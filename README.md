@@ -1,3 +1,5 @@
+[![ru](https://img.shields.io/badge/lang-ru-red.svg)](README.ru.md) [![en](https://img.shields.io/badge/lang-en-green.svg)](README.md)
+
 # 🤖 MangaBuff Miner Bot v8.0
 
 **MangaBuff Miner** is a powerful automation tool for the MangaBuff mining game featuring a modern GUI.
