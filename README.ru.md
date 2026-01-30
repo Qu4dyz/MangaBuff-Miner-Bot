@@ -33,7 +33,7 @@
    pip install customtkinter selenium webdriver-manager
 3. Запустите скрипт:
    ```bash
-   python "automatization v2.pyw"
+   python main.pyw
 🛠 Технологии
 UI: CustomTkinter
 

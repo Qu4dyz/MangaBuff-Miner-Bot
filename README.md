@@ -34,7 +34,7 @@ It fully simulates human behavior, supports auto-upgrades, and runs in backgroun
 
 3. Run the script:
    ```bash
-   python "automatization v2.pyw
+   python main.pyw
    
 ## 🛠 Tech Stack
 
