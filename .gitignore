@@ -1,0 +1,11 @@
+venv/
+.idea/
+__pycache__/
+
+*.pyc
+dist/
+build/
+*.spec
+
+user_data.json
+.env
