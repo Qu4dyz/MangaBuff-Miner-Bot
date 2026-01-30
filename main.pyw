@@ -445,48 +445,63 @@ class MangaMinerBot:
 
                 clicks_done = 0
                 consecutive = 0
-                target_clicks = random.randint(280, 320)
-                self.update_progress(0)
+
+                # Сброс прогресса в интерфейсе (ставим 50% т.к. конца мы не знаем, пока не кончится энергия)
+                self.update_progress(0.1)
                 self.update_stats(clicks=0)
 
-                while self.running and clicks_done < target_clicks:
+                # === ГЛАВНОЕ ИЗМЕНЕНИЕ: Бесконечный цикл, пока есть энергия ===
+                while self.running:
                     try:
-                        counter = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["energy_counter"])
-                        energy = self._parse_first_int(counter.text)
+                        # 1. Проверяем энергию
+                        # Чтобы не грузить процессор, читаем текст энергии каждые 15 кликов
+                        # (или каждый раз, если кликов мало, чтобы точно поймать ноль)
+                        if clicks_done % 15 == 0 or clicks_done < 50:
+                            counter = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["energy_counter"])
+                            energy = self._parse_first_int(counter.text)
 
-                        if clicks_done % 10 == 0:
                             self.log(tr("log_energy_info", energy=energy, clicks=clicks_done))
-                            progress_val = clicks_done / target_clicks
-                            self.update_progress(progress_val)
                             self.update_stats(energy=energy, clicks=clicks_done)
 
-                        if energy <= 0:
-                            self.log(tr("log_energy_empty"))
-                            self.update_stats(energy=0)
-                            break
+                            # Если энергии 0 — стоп машина
+                            if energy <= 0:
+                                self.log(tr("log_energy_empty"))
+                                self.update_stats(energy=0)
+                                break
 
+                            # Анимация прогресс-бара (просто чтобы бегал)
+                            fake_progress = (clicks_done % 500) / 500
+                            self.update_progress(fake_progress)
+
+                        # 2. КЛИК (JS Mode)
                         self.driver.execute_script("arguments[0].click();", button)
 
                         clicks_done += 1
                         consecutive += 1
 
-                        if consecutive > random.randint(30, 50):
-                            pause = random.uniform(3, 6)
+                        # 3. Человеческие паузы (чтобы не забанили за пулемет)
+                        if consecutive > random.randint(40, 70):
+                            # Если кликаем долго, делаем паузу
+                            pause = random.uniform(2, 4)
                             self.log(tr("log_break", s=pause))
                             time.sleep(pause)
                             consecutive = 0
                         else:
-                            time.sleep(random.uniform(0.15, 0.25))
+                            # Микро-задержка между кликами
+                            time.sleep(random.uniform(0.1, 0.2))
 
                     except Exception as e:
                         self.log(f"⚠️ Mining glitch: {e}")
                         try:
+                            # Если кнопка потерялась, ищем снова
                             button = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["mine_btn"])
                         except:
                             break
 
                 self.update_progress(1.0)
                 self.log(tr("log_mining_finish"))
+
+                # Проверка улучшений после окончания энергии
                 if self.auto_upgrade and self.running:
                     self.perform_upgrade()
 
