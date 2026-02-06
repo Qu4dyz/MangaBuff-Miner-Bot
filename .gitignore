@@ -9,3 +9,7 @@ build/
 
 user_data.json
 .env
+session_cache.json
+
+geckodriver.log
+chromedriver.log

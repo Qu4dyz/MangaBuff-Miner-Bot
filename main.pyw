@@ -1,31 +1,52 @@
 import time
 import random
 import os
-import re
 import json
 import threading
+import re
 import datetime
 from datetime import timedelta, timezone
+import requests
 import customtkinter as ctk
 from tkinter import messagebox
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-# === СЛОВАРЬ ПЕРЕВОДОВ ===
+# ==========================================
+# CONFIGURATION & SELECTORS
+# ==========================================
+CONFIG = {
+    "urls": {
+        "login": "https://mangabuff.ru/login",
+        "game": "https://mangabuff.ru/mine",
+        "upgrade": "https://mangabuff.ru/mine/upgrade"
+    },
+    "selectors": {
+        "login_input": 'input[name="email"]',
+        "pass_input": 'input[name="password"]',
+        "login_btn": ".login-button",
+        "mine_element": ".main-mine__header",
+        "balance_class": "mine-shop__ore-count",
+        "energy_class": "main-mine__game-hits-left"
+    }
+}
+
+# ==========================================
+# TRANSLATIONS
+# ==========================================
 LANGUAGES = {
     "English": {
-        "app_title": "MangaBuff Miner v8.0",
+        "app_title": "MangaBuff Miner",
         "settings": "SETTINGS",
-        "headless": "Headless Mode",
+        "headless": "Headless Login",
         "auto_upgrade": "Auto Upgrade",
         "controls": "CONTROLS",
-        "btn_start": "🚀 START MINING",
+        "btn_start": "🚀 START TURBO MINING",
         "btn_status": "📊 CHECK STATUS",
         "btn_stop": "🛑 STOP WORK",
         "btn_logout": "Sign Out / Change",
@@ -34,51 +55,58 @@ LANGUAGES = {
         "log_title": "ACTIVITY LOG",
         "card_energy": "⚡ ENERGY",
         "card_balance": "💎 BALANCE",
-        "card_clicks": "🖱️ CLICKS",
         "login_title": "Account Login",
         "login_save": "Save & Login",
         "error_env": "Please log in first!",
         "error_fill": "Please fill all fields!",
 
-        # Логи бота
-        "log_mode_headless": "👻 Mode: Headless (Invisible)",
-        "log_mode_visible": "👀 Mode: Visible Browser",
-        "log_stopping": "🛑 Stopping requested...",
-        "log_login_start": "🚪 Logging in...",
+        # LOG MESSAGES
+        "log_login_start": "🚪 Logging in via Browser...",
+        "log_process_login": "⏳ Processing Login...",
         "log_login_ok": "✅ Login successful!",
-        "log_login_fail": "❌ Login failed: {e}",
-        "log_status_check": "📊 Checking Status...",
-        "log_max_level": "MAX LEVEL 🌟",
-        "log_check_done": "👋 Done.",
-        "log_shop_check": "🔧 Checking store (End of session)...",
-        "log_nothing_buy": "✅ Nothing to buy.",
-        "log_buying": "💰 Buying upgrade...",
-        "log_buy_ok": "🆙 Upgrade purchased!",
-        "log_no_funds": "📉 Not enough funds.",
-        "log_btn_missing": "⚠️ Upgrade button not found (Max Level?)",
-        "log_nav_game": "🎮 Navigating to Mining Game...",
-        "log_mining_start": "⛏️ Starting mining loop (JS Mode)...",
-        "log_energy_info": "⚡ Energy: {energy} | Clicks: {clicks}",
-        "log_energy_empty": "🛑 Energy empty.",
-        "log_break": "🚬 Break ({s:.1f}s)...",
-        "log_mining_finish": "🏁 Mining finished.",
-        "log_browser_close": "👋 Browser closed.",
-        "log_logout": "ℹ️ Signed out. Please restart or login.",
-        "log_init": "🚀 Initializing Bot...",
+        "log_login_fail_page": "❌ Failed to reach Mining Page.",
+        "log_login_fail_csrf": "❌ ERROR: CSRF Token missing.",
+        "log_login_crash": "❌ Login Crash: {e}",
+        "log_steal_keys": "🕵️ Stealing Session Keys...",
+        "log_god_mode": "👻 Browser Closed. GOD MODE ACTIVE.",
 
-        # Статистика в логах
-        "log_stat_energy": "⚡ Energy:  {val}",
-        "log_stat_balance": "💎 Balance: {val} ore",
-        "log_stat_upgrade": "🛠️ Upgrade: {val}",
-        "log_bal_cost": "💎 Balance: {bal} | Cost: {cost}"
+        "log_mining_start": "🚀 STARTING API MINING...",
+        "log_energy_empty": "🛑 Energy empty.",
+        "log_mining_finish": "🏁 Session finished.",
+        "log_logout": "ℹ️ Signed out.",
+        "log_init": "🚀 Initializing...",
+        "log_stopping": "🛑 Stopping...",
+
+        "log_stat_energy": "⚡ Energy: {val}",
+        "log_stat_balance": "💎 Balance: {val}",
+        "log_session_load": "📂 Loading saved session...",
+        "log_session_valid": "✅ Session valid!",
+        "log_session_expired": "⚠️ Session expired. Re-logging...",
+        "log_session_restart": "❌ Session likely expired. Restarting...",
+
+        "log_upgrade_ok": "⬆️ UPGRADE SUCCESS! New Level.",
+        "log_upgrade_fail": "⚠️ Upgrade failed or too expensive.",
+        "log_upgrade_check": "🔍 Checking for upgrades...",
+        "log_buy_upgrade": "💰 Buying upgrade for {price}...",
+        "log_no_upgrade": "ℹ️ No upgrade found (Max Level?)",
+        "log_upgrade_cost": "⬆️ Next Upgrade: {cost}",
+        "log_upgrade_status_max": "⬆️ Upgrade: Max / None",
+
+        "log_source_check": "🔍 Reading page source...",
+        "log_done": "👋 Done.",
+        "log_auto_on": "ON",
+        "log_auto_off": "OFF",
+        "log_timeout": "⚠️ Timeout",
+        "log_error_generic": "💥 Error: {e}",
+        "log_thread_crash": "💥 Thread Crash: {e}"
     },
     "Русский": {
-        "app_title": "MangaBuff Майнер v8.0",
+        "app_title": "MangaBuff Miner",
         "settings": "НАСТРОЙКИ",
-        "headless": "Скрытый режим",
+        "headless": "Скрытый вход",
         "auto_upgrade": "Авто-улучшение",
         "controls": "УПРАВЛЕНИЕ",
-        "btn_start": "🚀 НАЧАТЬ МАЙНИНГ",
+        "btn_start": "🚀 ТУРБО МАЙНИНГ",
         "btn_status": "📊 ПРОВЕРИТЬ СТАТУС",
         "btn_stop": "🛑 ОСТАНОВИТЬ",
         "btn_logout": "Выйти / Сменить",
@@ -87,49 +115,58 @@ LANGUAGES = {
         "log_title": "ЛОГ ДЕЙСТВИЙ",
         "card_energy": "⚡ ЭНЕРГИЯ",
         "card_balance": "💎 БАЛАНС",
-        "card_clicks": "🖱️ КЛИКИ",
         "login_title": "Вход в аккаунт",
         "login_save": "Сохранить и Войти",
         "error_env": "Сначала войдите в аккаунт!",
         "error_fill": "Заполните все поля!",
 
-        "log_mode_headless": "👻 Режим: Скрытый (Невидимка)",
-        "log_mode_visible": "👀 Режим: Видимый браузер",
-        "log_stopping": "🛑 Запрос остановки...",
-        "log_login_start": "🚪 Вход в аккаунт...",
+        # LOG MESSAGES
+        "log_login_start": "🚪 Вход через браузер...",
+        "log_process_login": "⏳ Обработка входа...",
         "log_login_ok": "✅ Успешный вход!",
-        "log_login_fail": "❌ Ошибка входа: {e}",
-        "log_status_check": "📊 Проверка статуса...",
-        "log_max_level": "МАКС УРОВЕНЬ 🌟",
-        "log_check_done": "👋 Готово.",
-        "log_shop_check": "🔧 Проверка магазина (Конец сессии)...",
-        "log_nothing_buy": "✅ Покупать нечего.",
-        "log_buying": "💰 Покупка улучшения...",
-        "log_buy_ok": "🆙 Улучшение куплено!",
-        "log_no_funds": "📉 Недостаточно средств.",
-        "log_btn_missing": "⚠️ Кнопка не найдена (Возможно Макс?)",
-        "log_nav_game": "🎮 Переход в шахту...",
-        "log_mining_start": "⛏️ Старт цикла (JS Mode)...",
-        "log_energy_info": "⚡ Энергия: {energy} | Клики: {clicks}",
-        "log_energy_empty": "🛑 Энергия закончилась.",
-        "log_break": "🚬 Перекур ({s:.1f}с)...",
-        "log_mining_finish": "🏁 Майнинг завершен.",
-        "log_browser_close": "👋 Браузер закрыт.",
-        "log_logout": "ℹ️ Выход выполнен. Войдите заново.",
-        "log_init": "🚀 Запуск бота...",
+        "log_login_fail_page": "❌ Не удалось открыть страницу.",
+        "log_login_fail_csrf": "❌ ОШИБКА: Нет CSRF токена.",
+        "log_login_crash": "❌ Ошибка входа: {e}",
+        "log_steal_keys": "🕵️ Кража ключей сессии...",
+        "log_god_mode": "👻 Браузер закрыт. GOD MODE АКТИВЕН.",
 
-        "log_stat_energy": "⚡ Энергия:  {val}",
-        "log_stat_balance": "💎 Баланс: {val} руды",
-        "log_stat_upgrade": "🛠️ Улучшение: {val}",
-        "log_bal_cost": "💎 Баланс: {bal} | Цена: {cost}"
+        "log_mining_start": "🚀 ЗАПУСК API ЦИКЛА...",
+        "log_energy_empty": "🛑 Энергия закончилась.",
+        "log_mining_finish": "🏁 Сессия завершена.",
+        "log_logout": "ℹ️ Выход выполнен.",
+        "log_init": "🚀 Инициализация...",
+        "log_stopping": "🛑 Остановка...",
+
+        "log_stat_energy": "⚡ Энергия: {val}",
+        "log_stat_balance": "💎 Баланс: {val}",
+        "log_session_load": "📂 Загрузка сессии...",
+        "log_session_valid": "✅ Сессия активна!",
+        "log_session_expired": "⚠️ Сессия истекла. Перезаходим...",
+        "log_session_restart": "❌ Сессия истекла. Перезапуск...",
+
+        "log_upgrade_ok": "⬆️ УЛУЧШЕНИЕ КУПЛЕНО! Новый уровень.",
+        "log_upgrade_fail": "⚠️ Не хватает денег на улучшение.",
+        "log_upgrade_check": "🔍 Проверка улучшений...",
+        "log_buy_upgrade": "💰 Покупка улучшения за {price}...",
+        "log_no_upgrade": "ℹ️ Улучшений нет (Макс. уровень?)",
+        "log_upgrade_cost": "⬆️ След. уровень: {cost}",
+        "log_upgrade_status_max": "⬆️ Улучшение: Макс / Нет",
+
+        "log_source_check": "🔍 Чтение исходного кода...",
+        "log_done": "👋 Готово.",
+        "log_auto_on": "ВКЛ",
+        "log_auto_off": "ВЫКЛ",
+        "log_timeout": "⚠️ Тайм-аут соединения",
+        "log_error_generic": "💥 Ошибка: {e}",
+        "log_thread_crash": "💥 Крах потока: {e}"
     },
     "Українська": {
-        "app_title": "MangaBuff Майнер v8.0",
+        "app_title": "MangaBuff Miner",
         "settings": "НАЛАШТУВАННЯ",
-        "headless": "Прихований режим",
+        "headless": "Прихований вхід",
         "auto_upgrade": "Авто-покращення",
         "controls": "КЕРУВАННЯ",
-        "btn_start": "🚀 ПОЧАТИ МАЙНІНГ",
+        "btn_start": "🚀 ТУРБО МАЙНІНГ",
         "btn_status": "📊 ПЕРЕВІРИТИ СТАТУС",
         "btn_stop": "🛑 ЗУПИНИТИ",
         "btn_logout": "Вийти / Змінити",
@@ -138,119 +175,142 @@ LANGUAGES = {
         "log_title": "ЛОГ ДІЙ",
         "card_energy": "⚡ ЕНЕРГІЯ",
         "card_balance": "💎 БАЛАНС",
-        "card_clicks": "🖱️ КЛІКИ",
         "login_title": "Вхід в акаунт",
         "login_save": "Зберегти та Увійти",
         "error_env": "Спочатку увійдіть в акаунт!",
         "error_fill": "Заповніть усі поля!",
 
-        "log_mode_headless": "👻 Режим: Прихований (Невидимка)",
-        "log_mode_visible": "👀 Режим: Видимий браузер",
-        "log_stopping": "🛑 Запит зупинки...",
-        "log_login_start": "🚪 Вхід в акаунт...",
+        # LOG MESSAGES
+        "log_login_start": "🚪 Вхід через браузер...",
+        "log_process_login": "⏳ Обробка входу...",
         "log_login_ok": "✅ Успішний вхід!",
-        "log_login_fail": "❌ Помилка входу: {e}",
-        "log_status_check": "📊 Перевірка статусу...",
-        "log_max_level": "МАКС РІВЕНЬ 🌟",
-        "log_check_done": "👋 Готово.",
-        "log_shop_check": "🔧 Перевірка магазину (Кінець сесії)...",
-        "log_nothing_buy": "✅ Купувати нічого.",
-        "log_buying": "💰 Купівля покращення...",
-        "log_buy_ok": "🆙 Покращення придбано!",
-        "log_no_funds": "📉 Недостатньо коштів.",
-        "log_btn_missing": "⚠️ Кнопка не знайдена (Можливо Макс?)",
-        "log_nav_game": "🎮 Перехід у шахту...",
-        "log_mining_start": "⛏️ Старт циклу (JS Mode)...",
-        "log_energy_info": "⚡ Енергія: {energy} | Кліки: {clicks}",
-        "log_energy_empty": "🛑 Енергія закінчилася.",
-        "log_break": "🚬 Перекур ({s:.1f}с)...",
-        "log_mining_finish": "🏁 Майнінг завершено.",
-        "log_browser_close": "👋 Браузер закрито.",
-        "log_logout": "ℹ️ Вихід виконано. Увійдіть знову.",
-        "log_init": "🚀 Запуск бота...",
+        "log_login_fail_page": "❌ Не вдалося відкрити сторінку.",
+        "log_login_fail_csrf": "❌ ПОМИЛКА: Немає CSRF токена.",
+        "log_login_crash": "❌ Помилка входу: {e}",
+        "log_steal_keys": "🕵️ Крадіжка ключів сесії...",
+        "log_god_mode": "👻 Браузер закрито. GOD MODE АКТИВНИЙ.",
 
-        "log_stat_energy": "⚡ Енергія:  {val}",
-        "log_stat_balance": "💎 Баланс: {val} руди",
-        "log_stat_upgrade": "🛠️ Покращення: {val}",
-        "log_bal_cost": "💎 Баланс: {bal} | Ціна: {cost}"
+        "log_mining_start": "🚀 ЗАПУСК API ЦИКЛУ...",
+        "log_energy_empty": "🛑 Енергія закінчилася.",
+        "log_mining_finish": "🏁 Сесію завершено.",
+        "log_logout": "ℹ️ Вихід виконано.",
+        "log_init": "🚀 Ініціалізація...",
+        "log_stopping": "🛑 Зупинка...",
+
+        "log_stat_energy": "⚡ Енергія: {val}",
+        "log_stat_balance": "💎 Баланс: {val}",
+        "log_session_load": "📂 Завантаження сесії...",
+        "log_session_valid": "✅ Сесія активна!",
+        "log_session_expired": "⚠️ Сесія вичерпана. Перезаходимо...",
+        "log_session_restart": "❌ Сесія вичерпана. Перезапуск...",
+
+        "log_upgrade_ok": "⬆️ ПОКРАЩЕННЯ КУПЛЕНО! Новий рівень.",
+        "log_upgrade_fail": "⚠️ Не вистачає грошей на покращення.",
+        "log_upgrade_check": "🔍 Перевірка покращень...",
+        "log_buy_upgrade": "💰 Купівля покращення за {price}...",
+        "log_no_upgrade": "ℹ️ Покращень немає (Макс?)",
+        "log_upgrade_cost": "⬆️ Наст. рівень: {cost}",
+        "log_upgrade_status_max": "⬆️ Покращення: Макс / Немає",
+
+        "log_source_check": "🔍 Читання вихідного коду...",
+        "log_done": "👋 Готово.",
+        "log_auto_on": "УВІМК",
+        "log_auto_off": "ВИМК",
+        "log_timeout": "⚠️ Тайм-аут з'єднання",
+        "log_error_generic": "💥 Помилка: {e}",
+        "log_thread_crash": "💥 Крах потоку: {e}"
     }
 }
 
-# Глобальная переменная текущего языка
 CURRENT_LANG = "English"
 
 
 def tr(key, **kwargs):
-    """Функция перевода с поддержкой форматирования"""
-    text = LANGUAGES[CURRENT_LANG].get(key, key)
-    if kwargs:
-        return text.format(**kwargs)
+    lang_dict = LANGUAGES.get(CURRENT_LANG, LANGUAGES["English"])
+    text = lang_dict.get(key, LANGUAGES["English"].get(key, key))
+    if kwargs: return text.format(**kwargs)
     return text
 
 
-# === КОНФИГ И СЕЛЕКТОРЫ ===
-CONFIG = {
-    "urls": {
-        "login": "https://mangabuff.ru/login",
-        "game": "https://mangabuff.ru/mine"
-    },
-    "selectors": {
-        "login_input": 'body > div.wrapper > div.main > div > div > div.form > input:nth-child(1)',
-        "pass_input": 'body > div.wrapper > div.main > div > div > div.form > input:nth-child(2)',
-        "login_btn": 'body > div.wrapper > div.main > div > div > div.form > button',
-        "mine_btn": ".main-mine__game button",
-        "energy_counter": "body > main > div.main-mine__game > div.main-mine__game-panel > span > span",
-        "shop_open_btn": "body > main > div.main-mine__header > div.main-mine__header_score",
-        "current_ore": "#modal-mine-shop > div > div > div > div.mine-shop > div.mine-shop__ore-block.mb-3 > span",
-        "upgrade_info": "#modal-mine-shop > div > div > div > div.mine-shop > div.mine-shop__upgrade",
-        "upgrade_buy_btn": "#modal-mine-shop > div > div > div > div.mine-shop > div.mine-shop__upgrade > button"
-    }
-}
-
 DATA_FILE = "user_data.json"
+SESSION_FILE = "session_cache.json"
 
 
-# === МЕНЕДЖЕР ДАННЫХ ===
+# ==========================================
+# DATA MANAGEMENT
+# ==========================================
 class DataManager:
     @staticmethod
-    def load_data():
-        if not os.path.exists(DATA_FILE):
-            return {}
+    def load_json(filename):
+        if not os.path.exists(filename): return {}
         try:
-            with open(DATA_FILE, "r", encoding='utf-8') as f:
+            with open(filename, "r", encoding='utf-8') as f:
                 return json.load(f)
         except:
             return {}
 
     @staticmethod
-    def save_data(data):
+    def save_json(filename, data):
         try:
-            current = DataManager.load_data()
+            current = DataManager.load_json(filename)
             current.update(data)
-            with open(DATA_FILE, "w", encoding='utf-8') as f:
+            with open(filename, "w", encoding='utf-8') as f:
                 json.dump(current, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Save error: {e}")
+        except:
+            pass
 
     @staticmethod
     def get_credentials():
-        data = DataManager.load_data()
+        data = DataManager.load_json(DATA_FILE)
         return data.get("email"), data.get("password")
 
     @staticmethod
     def set_credentials(email, password):
-        DataManager.save_data({"email": email, "password": password})
+        DataManager.save_json(DATA_FILE, {"email": email, "password": password})
 
     @staticmethod
     def clear_credentials():
-        data = DataManager.load_data()
-        if "email" in data: del data["email"]
-        if "password" in data: del data["password"]
-        with open(DATA_FILE, "w", encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
+        DataManager.save_json(DATA_FILE, {"email": None, "password": None})
+        if os.path.exists(SESSION_FILE): os.remove(SESSION_FILE)
+
+    @staticmethod
+    def save_session(cookies_dict, csrf_token, user_agent):
+        data = {
+            "cookies": cookies_dict,
+            "csrf": csrf_token,
+            "agent": user_agent,
+            "timestamp": time.time()
+        }
+        DataManager.save_json(SESSION_FILE, data)
+
+    @staticmethod
+    def load_session():
+        return DataManager.load_json(SESSION_FILE)
 
 
-# === ЛОГИКА БОТА ===
+# ==========================================
+# UTILS
+# ==========================================
+def parse_smart_number(text):
+    if not text: return 0
+    text = str(text).lower().strip().replace(",", ".")
+    multiplier = 1
+    if 'k' in text:
+        multiplier = 1000
+    elif 'm' in text:
+        multiplier = 1000000
+
+    clean_num = re.sub(r'[^\d\.]', '', text)
+    try:
+        if not clean_num: return 0
+        return int(float(clean_num) * multiplier)
+    except:
+        return 0
+
+
+# ==========================================
+# BOT ENGINE
+# ==========================================
 class MangaMinerBot:
     def __init__(self, log_callback, progress_callback, stats_callback, headless=True, auto_upgrade=False):
         self.log = log_callback
@@ -259,261 +319,261 @@ class MangaMinerBot:
         self.headless = headless
         self.auto_upgrade = auto_upgrade
         self.running = False
-        self.driver = None
-        self.wait = None
-
+        self.API_URL = "https://mangabuff.ru/mine/hit"
+        self.session = requests.Session()
         self.email, self.password = DataManager.get_credentials()
+        self.csrf_token = None
+        self.user_agent = None
+        self.current_balance = 0
 
     def _init_driver(self):
         options = Options()
-        if self.headless:
-            self.log(tr("log_mode_headless"))
-            options.add_argument("--headless=new")
-        else:
-            self.log(tr("log_mode_visible"))
-
-        options.add_argument(
-            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        options.add_argument("--window-size=1920,1080")
+        if self.headless: options.add_argument("--headless=new")
+        options.add_argument("--window-size=1200,800")
         options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
         options.add_argument("--log-level=3")
-
         service = Service(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
+
+    def validate_session(self):
+        data = DataManager.load_session()
+        if not data or "cookies" not in data or "csrf" not in data:
+            return False
+
+        self.session.cookies.update(data["cookies"])
+        self.csrf_token = data["csrf"]
+        self.user_agent = data["agent"]
+        self.session.headers.update({
+            "User-Agent": self.user_agent,
+            "X-CSRF-TOKEN": self.csrf_token,
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": "https://mangabuff.ru/mine",
+            "Origin": "https://mangabuff.ru",
+            "Content-Type": "application/json"
+        })
+        self.log(tr("log_session_valid"))
+        return True
+
+    def login_and_steal_keys(self):
+        self.log(tr("log_login_start"))
+        driver = None
+        try:
+            driver = self._init_driver()
+            wait = WebDriverWait(driver, 20)
+
+            driver.get(CONFIG["urls"]["login"])
+            wait.until(
+                EC.visibility_of_element_located((By.CSS_SELECTOR, CONFIG["selectors"]["login_input"]))).send_keys(
+                self.email)
+            driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["pass_input"]).send_keys(self.password)
+
+            try:
+                btn = driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["login_btn"])
+            except:
+                btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+            driver.execute_script("arguments[0].click();", btn)
+
+            self.log(tr("log_process_login"))
+            time.sleep(3)
+            driver.get(CONFIG["urls"]["game"])
+
+            try:
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, CONFIG["selectors"]["mine_element"])))
+                self.log(tr("log_login_ok"))
+            except:
+                self.log(tr("log_login_fail_page"))
+                driver.quit()
+                return False
+
+            self.log(tr("log_steal_keys"))
+
+            cookies_dict = {c['name']: c['value'] for c in driver.get_cookies()}
+            self.session.cookies.update(cookies_dict)
+
+            try:
+                self.csrf_token = driver.execute_script(
+                    "return document.querySelector('meta[name=\"csrf-token\"]').getAttribute('content');")
+            except:
+                self.csrf_token = None
+
+            self.user_agent = driver.execute_script("return navigator.userAgent;")
+
+            if not self.csrf_token:
+                self.log(tr("log_login_fail_csrf"))
+                return False
+
+            self.session.headers.update({
+                "User-Agent": self.user_agent,
+                "X-CSRF-TOKEN": self.csrf_token,
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://mangabuff.ru/mine",
+                "Origin": "https://mangabuff.ru",
+                "Content-Type": "application/json"
+            })
+
+            DataManager.save_session(cookies_dict, self.csrf_token, self.user_agent)
+            driver.quit()
+            self.log(tr("log_god_mode"))
+            return True
+
+        except Exception as e:
+            self.log(tr("log_login_crash", e=e))
+            if driver: driver.quit()
+            return False
 
     def stop(self):
         self.running = False
         self.log(tr("log_stopping"))
 
-    def _random_sleep(self, min_s, max_s):
-        if self.running:
-            time.sleep(random.uniform(min_s, max_s))
-
-    def _parse_first_int(self, text):
-        if not text: return 0
-        digits = re.findall(r'\d+', text)
-        if digits:
-            return int(digits[0])
-        return 0
-
-    def login(self):
-        self.log(tr("log_login_start"))
-        try:
-            self.driver.get(CONFIG["urls"]["login"])
-            self._random_sleep(2, 4)
-
-            self.wait.until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, CONFIG["selectors"]["login_input"]))).send_keys(
-                self.email)
-            self._random_sleep(0.5, 1)
-            self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["pass_input"]).send_keys(self.password)
-            self._random_sleep(0.5, 1)
-            self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["login_btn"]).click()
-
-            self.wait.until_not(EC.presence_of_element_located((By.CSS_SELECTOR, CONFIG["selectors"]["login_input"])))
-            self.log(tr("log_login_ok"))
-            return True
-        except Exception as e:
-            self.log(tr("log_login_fail", e=e))
-            return False
-
-    def close_modals(self):
-        try:
-            webdriver.ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
-            time.sleep(1)
-        except:
-            pass
-
     def check_status_only(self):
-        self.running = True
-        try:
-            self.driver = self._init_driver()
-            self.wait = WebDriverWait(self.driver, 15)
-            if self.login():
-                self.log(tr("log_status_check"))
-                self.driver.get(CONFIG["urls"]["game"])
-                time.sleep(3)
-
-                try:
-                    counter = self.wait.until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, CONFIG["selectors"]["energy_counter"])))
-                    energy = self._parse_first_int(counter.text)
-                except:
-                    energy = 0
-
-                shop_btn = self.wait.until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, CONFIG["selectors"]["shop_open_btn"])))
-                shop_btn.click()
-                time.sleep(2)
-                ore_elem = self.wait.until(
-                    EC.visibility_of_element_located((By.CSS_SELECTOR, CONFIG["selectors"]["current_ore"])))
-                info_elem = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["upgrade_info"])
-
-                info_text = info_elem.text.lower()
-                current_ore = self._parse_first_int(ore_elem.text)
-
-                self.update_stats(energy=energy, balance=current_ore)
-
-                if "максимум" in info_text or "max" in info_text:
-                    cost_msg = tr("log_max_level")
-                else:
-                    cost = self._parse_first_int(info_elem.text)
-                    cost_msg = f"{cost:,} ore"
-
-                self.log("-" * 30)
-                # ИСПОЛЬЗУЕМ ПЕРЕВОД ТЕПЕРЬ И ЗДЕСЬ
-                self.log(tr("log_stat_energy", val=energy))
-                self.log(tr("log_stat_balance", val=f"{current_ore:,}"))
-                self.log(tr("log_stat_upgrade", val=cost_msg))
-                self.log("-" * 30)
-                self.close_modals()
-        except Exception as e:
-            self.log(f"💥 Error: {e}")
-        finally:
-            if self.driver: self.driver.quit()
-            self.running = False
-            self.log(tr("log_check_done"))
-
-    def perform_upgrade(self):
-        self.log(tr("log_shop_check"))
-        try:
-            if self.driver.current_url != CONFIG["urls"]["game"]:
-                self.driver.get(CONFIG["urls"]["game"])
-                time.sleep(2)
-
-            shop_btn = self.wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, CONFIG["selectors"]["shop_open_btn"])))
-            shop_btn.click()
-            self._random_sleep(1.5, 2.5)
-
-            ore_elem = self.wait.until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, CONFIG["selectors"]["current_ore"])))
-            info_elem = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["upgrade_info"])
-
-            info_text = info_elem.text.lower()
-            current_ore = self._parse_first_int(ore_elem.text)
-
-            self.update_stats(balance=current_ore)
-
-            if "максимум" in info_text or "max" in info_text:
-                self.log(f"💎 Balance: {current_ore} | Status: {tr('log_max_level')}")
-                self.log(tr("log_nothing_buy"))
-                self.close_modals()
+        self.log(tr("log_session_load"))
+        if not self.validate_session():
+            if not self.login_and_steal_keys():
                 return
 
-            upgrade_cost = self._parse_first_int(info_elem.text)
-            # ИСПОЛЬЗУЕМ ПЕРЕВОД ЗДЕСЬ
-            self.log(tr("log_bal_cost", bal=f"{current_ore:,}", cost=f"{upgrade_cost:,}"))
+        self.log(tr("log_source_check"))
+        try:
+            res = self.session.get(CONFIG["urls"]["game"], timeout=10)
+            if res.status_code == 200:
+                html = res.text
 
-            if current_ore >= upgrade_cost and upgrade_cost > 0:
-                self.log(tr("log_buying"))
-                buy_btn = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["upgrade_buy_btn"])
-                buy_btn.click()
-                self._random_sleep(2, 3)
-                self.log(tr("log_buy_ok"))
+                ore_raw, hits_raw, cost_raw = "0", "0", None
+
+                b_cls = CONFIG["selectors"]["balance_class"]
+                # FIXED: Double backslashes \\s to avoid SyntaxWarning
+                ore_match = re.search(f'class="[^"]*{b_cls}[^"]*">\\s*([\\d\\.\\s,kKmM]+)\\s*<', html)
+                if ore_match: ore_raw = ore_match.group(1)
+
+                e_cls = CONFIG["selectors"]["energy_class"]
+                # FIXED: Double backslashes \\s to avoid SyntaxWarning
+                hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', html)
+                if hits_match: hits_raw = hits_match.group(1)
+
+                price_match = re.search(r'class="[^"]*cost[^"]*">\s*([\d\.\s,kKmM]+)\s*<', html)
+                if not price_match:
+                    price_match = re.search(r'upgrade-btn.*?<span>([\d\.\s,kKmM]+)</span>', html, re.IGNORECASE)
+                if price_match:
+                    cost_raw = price_match.group(1)
+
+                ore = parse_smart_number(ore_raw)
+                hits = parse_smart_number(hits_raw)
+
+                self.current_balance = ore
+                self.update_stats(energy=hits, balance=ore)
+                self.log(tr("log_stat_energy", val=hits))
+                self.log(tr("log_stat_balance", val=f"{ore:,}"))
+
+                if cost_raw:
+                    self.log(tr("log_upgrade_cost", cost=cost_raw))
+                else:
+                    self.log(tr("log_upgrade_status_max"))
+
             else:
-                self.log(tr("log_no_funds"))
-            self.close_modals()
+                self.log(f"⚠️ API Error: {res.status_code}")
         except Exception as e:
-            if "no such element" in str(e).lower():
-                self.log(tr("log_btn_missing"))
+            self.log(tr("log_error_generic", e=e))
+        self.log(tr("log_done"))
+
+    def attempt_upgrade(self):
+        self.log(tr("log_upgrade_check"))
+        try:
+            res = self.session.get(CONFIG["urls"]["game"], timeout=5)
+            if res.status_code != 200: return
+            html = res.text
+
+            price_match = re.search(r'class="[^"]*cost[^"]*">\s*([\d\.\s,kKmM]+)\s*<', html)
+            if not price_match:
+                price_match = re.search(r'upgrade-btn.*?<span>([\d\.\s,kKmM]+)</span>', html, re.IGNORECASE)
+
+            if price_match:
+                price_str = price_match.group(1)
+                price = parse_smart_number(price_str)
+
+                if self.current_balance >= price and price > 0:
+                    self.log(tr("log_buy_upgrade", price=price))
+                    up_res = self.session.post(CONFIG["urls"]["upgrade"], json={}, timeout=5)
+                    if up_res.status_code == 200:
+                        self.log(tr("log_upgrade_ok"))
+                    else:
+                        self.log(tr("log_upgrade_fail"))
             else:
-                self.log(f"⚠️ Store check info: {e}")
-            self.close_modals()
+                self.log(tr("log_no_upgrade"))
+
+        except Exception as e:
+            self.log(f"⚠️ Upgrade logic error: {e}")
 
     def run(self):
         self.running = True
-        try:
-            self.driver = self._init_driver()
-            self.wait = WebDriverWait(self.driver, 15)
+        self.log(tr("log_session_load"))
+        if not self.validate_session():
+            if not self.login_and_steal_keys():
+                self.running = False
+                return
 
-            if self.login():
-                self.log(tr("log_nav_game"))
-                self.driver.get(CONFIG["urls"]["game"])
-                try:
-                    button = self.wait.until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, CONFIG["selectors"]["mine_btn"])))
-                except:
-                    self.driver.refresh()
-                    time.sleep(3)
-                    button = self.wait.until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, CONFIG["selectors"]["mine_btn"])))
+        self.log(tr("log_mining_start"))
 
-                self.log(tr("log_mining_start"))
+        status_text = tr("log_auto_on") if self.auto_upgrade else tr("log_auto_off")
+        self.log(f"🚀 SPEED: Turbo | Auto-Upgrade: {status_text}")
 
-                clicks_done = 0
-                consecutive = 0
+        clicks = 0
+        consecutive_errors = 0
 
-                # Сброс прогресса в интерфейсе (ставим 50% т.к. конца мы не знаем, пока не кончится энергия)
-                self.update_progress(0.1)
-                self.update_stats(clicks=0)
+        while self.running:
+            try:
+                payload = {"hits": 1}
+                response = self.session.post(self.API_URL, json=payload, timeout=5)
 
-                # === ГЛАВНОЕ ИЗМЕНЕНИЕ: Бесконечный цикл, пока есть энергия ===
-                while self.running:
+                if response.status_code == 200:
                     try:
-                        # 1. Проверяем энергию
-                        # Чтобы не грузить процессор, читаем текст энергии каждые 15 кликов
-                        # (или каждый раз, если кликов мало, чтобы точно поймать ноль)
-                        if clicks_done % 15 == 0 or clicks_done < 50:
-                            counter = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["energy_counter"])
-                            energy = self._parse_first_int(counter.text)
+                        data = response.json()
+                    except:
+                        time.sleep(2)
+                        continue
 
-                            self.log(tr("log_energy_info", energy=energy, clicks=clicks_done))
-                            self.update_stats(energy=energy, clicks=clicks_done)
+                    ore = data.get('ore', 0)
+                    hits_left = data.get('hits_left', 0)
+                    added = data.get('added', 0)
+                    self.current_balance = ore
 
-                            # Если энергии 0 — стоп машина
-                            if energy <= 0:
-                                self.log(tr("log_energy_empty"))
-                                self.update_stats(energy=0)
-                                break
+                    clicks += 1
+                    consecutive_errors = 0
 
-                            # Анимация прогресс-бара (просто чтобы бегал)
-                            fake_progress = (clicks_done % 500) / 500
-                            self.update_progress(fake_progress)
+                    self.log(f"⛏️ +{added} | ⚡ {hits_left} | 💎 {ore}")
+                    self.update_stats(energy=hits_left, balance=ore)
+                    prog = 1.0 - (hits_left / 100.0)
+                    if prog < 0: prog = 0
+                    self.update_progress(prog)
 
-                        # 2. КЛИК (JS Mode)
-                        self.driver.execute_script("arguments[0].click();", button)
+                    if self.auto_upgrade and (clicks % 15 == 0):
+                        self.attempt_upgrade()
 
-                        clicks_done += 1
-                        consecutive += 1
+                    if hits_left <= 0:
+                        self.log(tr("log_energy_empty"))
+                        self.update_stats(energy=0, balance=ore)
+                        break
 
-                        # 3. Человеческие паузы (чтобы не забанили за пулемет)
-                        if consecutive > random.randint(40, 70):
-                            # Если кликаем долго, делаем паузу
-                            pause = random.uniform(2, 4)
-                            self.log(tr("log_break", s=pause))
-                            time.sleep(pause)
-                            consecutive = 0
-                        else:
-                            # Микро-задержка между кликами
-                            time.sleep(random.uniform(0.1, 0.2))
+                    time.sleep(random.uniform(0.20, 0.30))
+                else:
+                    self.log(f"⚠️ Server: {response.status_code}")
+                    consecutive_errors += 1
+                    time.sleep(2)
+                    if consecutive_errors > 3:
+                        self.log(tr("log_session_restart"))
+                        break
 
-                    except Exception as e:
-                        self.log(f"⚠️ Mining glitch: {e}")
-                        try:
-                            # Если кнопка потерялась, ищем снова
-                            button = self.driver.find_element(By.CSS_SELECTOR, CONFIG["selectors"]["mine_btn"])
-                        except:
-                            break
+            except requests.exceptions.Timeout:
+                self.log(tr("log_timeout"))
+            except Exception as e:
+                self.log(tr("log_error_generic", e=e))
+                time.sleep(1)
 
-                self.update_progress(1.0)
-                self.log(tr("log_mining_finish"))
-
-                # Проверка улучшений после окончания энергии
-                if self.auto_upgrade and self.running:
-                    self.perform_upgrade()
-
-        except Exception as e:
-            self.log(f"💥 Critical Error: {e}")
-        finally:
-            if self.driver: self.driver.quit()
-            self.running = False
-            self.log(tr("log_browser_close"))
+        self.running = False
+        self.log(tr("log_mining_finish"))
 
 
-# === ОКНО ВХОДА ===
+# ==========================================
+# GUI CLASSES (CustomTkinter)
+# ==========================================
 class LoginDialog(ctk.CTkToplevel):
     def __init__(self, parent, callback):
         super().__init__(parent)
@@ -521,18 +581,13 @@ class LoginDialog(ctk.CTkToplevel):
         self.title(tr("login_title"))
         self.geometry("300x250")
         self.resizable(False, False)
-
         self.transient(parent)
         self.grab_set()
-
         ctk.CTkLabel(self, text="MangaBuff Login", font=("Arial", 14, "bold")).pack(pady=15)
-
         self.entry_email = ctk.CTkEntry(self, placeholder_text="Email")
         self.entry_email.pack(pady=5, padx=20, fill="x")
-
         self.entry_pass = ctk.CTkEntry(self, placeholder_text="Password", show="*")
         self.entry_pass.pack(pady=5, padx=20, fill="x")
-
         ctk.CTkButton(self, text=tr("login_save"), command=self.on_save, fg_color="#2CC985").pack(pady=20)
 
     def on_save(self):
@@ -546,29 +601,20 @@ class LoginDialog(ctk.CTkToplevel):
             messagebox.showwarning("Error", tr("error_fill"))
 
 
-# === GUI ===
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-
-        # Настройка окна
         self.geometry("800x600")
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
-
         self.bot = None
-
-        # Загрузка сохраненного языка
         global CURRENT_LANG
-        saved_data = DataManager.load_data()
+        saved_data = DataManager.load_json(DATA_FILE)
         CURRENT_LANG = saved_data.get("language", "English")
-
         self._setup_ui()
         self._load_saved_stats()
         self._check_login_state()
         self._update_reset_timer()
-
-        # Применяем язык сразу
         self.refresh_ui_text()
 
     def _setup_ui(self):
@@ -576,28 +622,24 @@ class App(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # === ЛЕВАЯ ПАНЕЛЬ ===
         self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
 
         self.logo = ctk.CTkLabel(self.sidebar, text="MangaBuff\nMiner", font=ctk.CTkFont(size=22, weight="bold"))
         self.logo.grid(row=0, column=0, padx=20, pady=(20, 10))
 
-        # Выбор языка (READONLY FIX)
         self.cmb_lang = ctk.CTkComboBox(self.sidebar, values=["English", "Русский", "Українська"],
                                         command=self.change_language, width=140, state="readonly")
         self.cmb_lang.set(CURRENT_LANG)
         self.cmb_lang.grid(row=1, column=0, pady=(0, 10))
 
-        # Статус аккаунта
         self.lbl_account = ctk.CTkLabel(self.sidebar, text="Guest", text_color="gray")
         self.lbl_account.grid(row=2, column=0)
 
-        self.btn_logout = ctk.CTkButton(self.sidebar, text=tr("btn_logout"), height=24, width=120,
-                                        fg_color="#444", font=("Arial", 10), command=self.logout)
+        self.btn_logout = ctk.CTkButton(self.sidebar, text=tr("btn_logout"), height=24, width=120, fg_color="#444",
+                                        font=("Arial", 10), command=self.logout)
         self.btn_logout.grid(row=3, column=0, pady=(0, 20))
 
-        # Таймер
         self.timer_frame = ctk.CTkFrame(self.sidebar, fg_color="#2b2b2b", corner_radius=5)
         self.timer_frame.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
         self.lbl_timer_title = ctk.CTkLabel(self.timer_frame, text=tr("timer_label"), font=("Arial", 10, "bold"),
@@ -607,7 +649,6 @@ class App(ctk.CTk):
                                       text_color="#FFAA00")
         self.lbl_timer.pack(pady=(0, 5))
 
-        # Настройки
         self.lbl_settings = ctk.CTkLabel(self.sidebar, text=tr("settings"), anchor="w", text_color="gray",
                                          font=ctk.CTkFont(size=11, weight="bold"))
         self.lbl_settings.grid(row=5, column=0, padx=20, pady=(10, 0), sticky="w")
@@ -616,35 +657,31 @@ class App(ctk.CTk):
         self.chk_headless = ctk.CTkSwitch(self.sidebar, text=tr("headless"), variable=self.headless_var)
         self.chk_headless.grid(row=6, column=0, padx=20, pady=(10, 5), sticky="w")
 
-        self.upgrade_var = ctk.BooleanVar(value=True)
-        self.chk_upgrade = ctk.CTkSwitch(self.sidebar, text=tr("auto_upgrade"), variable=self.upgrade_var)
+        self.upgrade_var = ctk.BooleanVar(value=False)
+        self.chk_upgrade = ctk.CTkSwitch(self.sidebar, text=tr("auto_upgrade"), variable=self.upgrade_var,
+                                         state="normal")
         self.chk_upgrade.grid(row=7, column=0, padx=20, pady=(5, 10), sticky="w")
 
-        # Кнопки
         self.lbl_actions = ctk.CTkLabel(self.sidebar, text=tr("controls"), anchor="w", text_color="gray",
                                         font=ctk.CTkFont(size=11, weight="bold"))
         self.lbl_actions.grid(row=8, column=0, padx=20, pady=(20, 0), sticky="w")
 
-        self.btn_start = ctk.CTkButton(self.sidebar, text=tr("btn_start"), height=40,
-                                       fg_color="#2CC985", hover_color="#229A65",
-                                       command=self.start_bot)
+        self.btn_start = ctk.CTkButton(self.sidebar, text=tr("btn_start"), height=40, fg_color="#2CC985",
+                                       hover_color="#229A65", command=self.start_bot)
         self.btn_start.grid(row=9, column=0, padx=20, pady=(10, 5))
 
-        self.btn_status = ctk.CTkButton(self.sidebar, text=tr("btn_status"), height=40,
-                                        fg_color="#3B8ED0", hover_color="#2D6D9E",
-                                        command=self.check_status)
+        self.btn_status = ctk.CTkButton(self.sidebar, text=tr("btn_status"), height=40, fg_color="#3B8ED0",
+                                        hover_color="#2D6D9E", command=self.check_status)
         self.btn_status.grid(row=10, column=0, padx=20, pady=5)
 
-        self.btn_stop = ctk.CTkButton(self.sidebar, text=tr("btn_stop"), height=40,
-                                      fg_color="#D94448", hover_color="#A83236", state="disabled",
-                                      command=self.stop_bot)
+        self.btn_stop = ctk.CTkButton(self.sidebar, text=tr("btn_stop"), height=40, fg_color="#D94448",
+                                      hover_color="#A83236", state="disabled", command=self.stop_bot)
         self.btn_stop.grid(row=11, column=0, padx=20, pady=(5, 10))
 
         self.progress_bar = ctk.CTkProgressBar(self.sidebar, orientation="horizontal", height=10)
         self.progress_bar.grid(row=12, column=0, padx=20, pady=(30, 10))
         self.progress_bar.set(0)
 
-        # === ПРАВАЯ ПАНЕЛЬ ===
         self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
 
@@ -653,16 +690,11 @@ class App(ctk.CTk):
 
         self.card_energy = self._create_card(self.stats_frame, tr("card_energy"), "?")
         self.card_energy.pack(side="left", fill="both", expand=True, padx=(0, 10))
-
         self.card_balance = self._create_card(self.stats_frame, tr("card_balance"), "---")
-        self.card_balance.pack(side="left", fill="both", expand=True, padx=5)
-
-        self.card_clicks = self._create_card(self.stats_frame, tr("card_clicks"), "0")
-        self.card_clicks.pack(side="left", fill="both", expand=True, padx=(10, 0))
+        self.card_balance.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
         self.lbl_log = ctk.CTkLabel(self.main_frame, text=tr("log_title"), font=ctk.CTkFont(size=12, weight="bold"))
         self.lbl_log.pack(anchor="w", pady=(0, 5))
-
         self.log_area = ctk.CTkTextbox(self.main_frame, width=400, font=("Consolas", 12))
         self.log_area.pack(fill="both", expand=True)
         self.log_area.configure(state="disabled")
@@ -673,18 +705,17 @@ class App(ctk.CTk):
         lbl_title.pack(pady=(10, 0))
         lbl_value = ctk.CTkLabel(frame, text=value, font=ctk.CTkFont(size=20, weight="bold"))
         lbl_value.pack(pady=(0, 10))
-        frame.title_label = lbl_title  # Сохраняем ссылку для перевода
+        frame.title_label = lbl_title
         frame.value_label = lbl_value
         return frame
 
     def change_language(self, new_lang):
         global CURRENT_LANG
         CURRENT_LANG = new_lang
-        DataManager.save_data({"language": new_lang})
+        DataManager.save_json(DATA_FILE, {"language": new_lang})
         self.refresh_ui_text()
 
     def refresh_ui_text(self):
-        """Обновляет все тексты в UI мгновенно"""
         self.title(tr("app_title"))
         self.lbl_settings.configure(text=tr("settings"))
         self.chk_headless.configure(text=tr("headless"))
@@ -695,16 +726,11 @@ class App(ctk.CTk):
         self.btn_stop.configure(text=tr("btn_stop"))
         self.btn_logout.configure(text=tr("btn_logout"))
         self.lbl_timer_title.configure(text=tr("timer_label"))
-
-        # Карточки
         self.card_energy.title_label.configure(text=tr("card_energy"))
         self.card_balance.title_label.configure(text=tr("card_balance"))
-        self.card_clicks.title_label.configure(text=tr("card_clicks"))
         self.lbl_log.configure(text=tr("log_title"))
+        self._check_login_state()
 
-        self._check_login_state()  # Обновит текст "No Account" / "User: ..."
-
-    # --- ЛОГИКА ---
     def _update_reset_timer(self):
         msk_offset = timezone(timedelta(hours=3))
         now_msk = datetime.datetime.now(msk_offset)
@@ -729,7 +755,7 @@ class App(ctk.CTk):
             self.btn_status.configure(state="disabled")
 
     def _load_saved_stats(self):
-        data = DataManager.load_data()
+        data = DataManager.load_json(DATA_FILE)
         saved_bal = data.get("last_balance", "---")
         self.card_balance.value_label.configure(text=f"{saved_bal}")
 
@@ -742,13 +768,12 @@ class App(ctk.CTk):
     def prompt_login(self):
         LoginDialog(self, self._check_login_state)
 
-    def update_stats_ui(self, energy=None, balance=None, clicks=None):
+    def update_stats_ui(self, energy=None, balance=None):
         def _update():
             if balance is not None:
-                DataManager.save_data({"last_balance": balance})
+                DataManager.save_json(DATA_FILE, {"last_balance": balance})
                 self.card_balance.value_label.configure(text=f"{balance:,}")
             if energy is not None: self.card_energy.value_label.configure(text=str(energy))
-            if clicks is not None: self.card_clicks.value_label.configure(text=str(clicks))
 
         self.after(0, _update)
 
@@ -795,7 +820,6 @@ class App(ctk.CTk):
         if not email:
             self.prompt_login()
             return
-
         self._lock_ui(True)
         self._init_bot()
         self.log(tr("log_init"))
@@ -807,7 +831,6 @@ class App(ctk.CTk):
         if not email:
             self.prompt_login()
             return
-
         self._lock_ui(True)
         self._init_bot()
         threading.Thread(target=self._run_status_thread, daemon=True).start()
@@ -818,12 +841,20 @@ class App(ctk.CTk):
             self.btn_stop.configure(state="disabled")
 
     def _run_mining_thread(self):
-        self.bot.run()
-        self.after(0, lambda: self._lock_ui(False))
+        try:
+            self.bot.run()
+        except Exception as e:
+            self.log(tr("log_thread_crash", e=e))
+        finally:
+            self.after(0, lambda: self._lock_ui(False))
 
     def _run_status_thread(self):
-        self.bot.check_status_only()
-        self.after(0, lambda: self._lock_ui(False))
+        try:
+            self.bot.check_status_only()
+        except Exception as e:
+            self.log(tr("log_thread_crash", e=e))
+        finally:
+            self.after(0, lambda: self._lock_ui(False))
 
 
 if __name__ == "__main__":
