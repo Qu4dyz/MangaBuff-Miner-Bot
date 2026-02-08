@@ -522,14 +522,12 @@ class MangaMinerBot:
 
         while self.running:
             try:
-                # payload = {"hits": 1} # <-- Make sure this matches your working payload
-                # Use a specific payload if needed, e.g. based on your miner version
+                # payload = {"hits": 1}
                 response = self.session.post(self.API_URL, json={"hits": 1}, timeout=5)
 
                 if response.status_code == 200:
                     try:
                         data = response.json()
-                        # ... (Rest of your parsing logic remains the same) ...
                         ore = data.get('ore', 0)
                         hits_left = data.get('hits_left', 0)
                         added = data.get('added', 0)
@@ -556,39 +554,41 @@ class MangaMinerBot:
                         time.sleep(random.uniform(0.20, 0.30))
 
                     except Exception as e:
-                        # JSON parse error (server might have sent HTML instead of JSON)
                         self.log(f"⚠️ JSON Error: {e}")
                         time.sleep(2)
                         continue
 
                 else:
-                    self.log(f"⚠️ Server: {response.status_code}")
+                    # === 🟢 FIX 1: Handle Empty Energy (403) ===
+                    if response.status_code == 403:
+                        self.log("⚡ Energy depleted (403). Stopping.")
+                        self.update_stats(energy=0)
+                        break  # Stop the loop cleanly
 
-                    # === 🛠️ CHANGE HERE: Handle 419 Explicitly ===
-                    if response.status_code == 419:
+                    # === 🟢 FIX 2: Handle Session Expired (419) ===
+                    elif response.status_code == 419:
                         self.log("♻️ Session expired (419). Auto-refreshing...")
-
-                        # Try to re-login immediately without stopping the bot
                         if self.login_and_steal_keys():
-                            self.log("✅ Re-login successful! Resuming mining...")
+                            self.log("✅ Re-login successful! Resuming...")
                             consecutive_errors = 0
                             time.sleep(1)
-                            continue  # Go back to the top of the loop with new keys
+                            continue
                         else:
                             self.log("❌ Re-login failed. Stopping.")
                             break
-                    # ===============================================
 
-                    consecutive_errors += 1
-                    time.sleep(2)
+                    # === 🔴 Handle Genuine Server Errors ===
+                    else:
+                        self.log(f"⚠️ Server: {response.status_code}")
+                        consecutive_errors += 1
+                        time.sleep(2)
 
-                    if consecutive_errors > 3:
-                        self.log(tr("log_session_restart"))
-                        # Optional: One last try to login before quitting?
-                        if self.login_and_steal_keys():
-                            consecutive_errors = 0
-                            continue
-                        break
+                        if consecutive_errors > 3:
+                            self.log(tr("log_session_restart"))
+                            if self.login_and_steal_keys():
+                                consecutive_errors = 0
+                                continue
+                            break
 
             except requests.exceptions.Timeout:
                 self.log(tr("log_timeout"))
