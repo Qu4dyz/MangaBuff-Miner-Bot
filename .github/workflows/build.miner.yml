@@ -29,7 +29,7 @@ jobs:
 
     - name: Build with Nuitka
       run: |
-        python -m nuitka --onefile --standalone --assume-yes-for-downloads --output-filename=MangaBuffMiner.exe main.pyw
+        python -m nuitka --onefile --standalone --assume-yes-for-downloads --include-package=requests --output-filename=MangaBuffMiner.exe main.pyw
 
     - name: Check File Exists
       run: dir
