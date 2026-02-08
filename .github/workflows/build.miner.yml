@@ -1,4 +1,4 @@
-name: Build Miner (Robust)
+name: Build Miner
 
 on:
   push:
@@ -24,15 +24,15 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # 🟢 FORCE INSTALL REQUESTS (Fixes "failed to locate package")
-        pip install requests urllib3
-        # Install other requirements if listed
+        # Force install critical libs to be safe
+        pip install customtkinter requests selenium webdriver_manager packaging urllib3
+        # Install from your file
         pip install -r requirements.txt
         pip install nuitka zstandard
 
     - name: Build with Nuitka
       run: |
-        python -m nuitka --onefile --standalone --assume-yes-for-downloads --enable-plugin=tk-inter --include-package=requests --output-filename=MangaBuffMiner.exe main.pyw
+        python -m nuitka --onefile --standalone --assume-yes-for-downloads --enable-plugin=tk-inter --include-package=customtkinter --include-package=requests --include-package=selenium --include-package=webdriver_manager --windows-disable-console --output-filename=MangaBuffMiner.exe main.pyw
 
     - name: Create Release
       uses: ncipollo/release-action@v1
