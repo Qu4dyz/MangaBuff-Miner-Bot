@@ -1,3 +1,4 @@
+import sys
 import time
 import random
 import os
@@ -16,6 +17,22 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+
+# ==========================================
+# 🛠️ FIX 1: PATH HANDLING FOR .EXE
+# ==========================================
+def get_base_path():
+    """ Returns the folder where the .exe is running, or the script folder. """
+    if getattr(sys, 'frozen', False):
+        # Running as compiled .exe
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as .py script
+        return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = get_base_path()
+DATA_FILE = os.path.join(BASE_DIR, "user_data.json")
+SESSION_FILE = os.path.join(BASE_DIR, "session_cache.json")
 
 # ==========================================
 # CONFIGURATION & SELECTORS
@@ -59,8 +76,6 @@ LANGUAGES = {
         "login_save": "Save & Login",
         "error_env": "Please log in first!",
         "error_fill": "Please fill all fields!",
-
-        # LOG MESSAGES
         "log_login_start": "🚪 Logging in via Browser...",
         "log_process_login": "⏳ Processing Login...",
         "log_login_ok": "✅ Login successful!",
@@ -69,21 +84,18 @@ LANGUAGES = {
         "log_login_crash": "❌ Login Crash: {e}",
         "log_steal_keys": "🕵️ Stealing Session Keys...",
         "log_god_mode": "👻 Browser Closed. GOD MODE ACTIVE.",
-
         "log_mining_start": "🚀 STARTING API MINING...",
         "log_energy_empty": "🛑 Energy empty.",
         "log_mining_finish": "🏁 Session finished.",
         "log_logout": "ℹ️ Signed out.",
         "log_init": "🚀 Initializing...",
         "log_stopping": "🛑 Stopping...",
-
         "log_stat_energy": "⚡ Energy: {val}",
         "log_stat_balance": "💎 Balance: {val}",
         "log_session_load": "📂 Loading saved session...",
         "log_session_valid": "✅ Session valid!",
         "log_session_expired": "⚠️ Session expired. Re-logging...",
         "log_session_restart": "❌ Session likely expired. Restarting...",
-
         "log_upgrade_ok": "⬆️ UPGRADE SUCCESS! New Level.",
         "log_upgrade_fail": "⚠️ Upgrade failed or too expensive.",
         "log_upgrade_check": "🔍 Checking for upgrades...",
@@ -91,7 +103,6 @@ LANGUAGES = {
         "log_no_upgrade": "ℹ️ No upgrade found (Max Level?)",
         "log_upgrade_cost": "⬆️ Next Upgrade: {cost}",
         "log_upgrade_status_max": "⬆️ Upgrade: Max / None",
-
         "log_source_check": "🔍 Reading page source...",
         "log_done": "👋 Done.",
         "log_auto_on": "ON",
@@ -119,8 +130,6 @@ LANGUAGES = {
         "login_save": "Сохранить и Войти",
         "error_env": "Сначала войдите в аккаунт!",
         "error_fill": "Заполните все поля!",
-
-        # LOG MESSAGES
         "log_login_start": "🚪 Вход через браузер...",
         "log_process_login": "⏳ Обработка входа...",
         "log_login_ok": "✅ Успешный вход!",
@@ -129,21 +138,18 @@ LANGUAGES = {
         "log_login_crash": "❌ Ошибка входа: {e}",
         "log_steal_keys": "🕵️ Кража ключей сессии...",
         "log_god_mode": "👻 Браузер закрыт. GOD MODE АКТИВЕН.",
-
         "log_mining_start": "🚀 ЗАПУСК API ЦИКЛА...",
         "log_energy_empty": "🛑 Энергия закончилась.",
         "log_mining_finish": "🏁 Сессия завершена.",
         "log_logout": "ℹ️ Выход выполнен.",
         "log_init": "🚀 Инициализация...",
         "log_stopping": "🛑 Остановка...",
-
         "log_stat_energy": "⚡ Энергия: {val}",
         "log_stat_balance": "💎 Баланс: {val}",
         "log_session_load": "📂 Загрузка сессии...",
         "log_session_valid": "✅ Сессия активна!",
         "log_session_expired": "⚠️ Сессия истекла. Перезаходим...",
         "log_session_restart": "❌ Сессия истекла. Перезапуск...",
-
         "log_upgrade_ok": "⬆️ УЛУЧШЕНИЕ КУПЛЕНО! Новый уровень.",
         "log_upgrade_fail": "⚠️ Не хватает денег на улучшение.",
         "log_upgrade_check": "🔍 Проверка улучшений...",
@@ -151,7 +157,6 @@ LANGUAGES = {
         "log_no_upgrade": "ℹ️ Улучшений нет (Макс. уровень?)",
         "log_upgrade_cost": "⬆️ След. уровень: {cost}",
         "log_upgrade_status_max": "⬆️ Улучшение: Макс / Нет",
-
         "log_source_check": "🔍 Чтение исходного кода...",
         "log_done": "👋 Готово.",
         "log_auto_on": "ВКЛ",
@@ -179,8 +184,6 @@ LANGUAGES = {
         "login_save": "Зберегти та Увійти",
         "error_env": "Спочатку увійдіть в акаунт!",
         "error_fill": "Заповніть усі поля!",
-
-        # LOG MESSAGES
         "log_login_start": "🚪 Вхід через браузер...",
         "log_process_login": "⏳ Обробка входу...",
         "log_login_ok": "✅ Успішний вхід!",
@@ -189,21 +192,18 @@ LANGUAGES = {
         "log_login_crash": "❌ Помилка входу: {e}",
         "log_steal_keys": "🕵️ Крадіжка ключів сесії...",
         "log_god_mode": "👻 Браузер закрито. GOD MODE АКТИВНИЙ.",
-
         "log_mining_start": "🚀 ЗАПУСК API ЦИКЛУ...",
         "log_energy_empty": "🛑 Енергія закінчилася.",
         "log_mining_finish": "🏁 Сесію завершено.",
         "log_logout": "ℹ️ Вихід виконано.",
         "log_init": "🚀 Ініціалізація...",
         "log_stopping": "🛑 Зупинка...",
-
         "log_stat_energy": "⚡ Енергія: {val}",
         "log_stat_balance": "💎 Баланс: {val}",
         "log_session_load": "📂 Завантаження сесії...",
         "log_session_valid": "✅ Сесія активна!",
         "log_session_expired": "⚠️ Сесія вичерпана. Перезаходимо...",
         "log_session_restart": "❌ Сесія вичерпана. Перезапуск...",
-
         "log_upgrade_ok": "⬆️ ПОКРАЩЕННЯ КУПЛЕНО! Новий рівень.",
         "log_upgrade_fail": "⚠️ Не вистачає грошей на покращення.",
         "log_upgrade_check": "🔍 Перевірка покращень...",
@@ -211,7 +211,6 @@ LANGUAGES = {
         "log_no_upgrade": "ℹ️ Покращень немає (Макс?)",
         "log_upgrade_cost": "⬆️ Наст. рівень: {cost}",
         "log_upgrade_status_max": "⬆️ Покращення: Макс / Немає",
-
         "log_source_check": "🔍 Читання вихідного коду...",
         "log_done": "👋 Готово.",
         "log_auto_on": "УВІМК",
@@ -224,17 +223,11 @@ LANGUAGES = {
 
 CURRENT_LANG = "English"
 
-
 def tr(key, **kwargs):
     lang_dict = LANGUAGES.get(CURRENT_LANG, LANGUAGES["English"])
     text = lang_dict.get(key, LANGUAGES["English"].get(key, key))
     if kwargs: return text.format(**kwargs)
     return text
-
-
-DATA_FILE = "user_data.json"
-SESSION_FILE = "session_cache.json"
-
 
 # ==========================================
 # DATA MANAGEMENT
@@ -382,7 +375,7 @@ class MangaMinerBot:
                 self.log(tr("log_login_ok"))
             except:
                 self.log(tr("log_login_fail_page"))
-                driver.quit()
+                if driver: driver.quit()
                 return False
 
             self.log(tr("log_steal_keys"))
@@ -400,6 +393,7 @@ class MangaMinerBot:
 
             if not self.csrf_token:
                 self.log(tr("log_login_fail_csrf"))
+                if driver: driver.quit()
                 return False
 
             self.session.headers.update({
@@ -436,16 +430,12 @@ class MangaMinerBot:
             res = self.session.get(CONFIG["urls"]["game"], timeout=10)
             if res.status_code == 200:
                 html = res.text
-
                 ore_raw, hits_raw, cost_raw = "0", "0", None
-
                 b_cls = CONFIG["selectors"]["balance_class"]
-                # FIXED: Double backslashes \\s to avoid SyntaxWarning
                 ore_match = re.search(f'class="[^"]*{b_cls}[^"]*">\\s*([\\d\\.\\s,kKmM]+)\\s*<', html)
                 if ore_match: ore_raw = ore_match.group(1)
 
                 e_cls = CONFIG["selectors"]["energy_class"]
-                # FIXED: Double backslashes \\s to avoid SyntaxWarning
                 hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', html)
                 if hits_match: hits_raw = hits_match.group(1)
 
@@ -506,14 +496,12 @@ class MangaMinerBot:
         self.running = True
         self.log(tr("log_session_load"))
 
-        # Initial validation
         if not self.validate_session():
             if not self.login_and_steal_keys():
                 self.running = False
                 return
 
         self.log(tr("log_mining_start"))
-
         status_text = tr("log_auto_on") if self.auto_upgrade else tr("log_auto_off")
         self.log(f"🚀 SPEED: Turbo | Auto-Upgrade: {status_text}")
 
@@ -522,7 +510,6 @@ class MangaMinerBot:
 
         while self.running:
             try:
-                # payload = {"hits": 1}
                 response = self.session.post(self.API_URL, json={"hits": 1}, timeout=5)
 
                 if response.status_code == 200:
@@ -532,9 +519,8 @@ class MangaMinerBot:
                         hits_left = data.get('hits_left', 0)
                         added = data.get('added', 0)
                         self.current_balance = ore
-
                         clicks += 1
-                        consecutive_errors = 0  # Reset errors on success
+                        consecutive_errors = 0
 
                         self.log(f"⛏️ +{added} | ⚡ {hits_left} | 💎 {ore}")
                         self.update_stats(energy=hits_left, balance=ore)
@@ -559,13 +545,12 @@ class MangaMinerBot:
                         continue
 
                 else:
-                    # === 🟢 FIX 1: Handle Empty Energy (403) ===
+                    # === 🛠️ 403 & 419 FIX APPLIED HERE ===
                     if response.status_code == 403:
                         self.log("⚡ Energy depleted (403). Stopping.")
                         self.update_stats(energy=0)
-                        break  # Stop the loop cleanly
+                        break
 
-                    # === 🟢 FIX 2: Handle Session Expired (419) ===
                     elif response.status_code == 419:
                         self.log("♻️ Session expired (419). Auto-refreshing...")
                         if self.login_and_steal_keys():
@@ -577,12 +562,10 @@ class MangaMinerBot:
                             self.log("❌ Re-login failed. Stopping.")
                             break
 
-                    # === 🔴 Handle Genuine Server Errors ===
                     else:
                         self.log(f"⚠️ Server: {response.status_code}")
                         consecutive_errors += 1
                         time.sleep(2)
-
                         if consecutive_errors > 3:
                             self.log(tr("log_session_restart"))
                             if self.login_and_steal_keys():
