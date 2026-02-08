@@ -505,6 +505,8 @@ class MangaMinerBot:
     def run(self):
         self.running = True
         self.log(tr("log_session_load"))
+
+        # Initial validation
         if not self.validate_session():
             if not self.login_and_steal_keys():
                 self.running = False
@@ -520,45 +522,72 @@ class MangaMinerBot:
 
         while self.running:
             try:
-                payload = {"hits": 1}
-                response = self.session.post(self.API_URL, json=payload, timeout=5)
+                # payload = {"hits": 1} # <-- Make sure this matches your working payload
+                # Use a specific payload if needed, e.g. based on your miner version
+                response = self.session.post(self.API_URL, json={"hits": 1}, timeout=5)
 
                 if response.status_code == 200:
                     try:
                         data = response.json()
-                    except:
+                        # ... (Rest of your parsing logic remains the same) ...
+                        ore = data.get('ore', 0)
+                        hits_left = data.get('hits_left', 0)
+                        added = data.get('added', 0)
+                        self.current_balance = ore
+
+                        clicks += 1
+                        consecutive_errors = 0  # Reset errors on success
+
+                        self.log(f"⛏️ +{added} | ⚡ {hits_left} | 💎 {ore}")
+                        self.update_stats(energy=hits_left, balance=ore)
+
+                        prog = 1.0 - (hits_left / 100.0)
+                        if prog < 0: prog = 0
+                        self.update_progress(prog)
+
+                        if self.auto_upgrade and (clicks % 15 == 0):
+                            self.attempt_upgrade()
+
+                        if hits_left <= 0:
+                            self.log(tr("log_energy_empty"))
+                            self.update_stats(energy=0, balance=ore)
+                            break
+
+                        time.sleep(random.uniform(0.20, 0.30))
+
+                    except Exception as e:
+                        # JSON parse error (server might have sent HTML instead of JSON)
+                        self.log(f"⚠️ JSON Error: {e}")
                         time.sleep(2)
                         continue
 
-                    ore = data.get('ore', 0)
-                    hits_left = data.get('hits_left', 0)
-                    added = data.get('added', 0)
-                    self.current_balance = ore
-
-                    clicks += 1
-                    consecutive_errors = 0
-
-                    self.log(f"⛏️ +{added} | ⚡ {hits_left} | 💎 {ore}")
-                    self.update_stats(energy=hits_left, balance=ore)
-                    prog = 1.0 - (hits_left / 100.0)
-                    if prog < 0: prog = 0
-                    self.update_progress(prog)
-
-                    if self.auto_upgrade and (clicks % 15 == 0):
-                        self.attempt_upgrade()
-
-                    if hits_left <= 0:
-                        self.log(tr("log_energy_empty"))
-                        self.update_stats(energy=0, balance=ore)
-                        break
-
-                    time.sleep(random.uniform(0.20, 0.30))
                 else:
                     self.log(f"⚠️ Server: {response.status_code}")
+
+                    # === 🛠️ CHANGE HERE: Handle 419 Explicitly ===
+                    if response.status_code == 419:
+                        self.log("♻️ Session expired (419). Auto-refreshing...")
+
+                        # Try to re-login immediately without stopping the bot
+                        if self.login_and_steal_keys():
+                            self.log("✅ Re-login successful! Resuming mining...")
+                            consecutive_errors = 0
+                            time.sleep(1)
+                            continue  # Go back to the top of the loop with new keys
+                        else:
+                            self.log("❌ Re-login failed. Stopping.")
+                            break
+                    # ===============================================
+
                     consecutive_errors += 1
                     time.sleep(2)
+
                     if consecutive_errors > 3:
                         self.log(tr("log_session_restart"))
+                        # Optional: One last try to login before quitting?
+                        if self.login_and_steal_keys():
+                            consecutive_errors = 0
+                            continue
                         break
 
             except requests.exceptions.Timeout:
