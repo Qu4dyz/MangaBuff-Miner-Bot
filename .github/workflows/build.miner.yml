@@ -1,0 +1,46 @@
+name: Build and Release EXE
+
+on:
+  push:
+    tags:
+      'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install nuitka zstandard
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka --onefile -standalone --asume-yes-for-downloads --outuput-filename=MangaBuffMiner.exe main.pyw
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Miner-EXE
+          path: MangaBuffMiner.exe
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs?tags/')
+        with:
+          files: MangaBuffMiner.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
