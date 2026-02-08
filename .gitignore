@@ -13,3 +13,7 @@ session_cache.json
 
 geckodriver.log
 chromedriver.log
+
+MangaBuffMiner.exe
+main.dist/
+nuitka-crash-report.xml
