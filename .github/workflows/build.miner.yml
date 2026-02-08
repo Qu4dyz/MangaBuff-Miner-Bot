@@ -29,7 +29,7 @@ jobs:
 
       - name: Build with Nuitka
         run: |
-          python -m nuitka --onefile -standalone --asume-yes-for-downloads --outuput-filename=MangaBuffMiner.exe main.pyw
+          python -m nuitka --onefile --standalone --assume-yes-for-downloads --output-filename=MangaBuffMiner.exe main.pyw
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
