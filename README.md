@@ -5,7 +5,7 @@
 **MangaBuff Miner** is a powerful automation tool for the MangaBuff mining game featuring a modern GUI.
 It fully simulates human behavior, supports auto-upgrades, and runs in background mode.
 
-![Status](https://img.shields.io/badge/Status-Active-success)
+![Status](https://img.shields.io/badge/Status-Inactive-gray)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 
 ## ✨ Features
