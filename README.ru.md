@@ -5,7 +5,7 @@
 **MangaBuff Miner** — это мощный бот для автоматизации игры MangaBuff с современным графическим интерфейсом.
 Полностью имитирует действия человека, поддерживает авто-покупки улучшений и работу в фоновом режиме.
 
-![Status](https://img.shields.io/badge/Status-Active-success)
+![Status](https://img.shields.io/badge/Status-Inactive-gray)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 
 ## ✨ Возможности
