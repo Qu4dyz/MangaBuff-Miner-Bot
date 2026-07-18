@@ -30,7 +30,7 @@ It fully simulates human behavior, supports auto-upgrades, and runs in backgroun
 1. Install Python 3.10+.
 2. Install dependencies:
    ```bash
-   pip install customtkinter selenium webdriver-manager
+   pip install customtkinter beautifulsoup4
 
 3. Run the script:
    ```bash
@@ -39,8 +39,7 @@ It fully simulates human behavior, supports auto-upgrades, and runs in backgroun
 ## 🛠 Tech Stack
 
 * **UI:** CustomTkinter
-* **Automation:** Selenium WebDriver
-* **Browser:** Chrome (Auto-managed via webdriver-manager)
+* **Automation:** Pure `requests` + BeautifulSoup (no browser)
 
 ---
 *Disclaimer: This software is for educational purposes only. Use at your own risk.*
