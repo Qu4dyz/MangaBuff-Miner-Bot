@@ -1237,7 +1237,18 @@ class MangaMinerBot:
         self.running = True
         self.log(tr("log_session_load"))
 
+        # Step 1: Load saved session (cookies + CSRF token)
         if not self.validate_session():
+            self.log(tr("log_session_expired"))
+            if not self.login_and_steal_keys():
+                self.running = False
+                return
+
+        # Step 2: Validate session with server BEFORE making any API calls
+        # (claim daily reward, mining, battles). This ensures we have a fresh
+        # CSRF token and valid session before proceeding.
+        if not self._validate_session_with_server():
+            self.log(tr("log_session_expired"))
             if not self.login_and_steal_keys():
                 self.running = False
                 return
@@ -1258,6 +1269,29 @@ class MangaMinerBot:
 
         self.running = False
         self.log(tr("log_mining_finish"))
+
+    def _validate_session_with_server(self):
+        """Make a lightweight GET request to verify the session is still valid.
+        Returns True if session is valid, False if expired/invalid (419, 401, etc.)."""
+        try:
+            # Use the mine page as a lightweight validation endpoint
+            res = self.session.get(CONFIG["urls"]["game"], timeout=10)
+            if res.status_code == 200:
+                # Check if we got redirected to login page (session expired)
+                if "login" in res.url.lower() or "csrf-token" in res.text.lower():
+                    self.log("⚠️ Session validation failed: redirected to login")
+                    return False
+                self.log(tr("log_session_valid"))
+                return True
+            elif res.status_code in (401, 419, 403):
+                self.log(f"⚠️ Session validation failed with status {res.status_code}")
+                return False
+            else:
+                self.log(f"⚠️ Session validation returned status {res.status_code}")
+                return False
+        except Exception as e:
+            self.log(f"⚠️ Session validation error: {e}")
+            return False
 
 
 # ==========================================
