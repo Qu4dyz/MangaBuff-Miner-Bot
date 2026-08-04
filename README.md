@@ -6,7 +6,7 @@
 
 ![Status](https://img.shields.io/badge/Status-Active%20Development-yellow)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Mode](https://img.shields.io/badge/Mode-CLI%20Test%20Mode-orange)
+![Mode](https://img.shields.io/badge/Mode-CLI%20%26%20GUI-orange)
 
 ## ✨ Actual Features
 
@@ -19,8 +19,9 @@
 * **🔐 Credential Storage:** Saves email/password locally in `user_data.json` (plaintext — local use only).
 * **🛡️ Anti-Ban Humanization:** Randomized delays between actions (4.5–12.2s), between battles (10–20s), micro-breaks (45–120s every 10–15 battles).
 * **🃏 High-Value Card Preservation:** Detects legendary/mythic card drops in battle results and saves them to `jackpot_cards.json` (never consumed).
-* **🌍 Multi-language Support (Code-Level):** Translations for English, Russian, Ukrainian exist in code (GUI currently disabled).
-* **🖥️ GUI (Disabled):** CustomTkinter GUI exists in code but is **currently disabled** — the script runs in CLI test mode via `__main__` block.
+* **🌍 Multi-language Support (Code-Level):** Translations for English, Russian, Ukrainian exist in code.
+* **🖥️ GUI (Optional):** CustomTkinter GUI available — launch with `USE_CLI_MODE = False` in `main.py`.
+* **📲 Telegram Notifications:** Sends log messages to a Telegram bot (configured via `.env`).
 
 ## 🚀 How to Run (From Source)
 
@@ -29,25 +30,38 @@
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the script:
+3. Set up your `.env` file with Telegram credentials (optional but recommended):
+   ```
+   TG_TOKEN=your_telegram_bot_token
+   TG_CHAT_ID=your_chat_id
+   ```
+4. Run the script:
    ```bash
    python main.py
    ```
    - On first run, it will prompt for your MangaBuff email and password (saved to `user_data.json`).
-   - The script runs in **CLI test mode**: logs in (or restores session), claims daily reward, claims daily quests, mines ore, upgrades pickaxe, then enters the battle farming loop until daily essence cap or energy depletion.
+   - By default (`USE_CLI_MODE = True`), the script runs in CLI mode: logs in (or restores session), claims daily reward, claims daily quests, mines ore, upgrades pickaxe, then enters the battle farming loop until daily essence cap or energy depletion.
+   - Set `USE_CLI_MODE = False` in `main.py` to launch the CustomTkinter GUI instead.
 
 ## 🛠 Tech Stack
 
 * **HTTP:** `requests` + `requests.Session` (persistent cookie jar + headers)
 * **HTML Parsing:** `BeautifulSoup4` + `regex` (for embedded JSON in battle result pages)
-* **GUI (Disabled):** `CustomTkinter` — code present but commented out in `__main__`
+* **GUI:** `CustomTkinter` — optional graphical interface
+* **Notifications:** `python-telegram-bot` style HTTP API calls via `tg_notifier.py`
 * **Config:** `user_data.json` (credentials), `session_cache.json` (session), `jackpot_cards.json` (preserved cards)
 
 ## 📁 Key Files
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Main entry point, `MangaMinerBot` class, GUI classes (disabled) |
+| `main.py` | Entry point with CLI/GUI switch (`USE_CLI_MODE`) |
+| `engine.py` | `MangaMinerBot` class — full farm logic (login, mining, battles) |
+| `gui_app.py` | `App` class — CustomTkinter GUI; also contains `run_cli_bot()` |
+| `config.py` | `CONFIG` dict (URLs, CSS selectors), `TARGET_RARITIES` |
+| `path.py` | `BASE_DIR`, `DATA_FILE`, `SESSION_FILE` path constants |
+| `tg_notifier.py` | `send_message()` — Telegram bot notification function |
+| `data_management.py` | `DataManager` — credentials/session persistence |
 | `requirements.txt` | Python dependencies |
 | `user_data.json` | Stores email, password, language (created on first run) |
 | `session_cache.json` | Cached session cookies, CSRF token, User-Agent |
@@ -55,16 +69,15 @@
 
 ## ⚙️ Configuration
 
-Edit the `CONFIG` dict in `main.py` to adjust:
+Edit the `CONFIG` dict in `config.py` to adjust:
 - URLs (`login`, `game`, `mine`)
 - CSS selectors for parsing mine page (balance, energy, upgrade cost)
-- `TARGET_RARITIES` — card tiers to preserve (default: `["legendary", "mythic"]`)
+- `TARGET_RARITIES` in `config.py` — card tiers to preserve (default: `["legendary", "mythic"]`)
 
 ## ⚠️ Known Limitations
 
 | Area | Status |
 |------|--------|
-| **GUI** | Disabled — runs in CLI mode only |
 | **Quest Claim Payload** | Sends multiple candidate field names (`user_daily_quest_id`, `id`, `quest_id`, `daily_quest_id`); exact field name not confirmed from Network tab |
 | **Essence JSON Key** | Battle result essence extracted via regex from embedded JSON; key name guessed (`essence`, `essence_gained`, `reward`, `gain`, `added`, `essence_added`) |
 | **Deck Detection** | Heuristic text search for "empty deck" phrases; fragile to UI text changes |
