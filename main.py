@@ -11,6 +11,7 @@ import requests
 import customtkinter as ctk
 from tkinter import messagebox
 from bs4 import BeautifulSoup
+from tg_notifier import send_message
 
 # ==========================================
 # 🛠️ FIX 1: PATH HANDLING FOR .EXE
@@ -1585,6 +1586,7 @@ if __name__ == "__main__":
     # --- Temporary CLI test: init bot and test claim_daily_reward() ---
     def _cli_log(msg):
         print(f"[BOT] {msg}")
+        send_message(f"[BOT] {msg}")
 
     print("=== CLI TEST MODE ===")
     bot = MangaMinerBot(
