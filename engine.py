@@ -15,7 +15,8 @@ import time
 # ==========================================
 class MangaMinerBot:
     def __init__(self, log_callback, progress_callback, stats_callback, headless=True):
-        self.log = log_callback
+        self.log = log_callback       
+        self.auth_log_buffer = []
         self.update_progress = progress_callback
         self.update_stats = stats_callback
         self.headless = headless
@@ -52,11 +53,11 @@ class MangaMinerBot:
             "Origin": "https://mangabuff.ru",
             "Content-Type": "application/json"
         })
-        self.log(tr("log_session_valid"))
+        self.auth_log_buffer.append(tr("log_session_valid"))
         return True
 
     def login_and_steal_keys(self):
-        self.log("Logging in via API...")
+        self.auth_log_buffer.append("Logging in via API...")
         self.session.cookies.clear()
         try:
             # Standard desktop User-Agent (no browser-automation fingerprints)
@@ -73,7 +74,7 @@ class MangaMinerBot:
             # Extract the CSRF token from the meta tag
             meta = soup.find("meta", attrs={"name": "csrf-token"})
             if not meta or not meta.get("content"):
-                self.log(tr("log_login_fail_csrf"))
+                self.auth_log_buffer.append(tr("log_login_fail_csrf"))
                 return False
             self.csrf_token = meta.get("content")
 
@@ -96,7 +97,7 @@ class MangaMinerBot:
             except ValueError:
                 print(f"DEBUG: Login returned non-JSON (status {post_res.status_code})")
                 print("DEBUG HTML:", post_res.text[:1000])
-                self.log(tr("log_login_fail_page"))
+                self.auth_log_buffer.append(tr("log_login_fail_page"))
                 return False
 
             if response_data.get("status") == True:
@@ -116,15 +117,15 @@ class MangaMinerBot:
                 # are preserved and the JSON save never raises.
                 cookies_dict = safe_cookies_to_dict(self.session)
                 DataManager.save_session(cookies_dict, self.csrf_token, self.user_agent)
-                self.log(tr("log_login_ok"))               
+                self.auth_log_buffer.append(tr("log_login_ok"))
                 return True
             else:
                 print(f"DEBUG: Login failed. Response: {response_data}")
-                self.log(tr("log_login_fail_page"))
+                self.auth_log_buffer.append(tr("log_login_fail_page"))
                 return False
 
         except Exception as e:
-            self.log(tr("log_login_crash", e=e))
+            self.auth_log_buffer.append(tr("log_login_crash", e=e))
             return False
 
     def claim_daily_reward(self):
@@ -136,18 +137,18 @@ class MangaMinerBot:
         Only then do we POST — with an EMPTY payload and the exact
         browser headers. If no active claim button exists, we skip gracefully.
         """
-        self.log("🎁 Checking for daily reward...")
+        self.auth_log_buffer.append("🎁 Checking for daily reward...")
         try:
             # 1. Parse the balance page for the active claim URL (dynamic).
             claim_url = self._find_active_claim_url()
             if not claim_url:
                 # No active claim button today -> nothing to do.
-                self.log("ℹ️ No available daily reward to claim.")
+                self.auth_log_buffer.append("ℹ️ No available daily reward to claim.")
                 return
 
             # 2. POST to the exact endpoint the page exposes, with the
             #    exact headers and an EMPTY payload (day id is in the URL).
-            self.log(f"🎁 Claiming reward: {claim_url}")
+            self.auth_log_buffer.append(f"🎁 Claiming reward: {claim_url}")
             claim_res = self.session.post(
                 claim_url,
                 data="",  # empty body; the day id lives in the URL
@@ -165,15 +166,15 @@ class MangaMinerBot:
             print(f"[DAILY] BODY: {claim_res.text[:1000]}")
 
             if claim_res.status_code == 422:               
-                self.log("ℹ️ Daily reward already claimed or not available yet.")
+                self.auth_log_buffer.append("ℹ️ Daily reward already claimed or not available yet.")
             elif claim_res.status_code == 200:                    
-                self.log("✅ Daily reward claimed successfully!")
+                self.auth_log_buffer.append ("✅ Daily reward claimed successfully!")
             else:
-                self.log(f"⚠️ Claim returned status {claim_res.status_code}")
+                self.auth_log_buffer.append(f"⚠️ Claim returned status {claim_res.status_code}")
 
         except Exception as e:
             print(f"[DAILY] Exception: {e}")
-            self.log(f"⚠️ Daily reward error: {e}")
+            self.auth_log_buffer.append(f"⚠️ Daily reward error: {e}")
 
     def analyze_battle_page(self):
         """Fetch /battle and dump the HTML needed to reverse-engineer the
@@ -475,7 +476,7 @@ class MangaMinerBot:
         rarity = card.get("potential_rarity")
         if rarity and str(rarity).lower() in TARGET_RARITIES:
             print(f"🔥 JACKPOT: Dropped a card with tier: {rarity}!")
-            self.log(f"🔥 JACKPOT: tier {rarity}")
+            self.auth_log_buffer.append(f"🔥 JACKPOT: tier {rarity}")
             self._preserve_card(card)
 
     def _preserve_card(self, card):
@@ -513,7 +514,7 @@ class MangaMinerBot:
             ]
             if any(m in text for m in empty_markers):
                 print("⚠️ Possible empty deck detected — but proceeding with battles anyway.")
-                self.log("⚠️ Possible empty deck — proceeding with battles.")
+                self.auth_log_buffer.append("⚠️ Possible empty deck — proceeding with battles.")
             return True
         except Exception as e:
             print(f"check_active_deck exception: {e} (proceeding anyway)")
@@ -523,13 +524,13 @@ class MangaMinerBot:
         """Re-authenticate when the server rejects the session (419/403 on
         battle endpoints). Returns True if a fresh session is established."""
         print("♻️ Session expired mid-farm. Auto-refreshing...")
-        self.log("♻️ Session expired. Re-logging in...")
+        self.auth_log_buffer.append("♻️ Session expired. Re-logging in...")
         if self.login_and_steal_keys():
             print("✅ Re-login successful! Resuming farm...")
-            self.log("✅ Re-login successful! Resuming...")
+            self.auth_log_buffer.append("✅ Re-login successful! Resuming...")
             return True
         print("❌ Re-login failed. Stopping farm.")
-        self.log("❌ Re-login failed. Stopping.")
+        self.auth_log_buffer.append("❌ Re-login failed. Stopping.")
         return False
 
     def get_actual_balance(self):
@@ -725,7 +726,13 @@ class MangaMinerBot:
         # Claim daily quests exactly ONCE before battling
         self.check_and_claim_quests()
 
+        self.log(tr("log_farm_start"))
+
         battles_done = 0
+        total_essence_ = 0 
+        wins = 0
+        losses = 0
+
         consecutive_unknown = 0   # FAILSAFE: check_battle_result() returned None
         next_micro_break = random.randint(10, 15)
         while self.running if hasattr(self, 'running') else True:
@@ -758,15 +765,14 @@ class MangaMinerBot:
                 if consecutive_unknown >= 3:
                     print("⚠️ 3 consecutive unparseable battle results — "
                           "aborting battle loop (likely a parser break).")
-                    self.log("⚠️ Battle parser failing — stopping farm to avoid infinite loop.")
+                    self.auth_log_buffer.append("⚠️ Battle parser failing — stopping farm to avoid infinite loop.")
                     break
                 time.sleep(random.uniform(10, 20))
                 continue
 
             # Got a valid result — reset the unknown counter.
             consecutive_unknown = 0
-            earned_essence, is_win = result
-            battles_done += 1
+            earned_essence, is_win = result           
 
             # Step3: DYNAMIC LIMIT CHECK (server-authoritative).
             # When the daily cap (+1000) is reached, the server awards 0 essence,
@@ -776,6 +782,13 @@ class MangaMinerBot:
                 print(f"[BATTLE] Result: {outcome} | Earned: +0 — daily cap reached. Stopping farm.")
                 self.log("Daily essence limit reached (+0)")
                 break
+
+            battles_done += 1
+            total_essence_ += earned_essence
+            if is_win:
+                wins += 1
+            else:
+                losses += 1
 
             # Step4: concise status line.
             outcome = "Win" if is_win else "Loss"
@@ -792,6 +805,11 @@ class MangaMinerBot:
             delay = random.uniform(10, 20)
             time.sleep(delay)
 
+        if battles_done > 0:
+            self.log(f"Battles done: {battles_done} | Wins: {wins} | Losses: {losses} | Total essence earned: +{total_essence_}") 
+        else:
+            self.log("No battles completed during this session.")
+
         # Claim any quests completed DURING the battles
         self.check_and_claim_quests()
 
@@ -800,12 +818,12 @@ class MangaMinerBot:
         self.log(tr("log_stopping"))
 
     def check_status_only(self):
-        self.log(tr("log_session_load"))
+        self.auth_log_buffer.append(tr("log_session_load"))
         if not self.validate_session():
             if not self.login_and_steal_keys():
                 return
 
-        self.log(tr("log_source_check"))
+        self.auth_log_buffer.append(tr("log_source_check"))
         try:
             res = self.session.get(CONFIG["urls"]["game"], timeout=10)
             if res.status_code == 200:
@@ -830,13 +848,13 @@ class MangaMinerBot:
 
                 self.current_balance = ore
                 self.update_stats(energy=hits, balance=ore)
-                self.log(tr("log_stat_energy", val=hits))
-                self.log(tr("log_stat_balance", val=f"{ore:,}"))
+                self.auth_log_buffer.append(tr("log_stat_energy", val=hits))
+                self.auth_log_buffer.append(tr("log_stat_balance", val=f"{ore:,}"))
 
                 if cost_raw:
-                    self.log(tr("log_upgrade_cost", cost=cost_raw))
+                    self.auth_log_buffer.append(tr("log_upgrade_cost", cost=cost_raw))
                 else:
-                    self.log(tr("log_upgrade_status_max"))
+                    self.auth_log_buffer.append(tr("log_upgrade_status_max"))
 
             else:
                 self.log(f"⚠️ API Error: {res.status_code}")
@@ -854,6 +872,7 @@ class MangaMinerBot:
         self.log(tr("log_mining_start"))
 
         clicks = 0
+        total_added = 0
         consecutive_errors = 0
 
         while self.running:
@@ -864,32 +883,31 @@ class MangaMinerBot:
                     try:
                         data = response.json()
                         if data.get('status') is False:
-                            self.log(f"⚠️ Mine rejected: {data}")
+                            self.auth_log_buffer.append(f"⚠️ Mine rejected: {data}")
                             time.sleep(2)
                             continue
+
                         ore = data.get('ore', 0)
                         hits_left = data.get('hits_left', 0)
                         added = data.get('added', 0)
+
                         self.current_balance = ore
                         clicks += 1
+                        total_added += added
                         consecutive_errors = 0
 
-                        self.log(f"⛏️ +{added} | ⚡ {hits_left} | 💎 {ore}")
-                        self.update_stats(energy=hits_left, balance=ore)
-
+                        self.update_stats(energy=hits_left, balance=ore)                     
                         prog = 1.0 - (hits_left / 100.0)
-                        if prog < 0: prog = 0
-                        self.update_progress(prog)
+                        self.update_progress(max(0, prog))
 
-                        if hits_left <= 0:
-                            self.log(tr("log_energy_empty"))
+                        if hits_left <= 0:                           
                             self.update_stats(energy=0, balance=ore)
                             break  # <-- only stops MINING, not the script
 
-                        time.sleep(random.uniform(0.20, 0.30))
+                        time.sleep(random.uniform(0.30, 0.50))
 
                     except Exception as e:
-                        self.log(f"⚠️ JSON Error: {e}")
+                        self.auth_log_buffer.append(f"⚠️ JSON Error: {e}")
                         time.sleep(2)
                         continue
 
@@ -909,6 +927,11 @@ class MangaMinerBot:
                         else:
                             self.log("❌ Re-login failed. Stopping.")
                             break
+                    elif response.status_code == 429:
+                        self.log("⚠️ Rate limited (429). Backing off 30s...")
+                        time.sleep(30)
+                        consecutive_errors = 0
+                        continue
                     else:
                         self.log(f"⚠️ Server: {response.status_code}")
                         consecutive_errors += 1
@@ -926,16 +949,20 @@ class MangaMinerBot:
                 self.log(tr("log_error_generic", e=e))
                 time.sleep(1)
 
+        if clicks > 0:
+            self.log(tr("log_mining_summary", clicks=clicks, added=total_added))
+            self.log(tr("log_stat_balance", val=f"{self.current_balance:,}"))
+
     def run(self):
         """Main execution flow: claim daily reward, mine ore (/mine/hit)
         until energy is depleted, then farm battles until the daily essence
         cap (3 consecutive +0) or energy depletion. Clean status logging only."""
         self.running = True
-        self.log(tr("log_session_load"))
+        self.auth_log_buffer.append(tr("log_session_load"))
 
         # Step 1: Load saved session (cookies + CSRF token)
         if not self.validate_session():
-            self.log(tr("log_session_expired"))
+            self.auth_log_buffer.append(tr("log_session_expired"))
             if not self.login_and_steal_keys():
                 self.running = False
                 return
@@ -944,13 +971,19 @@ class MangaMinerBot:
         # (claim daily reward, mining, battles). This ensures we have a fresh
         # CSRF token and valid session before proceeding.
         if not self._validate_session_with_server():
-            self.log(tr("log_session_expired"))
+            self.auth_log_buffer.append(tr("log_session_expired"))
             if not self.login_and_steal_keys():
                 self.running = False
                 return
 
         # Claim daily reward once on startup, before any farming begins
         self.claim_daily_reward()
+
+        if self.auth_log_buffer:
+            header = tr("log_startup_header")
+            body = "🔸 " + "\n🔸 ".join(self.auth_log_buffer)
+            self.log(header + body)
+            self.auth_log_buffer.clear()
 
         # --- Phase 1: ore mining (stops on 403, never aborts script) ---
         self._run_mining()
@@ -964,7 +997,7 @@ class MangaMinerBot:
             self.run_farm_loop()
 
         self.running = False
-        self.log(tr("log_mining_finish"))
+        self.auth_log_buffer.append(tr("log_mining_finish"))
 
     def _validate_session_with_server(self):
         """Make a lightweight GET request to verify the session is still valid.
@@ -975,16 +1008,17 @@ class MangaMinerBot:
             if res.status_code == 200:
                 # Check if we got redirected to login page (session expired)
                 if "login" in res.url.lower() or "csrf-token" in res.text.lower():
-                    self.log("⚠️ Session validation failed: redirected to login")
+                    self.auth_log_buffer.append("⚠️ Session validation failed: redirected to login")
                     return False
-                self.log(tr("log_session_valid"))
+                self.auth_log_buffer.append(tr("log_session_valid"))
                 return True
             elif res.status_code in (401, 419, 403):
-                self.log(f"⚠️ Session validation failed with status {res.status_code}")
+                self.auth_log_buffer.append(f"⚠️ Session validation failed with status {res.status_code}")
                 return False
             else:
-                self.log(f"⚠️ Session validation returned status {res.status_code}")
+                self.auth_log_buffer.append(f"⚠️ Session validation returned status {res.status_code}")
                 return False
         except Exception as e:
-            self.log(f"⚠️ Session validation error: {e}")
+            self.auth_log_buffer.append(f"⚠️ Session validation error: {e}")
             return False
+        
