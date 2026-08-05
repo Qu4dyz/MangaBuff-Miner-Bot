@@ -116,8 +116,7 @@ class MangaMinerBot:
                 # are preserved and the JSON save never raises.
                 cookies_dict = safe_cookies_to_dict(self.session)
                 DataManager.save_session(cookies_dict, self.csrf_token, self.user_agent)
-                self.log(tr("log_login_ok"))
-                self.log(tr("log_god_mode"))
+                self.log(tr("log_login_ok"))               
                 return True
             else:
                 print(f"DEBUG: Login failed. Response: {response_data}")
@@ -165,18 +164,10 @@ class MangaMinerBot:
             print(f"[DAILY] POST {claim_url} -> HTTP {claim_res.status_code}")
             print(f"[DAILY] BODY: {claim_res.text[:1000]}")
 
-            if claim_res.status_code == 422:
-                # 422 here means "calendar not available / already claimed".
+            if claim_res.status_code == 422:               
                 self.log("ℹ️ Daily reward already claimed or not available yet.")
-            elif claim_res.status_code == 200:
-                try:
-                    data = claim_res.json()
-                    if data.get("status") is True or data.get("success") is True:
-                        self.log("✅ Daily reward claimed successfully!")
-                    else:
-                        self.log("ℹ️ Daily reward already claimed today.")
-                except ValueError:
-                    self.log("✅ Daily reward claimed successfully!")
+            elif claim_res.status_code == 200:                    
+                self.log("✅ Daily reward claimed successfully!")
             else:
                 self.log(f"⚠️ Claim returned status {claim_res.status_code}")
 

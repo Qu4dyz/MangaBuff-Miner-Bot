@@ -22,8 +22,7 @@ def main():
         bot = MangaMinerBot(
             log_callback=_cli_log,
             progress_callback=lambda p: None,
-            stats_callback=lambda **kw: None,
-            headless=True
+            stats_callback=lambda **kw: None,            
         )
         bot.run()
 
