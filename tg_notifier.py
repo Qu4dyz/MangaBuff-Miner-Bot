@@ -316,13 +316,13 @@ class TelegramNotifier:
         )
         self.send_message(msg, silent=True)
 
-    def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None):
+    def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None, user_id=None):
         import urllib.parse
         encoded_name = urllib.parse.quote(card_name)
         market_url = f"https://mangabuff.ru/market?search={encoded_name}"
-        notifs_url = "https://mangabuff.ru/notifications"
+        inventory_url = f"https://mangabuff.ru/users/{user_id}/cards?sort=new" if user_id else None
 
-        msg = f'🎁 <b>Найдена <a href="{notifs_url}">бонусная карта</a> за чтение!</b>\n'
+        msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
         msg += f'🃏 Карта: <a href="{market_url}"><b>{card_name}</b></a>\n'
         if copy_info and copy_info.get("copy_number"):
             num = copy_info["copy_number"]
@@ -333,7 +333,11 @@ class TelegramNotifier:
             msg += f"🔢 <b>Экземпляр:</b> <code>{formatted_num}</code> (<b>{title}</b>{special_fire})\n"
         if cards_today:
             msg += f"📦 Найдено сегодня: <b>{cards_today}/10</b>\n"
-        msg += f'🔗 <a href="{notifs_url}">Уведомление на MangaBuff</a> | <a href="{market_url}">Цены на маркете</a>\n'
+
+        action_links = [f'💰 <b><a href="{market_url}">Узнать цену на Маркете</a></b>']
+        if inventory_url:
+            action_links.append(f'🎒 <b><a href="{inventory_url}">В инвентаре</a></b>')
+        msg += " | ".join(action_links) + "\n"
 
         if photo_bytes:
             self.send_photo(photo_bytes, caption=msg, parse_mode="HTML")

@@ -470,25 +470,19 @@ class MangaMinerBot:
                 if is_trade:
                     continue
 
-                # 3. PRESERVE CARD DROPS: User wants card drop notifications preserved on MangaBuff to check market prices
-                is_card_drop = any(k in item_text for k in [
+                # 3. IDENTIFY UNWANTED: card drops, promo banners, animated card announcements
+                is_unwanted = any(k in item_text for k in [
                     "получили новую карту",
                     "вы получили карту",
                     "вам выпала карта",
                     "выпала карта",
-                    "получена карта"
-                ])
-                if is_card_drop:
-                    continue
-
-                # 4. IDENTIFY UNWANTED PROMO SPAM: animated card advertisements, announcements
-                is_junk_promo = any(k in item_text for k in [
+                    "получена карта",
                     "анимированн",
                     "анимированная",
                     "добавлена анимированная"
                 ])
 
-                if is_junk_promo:
+                if is_unwanted:
                     unwanted_notif_ids.append(notif_id)
 
             # Delete only the identified unwanted items individually (leaving chapters & trades 100% untouched)
@@ -855,7 +849,8 @@ class MangaMinerBot:
                                         card_img,
                                         current_cards,
                                         photo_bytes=photo_bytes,
-                                        copy_info=copy_info
+                                        copy_info=copy_info,
+                                        user_id=self.user_id
                                     )
                                     wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", True)
                                     if wait_card_cd:
