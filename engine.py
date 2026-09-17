@@ -73,9 +73,9 @@ class MangaMinerBot:
             "X-CSRF-TOKEN": self.csrf_token,
             "X-Requested-With": "XMLHttpRequest",
             "Referer": "https://mangabuff.ru/mine",
-            "Origin": "https://mangabuff.ru",
-            "Content-Type": "application/json"
+            "Origin": "https://mangabuff.ru"
         })
+        self.session.headers.pop("Content-Type", None)
         self.auth_log_buffer.append(tr("log_session_valid"))
         return True
 
@@ -127,9 +127,9 @@ class MangaMinerBot:
                     "X-CSRF-TOKEN": self.csrf_token,
                     "X-Requested-With": "XMLHttpRequest",
                     "Referer": "https://mangabuff.ru/mine",
-                    "Origin": "https://mangabuff.ru",
-                    "Content-Type": "application/json"
+                    "Origin": "https://mangabuff.ru"
                 })
+                self.session.headers.pop("Content-Type", None)
 
                 cookies_dict = safe_cookies_to_dict(self.session)
                 DataManager.save_session(cookies_dict, self.csrf_token, self.user_agent)
@@ -500,7 +500,8 @@ class MangaMinerBot:
                             "Accept": "*/*",
                             "X-CSRF-TOKEN": self.csrf_token,
                             "X-Requested-With": "XMLHttpRequest",
-                            "Referer": title_url
+                            "Referer": title_url,
+                            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
                         }
                         load_res = self.session.post(
                             "https://mangabuff.ru/chapters/load",
@@ -606,7 +607,8 @@ class MangaMinerBot:
                             "Accept": "*/*",
                             "X-CSRF-TOKEN": self.csrf_token,
                             "X-Requested-With": "XMLHttpRequest",
-                            "Referer": buffer[-1]["url"]
+                            "Referer": buffer[-1]["url"],
+                            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
                         }
 
                         post_res = self.session.post(
