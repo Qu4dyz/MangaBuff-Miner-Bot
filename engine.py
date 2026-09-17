@@ -1474,6 +1474,31 @@ class MangaMinerBot:
                 w_s = sleep_sec % 60
                 self.log(f"💤 Все задачи проверены. Ближайшее действие: {next_name} (~{w_m} мин {w_s} сек). Ухожу в сон.")
 
+                # Heartbeat notification to Telegram once per cycle
+                t_h = tower_left_sec // 3600
+                t_m = (tower_left_sec % 3600) // 60
+                tower_str = f"{t_h}ч {t_m}м" if t_h > 0 else f"{t_m}м"
+                cards_cnt_str = f"{reading_stats.get('cards_found', 0)}/{reading_stats.get('cards_max', 10)}" if reading_stats else "?/10"
+                ads_cnt = 0
+                try:
+                    res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
+                    if res_bal_check.status_code == 200:
+                        btn = BeautifulSoup(res_bal_check.text, "html.parser").find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
+                        if btn:
+                            ads_cnt = int(btn.get("data-count", 0))
+                except Exception:
+                    pass
+
+                self.notifier.notify_cycle_heartbeat(
+                    energy=energy,
+                    balance=self.current_balance,
+                    ads_count=ads_cnt,
+                    cards_count=cards_cnt_str,
+                    tower_str=tower_str,
+                    next_action=next_name,
+                    next_wait_min=w_m
+                )
+
                 # Non-blocking sleep: checks self.running every 1 sec
                 for _ in range(int(sleep_sec)):
                     if not self.running:
