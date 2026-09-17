@@ -142,19 +142,23 @@ class MangaMinerBot:
 
     def claim_daily_reward(self):
         """Claim the daily login reward from /balance page."""
-        self.auth_log_buffer.append("🎁 Checking for daily reward...")
         try:
             claim_url = self._find_active_claim_url()
             if not claim_url:
-                self.auth_log_buffer.append("ℹ️ No available daily reward to claim.")
                 return
 
-            self.auth_log_buffer.append(f"🎁 Claiming reward: {claim_url}")
+            def _log_reward(txt):
+                if self.running:
+                    self.log(txt)
+                else:
+                    self.auth_log_buffer.append(txt)
+
+            _log_reward(f"🎁 Найдена ежедневная награда: {claim_url}. Забираем...")
             claim_res = self.session.post(
                 claim_url,
                 data="",
                 headers={
-                    "Accept": "*/*",
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
                     "X-CSRF-TOKEN": self.csrf_token,
                     "X-Requested-With": "XMLHttpRequest",
                     "Referer": "https://mangabuff.ru/balance"
@@ -163,16 +167,26 @@ class MangaMinerBot:
             )
 
             if claim_res.status_code == 422:               
-                self.auth_log_buffer.append("ℹ️ Daily reward already claimed or not available yet.")
+                _log_reward("ℹ️ Ежедневная награда уже была забрана сегодня.")
             elif claim_res.status_code == 200:                    
-                msg = "✅ Daily reward claimed successfully!"
-                self.auth_log_buffer.append(msg)
+                msg = "✅ Ежедневная награда успешно получена!"
+                try:
+                    res_json = claim_res.json()
+                    if isinstance(res_json, dict) and res_json.get("message"):
+                        msg = f"✅ Награда получена: {res_json['message']}"
+                except Exception:
+                    pass
+                _log_reward(msg)
                 self.notifier.notify_daily_reward(msg)
             else:
-                self.auth_log_buffer.append(f"⚠️ Claim returned status {claim_res.status_code}")
+                _log_reward(f"⚠️ Ошибка забора ежедневной награды: статус {claim_res.status_code}")
 
         except Exception as e:
-            self.auth_log_buffer.append(f"⚠️ Daily reward error: {e}")
+            err = f"⚠️ Daily reward error: {e}"
+            if self.running:
+                self.log(err)
+            else:
+                self.auth_log_buffer.append(err)
 
     def watch_daily_ads(self):
         """Watch up to 3 daily ads on /balance page for +7 diamonds each (+21 diamonds total)."""
@@ -321,6 +335,56 @@ class MangaMinerBot:
             print(f"get_reading_stats exception: {e}")
             return None
 
+    def get_popular_manga_slugs(self):
+        """Fetch top manga slugs dynamically from /manga/top with verified fallback."""
+        verified = [
+            "svinarnik",
+            "elised",
+            "mech-razyashchego-groma",
+            "geroi-vernulsya",
+            "slabeishii-geroi",
+            "plamya-beschislennyh-nevzgod",
+            "ona-moya",
+            "garem-iz-muzhchin",
+            "temnyi-demon",
+            "vetrolom-2013",
+            "ohotnik-sss-urovnya",
+            "borba-v-pryamom-efire",
+            "karti-istinnoe-obrazovanie",
+            "karti-odnazhdy-ya-stala-princessoi",
+            "ya-stal-grafskim-ublyudkom",
+            "klinok-rassekayushchii-demonov",
+            "vsevedushchii-chitatel",
+            "tenkaichi-turnir-silneishih-masterov-boevyh-iskusstv-yaponii",
+            "belaya-krov",
+            "nesravnennaya-chu-e-su",
+            "plach-nochnoi-vorony",
+            "kovarnyi-plan-muzhchiny-ili-kak-zavoevat-serdce",
+            "ya-podruzhilsya-so-vtoroi-samoi-krasivoi-devushkoi-v-klasse",
+            "operaciya-nastoyashchaya-lyubov",
+            "zlodeika-perevernuvshaya-pesochnye-chasy",
+            "studiya-kabana",
+            "sistema-vsemogushchego-dizainera",
+            "plan-pererozhdennogo-naemnika",
+            "vyberi-menya",
+            "rycar-zhivushchii-odnim-dnem"
+        ]
+        try:
+            res = self.session.get("https://mangabuff.ru/manga/top", timeout=10)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                slugs = [
+                    re.sub(r"https?://mangabuff\.ru/manga/", "", a["href"]).split("/")[0]
+                    for a in soup.find_all("a", href=True)
+                    if "/manga/" in a["href"] and not a["href"].endswith("/top")
+                ]
+                slugs = list(dict.fromkeys(s for s in slugs if s and not s.startswith("top") and "/" not in s))
+                if len(slugs) >= 15:
+                    return slugs
+        except Exception:
+            pass
+        return verified
+
     def read_manga_chapters(self, target_count=None):
         """Read manga chapters to farm bonus cards, sharpening scrolls, and 75-chapter daily quest."""
         if not DataManager.get_setting("reading_enabled", True):
@@ -360,40 +424,10 @@ class MangaMinerBot:
         read_history = set(state.get("history", []))
         progress_map = state.get("progress", {})
 
-        manga_list = state.get("manga_list") or [
-            "slabeishii-geroi",
-            "mech-razyashchego-groma",
-            "geroi-vernulsya",
-            "plamya-beschislennyh-nevzgod",
-            "tochka-zreniya-vsevedushchego-chitatelya",
-            "nachalo-posle-konca",
-            "podnyatie-urovnya-v-odinochku",
-            "ubijca-drakonov",
-            "svinarnik",
-            "eleceed",
-            "vozvrashenie-velikogo-mudreca-posle-4000-let",
-            "oruzheinyi-baron",
-            "ya-obnovil-svoi-navyki-do-maksimuma",
-            "ubijca-geroev",
-            "mag-kotoryi-poglyotil-drakona",
-            "voshozhdenie-v-tenyax",
-            "vysshii-mag",
-            "magicheskii-imperator",
-            "pirat-sudby",
-            "doktor-drevnih-vremen",
-            "master-magii",
-            "reinkarnaciya-bezrabotnogo",
-            "chernyi-klever",
-            "chelovek-benzopila",
-            "klinok-rassekajushij-demonov",
-            "magicheskaya-bitva",
-            "semya-shpiona",
-            "adskiy-ray",
-            "monstr-nomer-vosem",
-            "kaiju-no-8",
-            "bluelock"
-        ]
+        manga_list = self.get_popular_manga_slugs()
         manga_idx = state.get("manga_idx", 0)
+        if manga_idx >= len(manga_list):
+            manga_idx = 0
 
         chapters_read_session = 0
         cards_gained_session = 0
@@ -409,18 +443,18 @@ class MangaMinerBot:
                 title_url = f"https://mangabuff.ru/manga/{current_slug}"
                 res_title = self.session.get(title_url, timeout=10)
                 if res_title.status_code != 200:
-                    manga_idx += 1
+                    manga_idx = (manga_idx + 1) % len(manga_list)
                     continue
 
                 soup_title = BeautifulSoup(res_title.text, "html.parser")
                 ch_links = []
-                pattern = re.compile(rf"/manga/{re.escape(current_slug)}/(\d+)/(\d+)")
+                pattern = re.compile(rf"/manga/{re.escape(current_slug)}/(\d+)/([\d.]+)")
                 for a in soup_title.find_all("a", href=True):
                     href = a["href"]
                     m = pattern.search(href)
                     if m:
                         vol = int(m.group(1))
-                        ch = int(m.group(2))
+                        ch = float(m.group(2))
                         full_url = href if href.startswith("http") else f"https://mangabuff.ru{href}"
                         ch_links.append((vol, ch, full_url))
 
@@ -443,7 +477,7 @@ class MangaMinerBot:
 
                 if not unread_chapters:
                     # All chapters of this manga completed, advance to next title
-                    manga_idx += 1
+                    manga_idx = (manga_idx + 1) % len(manga_list)
                     continue
 
                 for vol, ch, ch_url in unread_chapters:
@@ -1009,6 +1043,14 @@ class MangaMinerBot:
             if meta and meta.get("content"):
                 self.csrf_token = meta.get("content")
 
+            # 1. Direct check for active daily reward calendar button
+            active_btn = soup.find(class_=lambda c: c and "daily-rewards-item-exp--active" in c)
+            if active_btn:
+                parent = active_btn.find_parent("div", class_="daily-rewards-item")
+                if parent and parent.get("data-day"):
+                    return f"https://mangabuff.ru/balance/claim/{parent.get('data-day')}"
+
+            # 2. General check for claim buttons
             claim_buttons = []
             for el in soup.find_all(string=lambda t: t and "Забрать" in t):
                 node = el.parent
@@ -1016,40 +1058,15 @@ class MangaMinerBot:
                     claim_buttons.append(node)
 
             for btn in claim_buttons:
-                link = None
-                for ancestor in [btn] + list(btn.find_parents()):
-                    if ancestor is None:
-                        continue
-                    name = getattr(ancestor, "name", None)
-                    if name in ("a", "button", "form") or ancestor.get("href") or ancestor.get("data-day"):
-                        link = ancestor
-                        break
-                if link is None:
-                    link = btn
-
-                if link.get("disabled") is not None:
-                    continue
-                classes = " ".join(link.get("class", []))
-                if "disabled" in classes.lower():
-                    continue
-
-                parent = link.find_parent("div", class_="daily-rewards-item")
-                if parent is None:
-                    parent = link.parent
-                if parent is not None:
+                parent = btn.find_parent("div", class_="daily-rewards-item")
+                if parent and parent.get("data-day"):
                     pclasses = " ".join(parent.get("class", [])).lower()
-                    if any(m in pclasses for m in ("completed", "claimed", "locked", "inactive", "disabled", "taken")):
-                        continue
+                    if not any(m in pclasses for m in ("completed", "claimed", "locked", "disabled")):
+                        return f"https://mangabuff.ru/balance/claim/{parent.get('data-day')}"
 
-                href = link.get("href") or link.get("action")
+                href = btn.get("href") or btn.get("action")
                 if href:
                     return href if href.startswith("http") else ("https://mangabuff.ru" + href)
-
-                day = link.get("data-day")
-                if day is None and parent is not None:
-                    day = parent.get("data-day")
-                if day:
-                    return f"https://mangabuff.ru/balance/claim/{day}"
 
         except Exception as e:
             print(f"_find_active_claim_url exception: {e}")
@@ -1391,6 +1408,9 @@ class MangaMinerBot:
 
         while self.running:
             try:
+                # 0. Check and claim daily calendar reward (cards, scrolls, ore)
+                self.claim_daily_reward()
+
                 # 1. Mining & Energy check
                 energy = 0
                 res_game = self.session.get(CONFIG["urls"]["game"], timeout=10)
@@ -1411,8 +1431,17 @@ class MangaMinerBot:
                     self.check_and_claim_quests()
 
                 # 2. Daily Ads check (3x7 💎)
+                ads_cnt = 3
                 if self.running and DataManager.get_setting("ads_enabled", True):
                     self.watch_daily_ads()
+                    try:
+                        res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
+                        if res_bal_check.status_code == 200:
+                            btn = BeautifulSoup(res_bal_check.text, "html.parser").find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
+                            if btn:
+                                ads_cnt = int(btn.get("data-count", 0))
+                    except Exception:
+                        pass
 
                 # 3. Abyss Tower check (claim rewards & restart 12h)
                 tower_left_sec = 86400
@@ -1450,8 +1479,8 @@ class MangaMinerBot:
                 # 5. Energy recovery wait estimation (1 energy per ~3.5 min, target 15 = ~50 min)
                 mine_wait_sec = 60 * 50 if energy < 15 else 60
 
-                # 6. Ads wait (resets at midnight MSK)
-                ads_wait_sec = get_seconds_until_midnight_msk()
+                # 6. Ads wait (resets at midnight MSK if all 3 watched, else short retry)
+                ads_wait_sec = get_seconds_until_midnight_msk() if ads_cnt >= 3 else 120
 
                 candidates = [
                     ("Карта", card_wait_sec),
@@ -1479,15 +1508,6 @@ class MangaMinerBot:
                 t_m = (tower_left_sec % 3600) // 60
                 tower_str = f"{t_h}ч {t_m}м" if t_h > 0 else f"{t_m}м"
                 cards_cnt_str = f"{reading_stats.get('cards_found', 0)}/{reading_stats.get('cards_max', 10)}" if reading_stats else "?/10"
-                ads_cnt = 0
-                try:
-                    res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
-                    if res_bal_check.status_code == 200:
-                        btn = BeautifulSoup(res_bal_check.text, "html.parser").find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
-                        if btn:
-                            ads_cnt = int(btn.get("data-count", 0))
-                except Exception:
-                    pass
 
                 self.notifier.notify_cycle_heartbeat(
                     energy=energy,
