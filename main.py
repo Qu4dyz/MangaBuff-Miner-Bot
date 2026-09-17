@@ -1,35 +1,79 @@
 import os
+import sys
+import time
+import argparse
 from dotenv import load_dotenv
 
+# Ensure UTF-8 output on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from path import BASE_DIR
-from tg_notifier import send_message
+from data_management import DataManager
 from engine import MangaMinerBot
 from gui_app import App
 
-USE_CLI_MODE = True # Set to True to run in CLI mode, False for GUI mode
+USE_CLI_MODE = True  # Set to True to default to CLI mode, False for GUI mode
+
 
 def main():
     os.makedirs(BASE_DIR, exist_ok=True)
     load_dotenv()
 
-    if USE_CLI_MODE:
-        print("Starting MangaBuff Miner in CLI mode...")
+    parser = argparse.ArgumentParser(description="MangaBuff Miner Bot")
+    parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
+    parser.add_argument("--gui", action="store_true", help="Run in GUI mode")
+    parser.add_argument("--status", action="store_true", help="Check status and exit")
+    parser.add_argument("--proxy", type=str, default=None, help="Proxy (ip:port:user:pass or http://user:pass@ip:port)")
+    args = parser.parse_args()
+
+    run_gui = args.gui or (not args.cli and not args.status and not USE_CLI_MODE)
+
+    if run_gui:
+        print("Starting MangaBuff Miner in GUI mode...")
+        app = App()
+        app.mainloop()
+    else:
+        print("=" * 50)
+        print("🤖 MangaBuff Miner — CLI Mode")
+        if args.status:
+            print("📊 Checking Account Status...")
+        print("=" * 50)
+
+        email, pwd = DataManager.get_credentials()
+        if not email or not pwd:
+            env_login = os.getenv("MANGA_LOGIN")
+            env_pass = os.getenv("MANGA_PASSWORD")
+            if env_login and env_pass:
+                DataManager.set_credentials(env_login, env_pass)
+                email, pwd = env_login, env_pass
+            else:
+                email = input("Введите email MangaBuff: ").strip()
+                pwd = input("Введите пароль MangaBuff: ").strip()
+                if email and pwd:
+                    DataManager.set_credentials(email, pwd)
+                else:
+                    print("❌ Логин и пароль не могут быть пустыми.")
+                    return
 
         def _cli_log(msg):
-            print(f"[BOT] {msg}")
-            send_message(f"[BOT] {msg}")
+            t = time.strftime("%H:%M:%S")
+            print(f"[{t}] [BOT] {msg}")
 
         bot = MangaMinerBot(
             log_callback=_cli_log,
             progress_callback=lambda p: None,
-            stats_callback=lambda **kw: None,            
+            stats_callback=lambda **kw: None,
+            headless=True,
+            proxy=args.proxy
         )
-        bot.run()
+        if args.status:
+            bot.check_status_only()
+        else:
+            bot.run()
 
-    else:
-        print("Starting MangaBuff Miner in GUI mode...")
-        app = App()
-        app.mainloop()
 
 if __name__ == "__main__":
     main()

@@ -17,3 +17,4 @@ def get_base_path():
 BASE_DIR = get_base_path()
 DATA_FILE = os.path.join(BASE_DIR, "user_data.json")
 SESSION_FILE = os.path.join(BASE_DIR, "session_cache.json")
+READING_STATE_FILE = os.path.join(BASE_DIR, "reading_state.json")

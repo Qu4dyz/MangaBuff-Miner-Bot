@@ -12,16 +12,19 @@
 
 * **🔐 API-based Authentication:** Logs in via Laravel backend using email/password, extracts CSRF token from login page, maintains session via cookies (cached to `session_cache.json`).
 * **🎁 Daily Reward Claiming:** Parses `/balance` page for the active "Claim" button and posts to the dynamic claim endpoint.
-* **⚔️ Daily Quest Claiming:** Single-pass scan of `/battle` page for completed-but-unclaimed daily quests; claims them via API.
-* **⚔️ Battle Farming Loop:** Starts battles via `/battle/fight/start`, follows redirect to result page, extracts earned essence via regex from embedded JSON. Stops at daily essence cap (1000/day detected via 3 consecutive 0-essence battles).
-* **⛏️ Ore Mining & Auto-Upgrade:** Hits `/mine/hit` API endpoint, auto-checks and buys pickaxe upgrades from the shop.
-* **💾 Session Persistence:** Saves cookies, CSRF token, and User-Agent to `session_cache.json`; reuses until HTTP 419 (expired) triggers auto-re-login.
+* **📺 Daily Rewarded Ads (3x7 💎):** Automatically watches up to 3 rewarded ads per day via `POST /balance/ads` (+21 diamonds daily) respecting server video duration cooldowns (~18–22s).
+* **📖 Manga Chapter Reading (`/addHistory`):** Sequentially reads manga chapters with humanized delays (10–18s) to farm up to 10 bonus cards/day, sharpening scrolls, and progress the 75-chapter daily quest. Saves read history in `reading_state.json`.
+* **🏰 Abyss Tower Expeditions (`/tower`):** Automatically checks active expeditions. Claims completed rewards (diamonds + dark crystals + card levels), delivers Telegram report, and restarts a fresh 12h Nightmare expedition with your saved squad.
+* **⚔️ Daily Quest Claiming:** Scans `/battle` page for completed-but-unclaimed daily quests; claims essence, diamonds, and scrolls safely via API.
+* **⚔️ Battle Farming Loop:** Starts battles via `/battle/fight/start`, follows redirect to result page, extracts earned essence. Stops cleanly at daily essence cap (1000/day detected via 3 consecutive 0-essence battles).
+* **⛏️ Ore Mining & Auto-Upgrade:** Hits `/mine/hit` API endpoint, auto-checks and buys pickaxe upgrades and Strong Hit from the shop.
+* **💾 Session Persistence:** Saves cookies, CSRF token, and User-Agent to `session_cache.json`; reuses until HTTP 419 triggers automatic re-login.
 * **🔐 Credential Storage:** Saves email/password locally in `user_data.json` (plaintext — local use only).
-* **🛡️ Anti-Ban Humanization:** Randomized delays between actions (4.5–12.2s), between battles (10–20s), micro-breaks (45–120s every 10–15 battles).
-* **🃏 High-Value Card Preservation:** Detects legendary/mythic card drops in battle results and saves them to `jackpot_cards.json` (never consumed).
-* **🌍 Multi-language Support (Code-Level):** Translations for English, Russian, Ukrainian exist in code.
-* **🖥️ GUI (Optional):** CustomTkinter GUI available — launch with `USE_CLI_MODE = False` in `main.py`.
-* **📲 Telegram Notifications:** Sends log messages to a Telegram bot (configured via `.env`).
+* **🛡️ Anti-Ban Humanization:** Randomized delays between actions (4.5–12.2s), between battles (10–20s), micro-breaks (35–75s every 10–15 battles).
+* **🃏 High-Value Card Preservation:** Detects legendary/mythic card drops in battle results and saves them to `jackpot_cards.json` (protected from consumption).
+* **🌍 Multi-language Support:** Full translations for English, Russian, and Ukrainian.
+* **🖥️ GUI & CLI Modes:** CustomTkinter GUI or streamlined CLI mode with `--status` and `--gui` flags.
+* **📲 Telegram Notifications:** Asynchronous non-blocking worker delivering structured HTML event summaries and alerts.
 
 ## 🚀 How to Run (From Source)
 
@@ -35,13 +38,19 @@
    TG_TOKEN=your_telegram_bot_token
    TG_CHAT_ID=your_chat_id
    ```
-4. Run the script:
-   ```bash
-   python main.py
-   ```
-   - On first run, it will prompt for your MangaBuff email and password (saved to `user_data.json`).
-   - By default (`USE_CLI_MODE = True`), the script runs in CLI mode: logs in (or restores session), claims daily reward, claims daily quests, mines ore, upgrades pickaxe, then enters the battle farming loop until daily essence cap or energy depletion.
-   - Set `USE_CLI_MODE = False` in `main.py` to launch the CustomTkinter GUI instead.
+4. Execution Options:
+   - **Default Execution (CLI):**
+     ```bash
+     python main.py
+     ```
+   - **Quick Status Check (no actions performed):**
+     ```bash
+     python main.py --status
+     ```
+   - **Graphical Interface (GUI):**
+     ```bash
+     python main.py --gui
+     ```
 
 ## 🛠 Tech Stack
 
@@ -74,14 +83,16 @@ Edit the `CONFIG` dict in `config.py` to adjust:
 - CSS selectors for parsing mine page (balance, energy, upgrade cost)
 - `TARGET_RARITIES` in `config.py` — card tiers to preserve (default: `["legendary", "mythic"]`)
 
-## ⚠️ Known Limitations
+## ⚠️ Status & Solved Limitations
 
-| Area | Status |
-|------|--------|
-| **Quest Claim Payload** | Sends multiple candidate field names (`user_daily_quest_id`, `id`, `quest_id`, `daily_quest_id`); exact field name not confirmed from Network tab |
-| **Essence JSON Key** | Battle result essence extracted via regex from embedded JSON; key name guessed (`essence`, `essence_gained`, `reward`, `gain`, `added`, `essence_added`) |
-| **Deck Detection** | Heuristic text search for "empty deck" phrases; fragile to UI text changes |
-| **Daily Cap Detection** | Stops after 3 consecutive 0-essence battles; may false-stop on new/empty decks |
+| Area | Status | Resolution |
+|------|--------|------------|
+| **Quest Claim Payload** | ✅ **Resolved** | Exact form-encoded payload `user_daily_quest_id` reverse-engineered from `manga.js`. Verified working with `HTTP 200`. |
+| **Pickaxe Auto-Upgrade** | ✅ **Implemented** | Connected `/mine/upgrade` and `/mine/buy-strong-hit` endpoints with automatic purchase logic when enough ore is mined. |
+| **Telegram Notifier** | ✅ **Revamped** | Asynchronous worker queue, rate-limit protection, zero spam, beautiful HTML summaries for milestones, instant Jackpot alerts. |
+| **Jackpot Card Preservation** | ✅ **Activated** | High-value card drops (`legendary`, `mythic`) detected during battles, preserved into `jackpot_cards.json`, and alerted via TG. |
+| **Daily Cap Detection** | ✅ **Fixed** | Exits only after 3 consecutive 0-essence battles. Single losses no longer prematurely stop the farm. |
+| **Cloudflare Turnstile** | 🛡️ **Guarded** | Captcha challenge detector with immediate Telegram alert and safe bot pause. |
 
 ## 📋 Requirements
 

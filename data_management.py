@@ -1,7 +1,9 @@
 import os
 import json
-from path import DATA_FILE, SESSION_FILE
+import tempfile
 import time
+from path import DATA_FILE, SESSION_FILE, READING_STATE_FILE
+
 
 # ==========================================
 # DATA MANAGEMENT
@@ -9,21 +11,30 @@ import time
 class DataManager:
     @staticmethod
     def load_json(filename):
-        if not os.path.exists(filename): return {}
+        if not os.path.exists(filename):
+            return {}
         try:
-            with open(filename, "r", encoding='utf-8') as f:
+            with open(filename, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, OSError):
             return {}
 
     @staticmethod
     def save_json(filename, data):
+        """Atomically saves JSON data to prevent file corruption on crash."""
         try:
             current = DataManager.load_json(filename)
             current.update(data)
-            with open(filename, "w", encoding='utf-8') as f:
-                json.dump(current, f, indent=4, ensure_ascii=False)
-        except:
+            dir_name = os.path.dirname(os.path.abspath(filename))
+            os.makedirs(dir_name, exist_ok=True)
+            
+            # Atomic write via temp file
+            with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, encoding="utf-8") as tf:
+                json.dump(current, tf, indent=4, ensure_ascii=False)
+                temp_name = tf.name
+                
+            os.replace(temp_name, filename)
+        except OSError:
             pass
 
     @staticmethod
@@ -38,7 +49,11 @@ class DataManager:
     @staticmethod
     def clear_credentials():
         DataManager.save_json(DATA_FILE, {"email": None, "password": None})
-        if os.path.exists(SESSION_FILE): os.remove(SESSION_FILE)
+        if os.path.exists(SESSION_FILE):
+            try:
+                os.remove(SESSION_FILE)
+            except OSError:
+                pass
 
     @staticmethod
     def save_session(cookies_dict, csrf_token, user_agent):
@@ -53,3 +68,20 @@ class DataManager:
     @staticmethod
     def load_session():
         return DataManager.load_json(SESSION_FILE)
+
+    @staticmethod
+    def get_setting(key, default=None):
+        data = DataManager.load_json(DATA_FILE)
+        return data.get(key, default)
+
+    @staticmethod
+    def set_setting(key, value):
+        DataManager.save_json(DATA_FILE, {key: value})
+
+    @staticmethod
+    def load_reading_state():
+        return DataManager.load_json(READING_STATE_FILE)
+
+    @staticmethod
+    def save_reading_state(data):
+        DataManager.save_json(READING_STATE_FILE, data)
