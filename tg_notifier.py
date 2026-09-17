@@ -31,12 +31,19 @@ class TelegramNotifier:
             item = self._queue.get()
             if item is None:
                 break
-            if len(item) == 3:
-                text, parse_mode, disable_preview = item
-            else:
-                text, parse_mode = item
-                disable_preview = True
-            self._send_http(text, parse_mode, disable_preview=disable_preview)
+            try:
+                if isinstance(item, tuple) and len(item) > 0 and item[0] == "__PHOTO__":
+                    _, photo_bytes, caption, parse_mode = item
+                    self._send_photo_http(photo_bytes, caption=caption, parse_mode=parse_mode)
+                else:
+                    if len(item) == 3:
+                        text, parse_mode, disable_preview = item
+                    else:
+                        text, parse_mode = item
+                        disable_preview = True
+                    self._send_http(text, parse_mode, disable_preview=disable_preview)
+            except Exception as e:
+                print(f"Telegram queue error: {e}")
             self._queue.task_done()
             # Slight delay to respect Telegram's rate limits (max 30/sec, safe: 2/sec)
             time.sleep(0.5)
@@ -73,12 +80,50 @@ class TelegramNotifier:
         except requests.RequestException as e:
             return False, str(e)
 
+    def _send_photo_http(self, photo_bytes, caption=None, parse_mode="HTML"):
+        token, chat_id, enabled = self.get_credentials()
+        if not enabled or not token or not chat_id:
+            return False, "Telegram notifications disabled or credentials missing."
+
+        url = f"https://api.telegram.org/bot{token}/sendPhoto"
+        payload = {"chat_id": chat_id}
+        if caption:
+            payload["caption"] = caption
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+
+        files = {"photo": ("card.png", photo_bytes, "image/png")}
+        try:
+            response = requests.post(url, data=payload, files=files, timeout=15)
+            if response.status_code == 200:
+                return True, "OK"
+            elif response.status_code == 429:
+                try:
+                    retry_after = response.json().get("parameters", {}).get("retry_after", 5)
+                except Exception:
+                    retry_after = 5
+                time.sleep(retry_after)
+                requests.post(url, data=payload, files=files, timeout=15)
+                return False, f"Rate limited, waited {retry_after}s"
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        except requests.RequestException as e:
+            return False, str(e)
+
     def send_message(self, text, parse_mode="HTML", wait=False, disable_preview=True):
         """Send message asynchronously (or synchronously if wait=True)."""
         if wait:
             return self._send_http(text, parse_mode, disable_preview=disable_preview)
         else:
             self._queue.put((text, parse_mode, disable_preview))
+            return True, "Queued"
+
+    def send_photo(self, photo_bytes, caption=None, parse_mode="HTML", wait=False):
+        """Send a photo asynchronously (or synchronously if wait=True)."""
+        if wait:
+            return self._send_photo_http(photo_bytes, caption=caption, parse_mode=parse_mode)
+        else:
+            self._queue.put(("__PHOTO__", photo_bytes, caption, parse_mode))
             return True, "Queued"
 
     # ==========================================
@@ -175,15 +220,19 @@ class TelegramNotifier:
         )
         self.send_message(msg)
 
-    def notify_card_dropped(self, card_name, card_image=None, cards_today=None):
+    def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None):
         msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
-        if card_image:
-            full_img = f"https://mangabuff.ru{card_image}" if card_image.startswith("/") else card_image
-            msg = f'<a href="{full_img}">&#8205;</a>' + msg
         msg += f"🃏 Карта: <b>{card_name}</b>\n"
         if cards_today:
             msg += f"📦 Найдено сегодня: <b>{cards_today}/10</b>\n"
-        self.send_message(msg, disable_preview=False if card_image else True)
+
+        if photo_bytes:
+            self.send_photo(photo_bytes, caption=msg, parse_mode="HTML")
+        else:
+            if card_image:
+                full_img = f"https://mangabuff.ru{card_image}" if card_image.startswith("/") else card_image
+                msg = f'<a href="{full_img}">&#8205;</a>' + msg
+            self.send_message(msg, disable_preview=False if card_image else True)
 
     def notify_scroll_dropped(self, scroll_name, rank=None):
         msg = "📜 <b>Выпал свиток заточки за чтение!</b>\n"
@@ -209,15 +258,23 @@ class TelegramNotifier:
         msg = f"⚠️ <b>Внимание: {title}</b>\n{detail}"
         self.send_message(msg)
 
-    def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min, diamonds=None):
-        diamonds_str = f" | 💎 Алмазы: <b>{diamonds:,}</b>" if diamonds is not None else ""
-        msg = (
-            "🤖 <b>Отчет цикла MangaBuff</b>\n"
-            f"⛏️ Руда: <b>{balance:,}</b>{diamonds_str} | ⚡ Энергия: <b>{energy}</b>\n"
-            f"📺 Реклама: <b>{ads_count}/3</b> | 🃏 Карты: <b>{cards_count}</b>\n"
-            f"🏰 Башня: <b>{tower_str}</b>\n"
-            f"💤 Следующее: <b>{next_action}</b> (~{next_wait_min} мин)"
-        )
+    def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min, diamonds=None, chapters_str=None):
+        ore_dia = (balance // 100) if balance else 0
+        dia_part = f" | 💎 Баланс: <b>{diamonds:,}</b>" if diamonds is not None else ""
+
+        msg = "🤖 <b>Отчет цикла MangaBuff</b>\n"
+        msg += f"⛏️ Руда: <b>{balance:,}</b> (≈{ore_dia:,} 💎){dia_part}\n"
+
+        if diamonds is not None:
+            total_dia = diamonds + ore_dia
+            msg += f"💰 Всего капитал: <b>~{total_dia:,} 💎</b> | ⚡ Энергия: <b>{energy}</b>\n"
+        else:
+            msg += f"⚡ Энергия: <b>{energy}</b>\n"
+
+        ch_part = f"📖 Главы: <b>{chapters_str}</b> | " if chapters_str else ""
+        msg += f"{ch_part}📺 Реклама: <b>{ads_count}/3</b> | 🃏 Карты: <b>{cards_count}</b>\n"
+        msg += f"🏰 Башня: <b>{tower_str}</b>\n"
+        msg += f"💤 Следующее: <b>{next_action}</b> (~{next_wait_min} мин)"
         self.send_message(msg)
 
 
