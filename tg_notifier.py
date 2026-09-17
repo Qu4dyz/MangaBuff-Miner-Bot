@@ -316,10 +316,14 @@ class TelegramNotifier:
         )
         self.send_message(msg, silent=True)
 
-    def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None, user_id=None):
+    def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None, user_id=None, card_id=None):
         import urllib.parse
-        encoded_name = urllib.parse.quote(card_name)
-        market_url = f"https://mangabuff.ru/market?search={encoded_name}"
+        # Exact market URL by card_id if available, otherwise fall back to name search
+        if card_id:
+            market_url = f"https://mangabuff.ru/market?card={card_id}"
+        else:
+            encoded_name = urllib.parse.quote(card_name)
+            market_url = f"https://mangabuff.ru/market?search={encoded_name}"
         inventory_url = f"https://mangabuff.ru/users/{user_id}/cards?sort=new" if user_id else None
 
         msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
@@ -334,7 +338,7 @@ class TelegramNotifier:
         if cards_today:
             msg += f"📦 Найдено сегодня: <b>{cards_today}/10</b>\n"
 
-        action_links = [f'💰 <b><a href="{market_url}">Узнать цену на Маркете</a></b>']
+        action_links = [f'💰 <b><a href="{market_url}">Цены на Маркете</a></b>']
         if inventory_url:
             action_links.append(f'🎒 <b><a href="{inventory_url}">В инвентаре</a></b>')
         msg += " | ".join(action_links) + "\n"
