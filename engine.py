@@ -11,7 +11,8 @@ from utils import (
     normalize_proxy_url,
     mask_proxy_url,
     parse_card_cooldown_seconds,
-    get_seconds_until_midnight_msk
+    get_seconds_until_midnight_msk,
+    classify_card_copy_number
 )
 import os
 import random
@@ -55,6 +56,7 @@ class MangaMinerBot:
         self.email, self.password = DataManager.get_credentials()
         self.csrf_token = None
         self.user_agent = None
+        self.user_id = None
         self.current_balance = 0
         self.diamonds_balance = 0
         self.daily_reward_claimed = False
@@ -650,7 +652,25 @@ class MangaMinerBot:
                                     card_img = resp_data.get("image")
                                     cards_gained_session += 1
                                     current_cards = (stats["cards_found"] if stats else 0) + cards_gained_session
-                                    self.log(f"🃏 ВЫПАЛА КАРТА: «{card_name}»! ({current_cards}/10 сегодня)")
+
+                                    # Extract copy number
+                                    copy_num = (
+                                        resp_data.get("copy_number")
+                                        or resp_data.get("copy")
+                                        or resp_data.get("number")
+                                        or (resp_data.get("card", {}).get("copy_number") if isinstance(resp_data.get("card"), dict) else None)
+                                    )
+                                    if not copy_num:
+                                        copy_num = self._fetch_latest_card_copy_number(card_name)
+
+                                    copy_info = classify_card_copy_number(copy_num) if copy_num else None
+
+                                    if copy_info and copy_info.get("copy_number"):
+                                        num_str = f"#{copy_info['copy_number']:06d}" if copy_info['copy_number'] < 1000000 else f"#{copy_info['copy_number']}"
+                                        special_tag = " 🔥 [УНИКАЛЬНЫЙ НОМЕР]" if copy_info.get("is_special") else ""
+                                        self.log(f"🃏 ВЫПАЛА КАРТА: «{card_name}» ({num_str} — «{copy_info['title']}»{special_tag})! ({current_cards}/10 сегодня)")
+                                    else:
+                                        self.log(f"🃏 ВЫПАЛА КАРТА: «{card_name}»! ({current_cards}/10 сегодня)")
 
                                     # Download card preview to send as real photo to Telegram
                                     photo_bytes = None
@@ -663,7 +683,13 @@ class MangaMinerBot:
                                         except Exception as err:
                                             self.log(f"⚠️ Не удалось загрузить превью карты: {err}")
 
-                                    self.notifier.notify_card_dropped(card_name, card_img, current_cards, photo_bytes=photo_bytes)
+                                    self.notifier.notify_card_dropped(
+                                        card_name,
+                                        card_img,
+                                        current_cards,
+                                        photo_bytes=photo_bytes,
+                                        copy_info=copy_info
+                                    )
                                     wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", True)
                                     if wait_card_cd:
                                         if stats and (stats["chapters_read"] + chapters_read_session) >= stats["chapters_max"]:
@@ -708,6 +734,35 @@ class MangaMinerBot:
         except Exception as e:
             self.log(f"⚠️ read_manga_chapters error: {e}")
             return False
+
+    def _fetch_latest_card_copy_number(self, card_name=None):
+        """Fetch the copy number of the newest card in user inventory."""
+        try:
+            if not self.user_id:
+                res_bal = self.session.get("https://mangabuff.ru/balance", timeout=8)
+                if res_bal.status_code == 200:
+                    m = re.search(r'/users/(\d+)', res_bal.text)
+                    if m:
+                        self.user_id = m.group(1)
+
+            if not self.user_id:
+                return None
+
+            cards_url = f"https://mangabuff.ru/users/{self.user_id}/cards?sort=new"
+            res_c = self.session.get(cards_url, timeout=8)
+            if res_c.status_code == 200:
+                soup = BeautifulSoup(res_c.text, "html.parser")
+                items = soup.find_all(class_="manga-cards__item")
+                for item in items[:5]:
+                    c_name = item.get("data-name", "")
+                    c_num = item.get("data-copy-number")
+                    if c_num and (not card_name or (card_name.lower() in c_name.lower() or c_name.lower() in card_name.lower())):
+                        return int(c_num)
+                if items and items[0].get("data-copy-number"):
+                    return int(items[0].get("data-copy-number"))
+        except Exception as e:
+            self.log(f"⚠️ Ошибка получения номера карты из инвентаря: {e}")
+        return None
 
     def check_and_claim_quests(self):
         """Parse all daily quests on /battle and claim any completed unclaimed quests."""

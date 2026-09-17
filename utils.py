@@ -95,3 +95,52 @@ def get_seconds_until_midnight_msk():
     return max(60, int(diff))
 
 
+def classify_card_copy_number(copy_number):
+    """Classify card copy number into MangaBuff's official special number tiers.
+
+    Official categories from MangaBuff frontend (getCardCopyInfo):
+    - #1: «Самая первая»
+    - #2–#10: «Ранний осколок»
+    - #11–#100: «Старший экземпляр»
+    - #404: «Потерянная карта»
+    - 777, 7777...: «Семёрка удачи»
+    - 11, 22, 33, 444, 5555...: «Зеркальный след» (одинаковые цифры)
+    - 123, 1234, 12345...: «Идеальная цепочка» (возрастающая последовательность)
+    - 321, 4321, 54321...: «Обратная цепь» (убывающая последовательность)
+    - 101, 676, 1001, 1221...: «Двойное отражение» (число-палиндром)
+    - Кратные 500, 1000: «Веха коллекции»
+    - Иначе: «Архивный след» (обычный порядковый номер)
+    """
+    try:
+        num = int(copy_number)
+    except (ValueError, TypeError):
+        return None
+    if num <= 0:
+        return None
+
+    num_str = str(num)
+    if num == 1:
+        return {"copy_number": num, "title": "Самая первая", "is_special": True}
+    elif num <= 10:
+        return {"copy_number": num, "title": "Ранний осколок", "is_special": True}
+    elif num <= 100:
+        return {"copy_number": num, "title": "Старший экземпляр", "is_special": True}
+    elif num == 404:
+        return {"copy_number": num, "title": "Потерянная карта", "is_special": True}
+    elif re.match(r"^7+$", num_str):
+        return {"copy_number": num, "title": "Семёрка удачи", "is_special": True}
+    elif re.match(r"^(\d)\1+$", num_str):
+        return {"copy_number": num, "title": "Зеркальный след", "is_special": True}
+    elif len(num_str) >= 3 and num_str in "123456789":
+        return {"copy_number": num, "title": "Идеальная цепочка", "is_special": True}
+    elif len(num_str) >= 3 and num_str in "987654321":
+        return {"copy_number": num, "title": "Обратная цепь", "is_special": True}
+    elif len(num_str) >= 3 and num_str == num_str[::-1]:
+        return {"copy_number": num, "title": "Двойное отражение", "is_special": True}
+    elif num % 500 == 0 or num % 1000 == 0:
+        return {"copy_number": num, "title": "Веха коллекции", "is_special": True}
+    else:
+        return {"copy_number": num, "title": "Архивный след", "is_special": False}
+
+
+

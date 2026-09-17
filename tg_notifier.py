@@ -220,9 +220,16 @@ class TelegramNotifier:
         )
         self.send_message(msg)
 
-    def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None):
+    def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None):
         msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
         msg += f"🃏 Карта: <b>{card_name}</b>\n"
+        if copy_info and copy_info.get("copy_number"):
+            num = copy_info["copy_number"]
+            title = copy_info.get("title", "")
+            is_special = copy_info.get("is_special", False)
+            formatted_num = f"#{num:06d}" if num < 1000000 else f"#{num}"
+            special_fire = " 🔥" if is_special else ""
+            msg += f"🔢 <b>Экземпляр:</b> <code>{formatted_num}</code> (<b>{title}</b>{special_fire})\n"
         if cards_today:
             msg += f"📦 Найдено сегодня: <b>{cards_today}/10</b>\n"
 
