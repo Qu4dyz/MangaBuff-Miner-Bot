@@ -13,7 +13,6 @@ if hasattr(sys.stderr, "reconfigure"):
 from path import BASE_DIR
 from data_management import DataManager
 from engine import MangaMinerBot
-from gui_app import App
 
 USE_CLI_MODE = True  # Set to True to default to CLI mode, False for GUI mode
 
@@ -32,10 +31,16 @@ def main():
     run_gui = args.gui or (not args.cli and not args.status and not USE_CLI_MODE)
 
     if run_gui:
-        print("Starting MangaBuff Miner in GUI mode...")
-        app = App()
-        app.mainloop()
-    else:
+        try:
+            from gui_app import App
+            print("Starting MangaBuff Miner in GUI mode...")
+            app = App()
+            app.mainloop()
+        except (ImportError, ModuleNotFoundError) as e:
+            print(f"⚠️ GUI not supported in headless environment ({e}). Falling back to CLI mode...")
+            run_gui = False
+
+    if not run_gui:
         print("=" * 50)
         print("🤖 MangaBuff Miner — CLI Mode")
         if args.status:
