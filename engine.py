@@ -452,9 +452,12 @@ class MangaMinerBot:
         progress_map = state.get("progress", {})
 
         manga_list = self.get_popular_manga_slugs()
-        manga_idx = state.get("manga_idx", 0)
-        if manga_idx >= len(manga_list):
+        current_manga = state.get("current_manga", "elised")
+        if current_manga in manga_list:
+            manga_idx = manga_list.index(current_manga)
+        else:
             manga_idx = 0
+            current_manga = manga_list[0] if manga_list else "elised"
 
         chapters_read_session = 0
         cards_gained_session = 0
@@ -471,6 +474,9 @@ class MangaMinerBot:
                 res_title = self.session.get(title_url, timeout=10)
                 if res_title.status_code != 200:
                     manga_idx = (manga_idx + 1) % len(manga_list)
+                    state["current_manga"] = manga_list[manga_idx]
+                    state["manga_idx"] = manga_idx
+                    DataManager.save_reading_state(state)
                     continue
 
                 soup_title = BeautifulSoup(res_title.text, "html.parser")
@@ -484,6 +490,39 @@ class MangaMinerBot:
                         ch = float(m.group(2))
                         full_url = href if href.startswith("http") else f"https://mangabuff.ru{href}"
                         ch_links.append((vol, ch, full_url))
+
+                # Load remaining chapters if loaded via AJAX (load-chapters-trigger)
+                manga_el = soup_title.find(class_="manga")
+                manga_id = manga_el.get("data-id") if manga_el else None
+                if manga_id and soup_title.find(class_="load-chapters-trigger"):
+                    try:
+                        load_headers = {
+                            "Accept": "*/*",
+                            "X-CSRF-TOKEN": self.csrf_token,
+                            "X-Requested-With": "XMLHttpRequest",
+                            "Referer": title_url
+                        }
+                        load_res = self.session.post(
+                            "https://mangabuff.ru/chapters/load",
+                            data={"manga_id": manga_id},
+                            headers=load_headers,
+                            timeout=10
+                        )
+                        if load_res.status_code == 200:
+                            load_data = load_res.json()
+                            content = load_data.get("content", "")
+                            if content:
+                                soup_more = BeautifulSoup(content, "html.parser")
+                                for a in soup_more.find_all("a", href=True):
+                                    href = a["href"]
+                                    m = pattern.search(href)
+                                    if m:
+                                        vol = int(m.group(1))
+                                        ch = float(m.group(2))
+                                        full_url = href if href.startswith("http") else f"https://mangabuff.ru{href}"
+                                        ch_links.append((vol, ch, full_url))
+                    except Exception:
+                        pass
 
                 # Deduplicate and sort chronologically by (volume, chapter)
                 ch_links = sorted(list(set(ch_links)), key=lambda x: (x[0], x[1]))
@@ -505,6 +544,9 @@ class MangaMinerBot:
                 if not unread_chapters:
                     # All chapters of this manga completed, advance to next title
                     manga_idx = (manga_idx + 1) % len(manga_list)
+                    state["current_manga"] = manga_list[manga_idx]
+                    state["manga_idx"] = manga_idx
+                    DataManager.save_reading_state(state)
                     continue
 
                 for vol, ch, ch_url in unread_chapters:
@@ -576,8 +618,9 @@ class MangaMinerBot:
 
                         # Handle rate limit (429) backoff
                         if post_res.status_code == 429:
-                            retry_after = int(post_res.headers.get("Retry-After", 4))
-                            time.sleep(retry_after + 1)
+                            retry_after = int(post_res.headers.get("Retry-After", 10))
+                            self.log(f"⏳ Лимит запросов (429): ждем {retry_after + 2}с перед повторной отправкой...")
+                            time.sleep(retry_after + 2)
                             post_res = self.session.post(
                                 "https://mangabuff.ru/addHistory?r=702",
                                 data=payload,
@@ -591,6 +634,7 @@ class MangaMinerBot:
                                 read_history.add(b["url"])
                                 progress_map[b["slug"]] = {"vol": b["vol"], "ch": b["ch"]}
 
+                            state["current_manga"] = current_slug
                             state["manga_idx"] = manga_idx
                             state["progress"] = progress_map
                             state["history"] = list(read_history)[-2000:]
@@ -637,8 +681,11 @@ class MangaMinerBot:
 
                             self.log(tr("log_reading_batch", count=chapters_read_session, current=chapters_read_session, total=target_count))
 
+                        else:
+                            self.log(f"⚠️ Ошибка отправки истории (HTTP {post_res.status_code})")
                         buffer.clear()
 
+            state["current_manga"] = manga_list[manga_idx % len(manga_list)]
             state["manga_idx"] = manga_idx
             state["progress"] = progress_map
             state["history"] = list(read_history)[-2000:]
