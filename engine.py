@@ -5,7 +5,14 @@ from bs4 import BeautifulSoup
 from config import CONFIG, TARGET_RARITIES, BASE_DIR
 import re
 import json
-from utils import parse_smart_number, safe_cookies_to_dict, normalize_proxy_url, mask_proxy_url
+from utils import (
+    parse_smart_number,
+    safe_cookies_to_dict,
+    normalize_proxy_url,
+    mask_proxy_url,
+    parse_card_cooldown_seconds,
+    get_seconds_until_midnight_msk
+)
 import os
 import random
 import time
@@ -346,11 +353,13 @@ class MangaMinerBot:
                 self.log(tr("log_reading_limit_reached", chapters=stats["chapters_read"], cards=stats["cards_found"]))
             return
 
-        delay_min = float(DataManager.get_setting("reading_delay_min", 10.0))
-        delay_max = float(DataManager.get_setting("reading_delay_max", 18.0))
+        delay_min = float(DataManager.get_setting("reading_delay_min", 18.0))
+        delay_max = float(DataManager.get_setting("reading_delay_max", 32.0))
 
         state = DataManager.load_reading_state() or {}
         read_history = set(state.get("history", []))
+        progress_map = state.get("progress", {})
+
         manga_list = state.get("manga_list") or [
             "slabeishii-geroi",
             "mech-razyashchego-groma",
@@ -360,15 +369,35 @@ class MangaMinerBot:
             "nachalo-posle-konca",
             "podnyatie-urovnya-v-odinochku",
             "ubijca-drakonov",
-            "svinarnik"
+            "svinarnik",
+            "eleceed",
+            "vozvrashenie-velikogo-mudreca-posle-4000-let",
+            "oruzheinyi-baron",
+            "ya-obnovil-svoi-navyki-do-maksimuma",
+            "ubijca-geroev",
+            "mag-kotoryi-poglyotil-drakona",
+            "voshozhdenie-v-tenyax",
+            "vysshii-mag",
+            "magicheskii-imperator",
+            "pirat-sudby",
+            "doktor-drevnih-vremen",
+            "master-magii",
+            "reinkarnaciya-bezrabotnogo",
+            "chernyi-klever",
+            "chelovek-benzopila",
+            "klinok-rassekajushij-demonov",
+            "magicheskaya-bitva",
+            "semya-shpiona",
+            "adskiy-ray",
+            "monstr-nomer-vosem",
+            "kaiju-no-8",
+            "bluelock"
         ]
         manga_idx = state.get("manga_idx", 0)
 
         chapters_read_session = 0
         cards_gained_session = 0
         scrolls_gained_session = 0
-        current_server_read = stats["chapters_read"] if stats else 0
-        stagnant_batches = 0
         buffer = []
 
         try:
@@ -395,9 +424,25 @@ class MangaMinerBot:
                         full_url = href if href.startswith("http") else f"https://mangabuff.ru{href}"
                         ch_links.append((vol, ch, full_url))
 
+                # Deduplicate and sort chronologically by (volume, chapter)
                 ch_links = sorted(list(set(ch_links)), key=lambda x: (x[0], x[1]))
-                unread_chapters = [item for item in ch_links if item[2] not in read_history]
+
+                # Check saved sequential progress for this manga
+                prog = progress_map.get(current_slug, {})
+                last_v = prog.get("vol", 0)
+                last_c = prog.get("ch", 0)
+
+                # Prioritize chapters strictly after our last read chapter
+                unread_chapters = [
+                    item for item in ch_links
+                    if item[2] not in read_history and (item[0] > last_v or (item[0] == last_v and item[1] > last_c))
+                ]
+                # Fallback to any unread chapter in this title
                 if not unread_chapters:
+                    unread_chapters = [item for item in ch_links if item[2] not in read_history]
+
+                if not unread_chapters:
+                    # All chapters of this manga completed, advance to next title
                     manga_idx += 1
                     continue
 
@@ -427,7 +472,9 @@ class MangaMinerBot:
                     if meta_csrf and meta_csrf.get("content"):
                         self.csrf_token = meta_csrf.get("content")
 
+                    # Humanized reading delay (simulates page-turning and reading time)
                     delay = random.uniform(delay_min, delay_max)
+                    self.log(f"📖 Читаем «{current_slug}» (т.{vol} гл.{ch})... имитация чтения ({delay:.0f}с)")
                     for _ in range(int(delay * 4)):
                         if not self.running:
                             break
@@ -439,9 +486,13 @@ class MangaMinerBot:
                     buffer.append({
                         "manga_id": manga_id,
                         "chapter_id": chapter_id,
-                        "url": ch_url
+                        "url": ch_url,
+                        "vol": vol,
+                        "ch": ch,
+                        "slug": current_slug
                     })
 
+                    # Batch submit (every 1-2 chapters)
                     if len(buffer) >= 2 or (chapters_read_session + len(buffer)) >= target_count:
                         payload = {}
                         for bi, b_item in enumerate(buffer):
@@ -462,7 +513,7 @@ class MangaMinerBot:
                             timeout=10
                         )
 
-                        # Handle rate limit (429)
+                        # Handle rate limit (429) backoff
                         if post_res.status_code == 429:
                             retry_after = int(post_res.headers.get("Retry-After", 4))
                             time.sleep(retry_after + 1)
@@ -474,74 +525,64 @@ class MangaMinerBot:
                             )
 
                         if post_res.status_code == 200:
+                            chapters_read_session += len(buffer)
                             for b in buffer:
                                 read_history.add(b["url"])
+                                progress_map[b["slug"]] = {"vol": b["vol"], "ch": b["ch"]}
+
+                            state["manga_idx"] = manga_idx
+                            state["progress"] = progress_map
+                            state["history"] = list(read_history)[-2000:]
+                            DataManager.save_reading_state(state)
 
                             # Parse drop responses
                             try:
                                 resp_data = post_res.json()
-                                if isinstance(resp_data, dict) and resp_data.get("image") and resp_data.get("name"):
-                                    card_name = resp_data["name"]
+                                if isinstance(resp_data, dict) and resp_data.get("name"):
+                                    card_name = resp_data.get("name")
                                     card_img = resp_data.get("image")
                                     cards_gained_session += 1
                                     current_cards = (stats["cards_found"] if stats else 0) + cards_gained_session
-                                    self.log(tr("log_reading_card", name=card_name))
+                                    self.log(f"🃏 ВЫПАЛА КАРТА: «{card_name}»! ({current_cards}/10 сегодня)")
                                     self.notifier.notify_card_dropped(card_name, card_img, current_cards)
-                                    wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", False)
+                                    wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", True)
                                     if wait_card_cd:
                                         self.log("🎁 Бонусная карта получена! Кулдаун активирован (~45–60 мин). Остановка чтения для экономии глав.")
                                         buffer.clear()
-                                        return
+                                        return True
 
                                 if isinstance(resp_data, dict) and resp_data.get("scroll"):
                                     scroll_name = resp_data.get("scroll", "Свиток заточки")
                                     scrolls_gained_session += 1
-                                    self.log(tr("log_reading_scroll", name=scroll_name))
+                                    self.log(f"📜 ВЫПАЛ СВИТОК: «{scroll_name}»!")
                                     self.notifier.notify_scroll_dropped(scroll_name, resp_data.get("rank"))
                             except Exception:
                                 pass
 
-                            # Verify progress with actual server count from /balance
-                            fresh_stats = self.get_reading_stats()
-                            if fresh_stats:
-                                new_read = fresh_stats["chapters_read"]
-                                if new_read > current_server_read:
-                                    chapters_read_session += (new_read - current_server_read)
-                                    current_server_read = new_read
-                                    stagnant_batches = 0
-                                    self.log(tr("log_reading_batch", count=chapters_read_session, current=new_read, total=75))
-                                else:
-                                    stagnant_batches += 1
-                                    if stagnant_batches >= 2:
-                                        self.log(f"ℹ️ Главы «{current_slug}» уже прочитаны на аккаунте. Переключаемся на следующий тайтл...")
-                                        manga_idx += 1
-                                        buffer.clear()
-                                        break
-                            else:
-                                chapters_read_session += len(buffer)
-
-                            state["manga_idx"] = manga_idx
-                            state["history"] = list(read_history)[-1000:]
-                            DataManager.save_reading_state(state)
+                            self.log(tr("log_reading_batch", count=chapters_read_session, current=chapters_read_session, total=target_count))
 
                         buffer.clear()
 
             state["manga_idx"] = manga_idx
-            state["history"] = list(read_history)[-1000:]
+            state["progress"] = progress_map
+            state["history"] = list(read_history)[-2000:]
             DataManager.save_reading_state(state)
 
             if chapters_read_session > 0:
                 final_stats = self.get_reading_stats()
                 final_today = final_stats["chapters_read"] if final_stats else None
                 self.log(tr("log_reading_summary", chapters=chapters_read_session, cards=cards_gained_session))
-                self.notifier.notify_reading_summary(
-                    chapters_read_session,
-                    total_today=final_today,
-                    cards_gained=cards_gained_session,
-                    scrolls_gained=scrolls_gained_session
-                )
+                if cards_gained_session > 0 or scrolls_gained_session > 0:
+                    self.notifier.notify_reading_summary(
+                        chapters_read_session,
+                        total_today=final_today,
+                        cards_gained=cards_gained_session,
+                        scrolls_gained=scrolls_gained_session
+                    )
+            return False
         except Exception as e:
             self.log(f"⚠️ read_manga_chapters error: {e}")
+            return False
 
     def check_and_claim_quests(self):
         """Parse all daily quests on /battle and claim any completed unclaimed quests."""
@@ -791,18 +832,22 @@ class MangaMinerBot:
                             dur_hours = duration_mins // 60
                             self.log(tr("log_tower_started", diff=difficulty.capitalize(), dur=dur_hours))
                             self.notifier.notify_tower_started(difficulty.capitalize(), dur_hours, ends_at)
-                            return
+                            return duration_mins * 60
                         except Exception:
-                            pass
+                            return duration_mins * 60
                     else:
                         self.log(f"⚠️ Tower start failed with status {start_res.status_code}")
+                        return 3600
                 else:
                     self.log("ℹ️ No cards selected for Tower expedition. Please select squad in browser once.")
+                    return 3600
             else:
                 self.log(tr("log_tower_running", left=time_str))
+                return remaining_seconds
 
         except Exception as e:
             self.log(f"⚠️ Tower error: {e}")
+            return 3600
 
     def start_battle(self):
         """POST to the matchmaking endpoint; return redirect_url or error code."""
@@ -1322,6 +1367,125 @@ class MangaMinerBot:
 
         self.running = False
         self.log(tr("log_mining_finish"))
+
+    def run_daemon(self):
+        """Smart event-driven scheduler daemon. Runs 24/7, sleeping until the earliest event."""
+        self.running = True
+        self.log("🚀 MangaBuff Miner — Запуск автономного Smart Daemon (24/7)")
+
+        # Validate session at start
+        if not self.validate_session() or not self._validate_session_with_server():
+            if not self.login_and_steal_keys():
+                self.log("❌ Первоначальная авторизация не удалась. Остановка демона.")
+                self.running = False
+                return
+
+        if self.auth_log_buffer:
+            header = tr("log_startup_header")
+            body = "🔸 " + "\n🔸 ".join(self.auth_log_buffer)
+            self.log(header + body)
+            self.auth_log_buffer.clear()
+
+        # Claim daily login reward if ready
+        self.claim_daily_reward()
+
+        while self.running:
+            try:
+                # 1. Mining & Energy check
+                energy = 0
+                res_game = self.session.get(CONFIG["urls"]["game"], timeout=10)
+                if res_game.status_code == 200:
+                    e_cls = CONFIG["selectors"]["energy_class"]
+                    hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', res_game.text)
+                    if hits_match:
+                        energy = parse_smart_number(hits_match.group(1))
+                elif res_game.status_code in (401, 419):
+                    self.login_and_steal_keys()
+
+                if energy >= 15:
+                    self.log(f"⚡ Накопилась энергия ({energy}). Запуск добычи руды и боев...")
+                    self._run_mining()
+                    if self.running:
+                        self.run_farm_loop()
+                    self.auto_upgrade_pickaxe()
+                    self.check_and_claim_quests()
+
+                # 2. Daily Ads check (3x7 💎)
+                if self.running and DataManager.get_setting("ads_enabled", True):
+                    self.watch_daily_ads()
+
+                # 3. Abyss Tower check (claim rewards & restart 12h)
+                tower_left_sec = 86400
+                if self.running and DataManager.get_setting("tower_enabled", True):
+                    t_sec = self.check_tower_expedition()
+                    if t_sec is not None:
+                        tower_left_sec = max(60, t_sec)
+
+                # 4. Manga Reading check (cards & 75-chapter quest)
+                card_wait_sec = 60 * 45
+                if self.running and DataManager.get_setting("reading_enabled", True):
+                    reading_stats = self.get_reading_stats()
+                    if reading_stats:
+                        cards_found = reading_stats.get("cards_found", 0)
+                        cards_max = reading_stats.get("cards_max", 10)
+                        card_ready = reading_stats.get("card_ready", False)
+                        cd_str = reading_stats.get("card_cooldown") or ""
+
+                        if cards_found >= cards_max:
+                            # 10/10 cards reached for today! Wait until midnight MSK
+                            card_wait_sec = get_seconds_until_midnight_msk()
+                        elif card_ready:
+                            self.log(f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! Читаем главы...")
+                            self.read_manga_chapters(target_count=10)
+                            # After reading, re-evaluate cooldown
+                            fresh_r = self.get_reading_stats()
+                            if fresh_r:
+                                if not fresh_r.get("card_ready", True):
+                                    card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
+                                else:
+                                    card_wait_sec = 60
+                        else:
+                            card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
+
+                # 5. Energy recovery wait estimation (1 energy per ~3.5 min, target 15 = ~50 min)
+                mine_wait_sec = 60 * 50 if energy < 15 else 60
+
+                # 6. Ads wait (resets at midnight MSK)
+                ads_wait_sec = get_seconds_until_midnight_msk()
+
+                candidates = [
+                    ("Карта", card_wait_sec),
+                    ("Шахта", mine_wait_sec),
+                    ("Башня", tower_left_sec),
+                    ("Реклама", ads_wait_sec)
+                ]
+                positive = [(name, s) for name, s in candidates if s > 0]
+                if not positive:
+                    next_name, sleep_sec = "Повторная проверка", 60
+                else:
+                    next_name, sleep_sec = min(positive, key=lambda x: x[1])
+
+                # Bounded sleep: at least 60s, max 7200s (2h)
+                sleep_sec = max(60, min(sleep_sec, 7200))
+                # Add human jitter (+15..45s)
+                sleep_sec += random.randint(15, 45)
+
+                w_m = sleep_sec // 60
+                w_s = sleep_sec % 60
+                self.log(f"💤 Все задачи проверены. Ближайшее действие: {next_name} (~{w_m} мин {w_s} сек). Ухожу в сон.")
+
+                # Non-blocking sleep: checks self.running every 1 sec
+                for _ in range(int(sleep_sec)):
+                    if not self.running:
+                        break
+                    time.sleep(1)
+
+            except Exception as e:
+                self.log(f"⚠️ Ошибка в Daemon цикле: {e}")
+                for _ in range(30):
+                    if not self.running:
+                        break
+                    time.sleep(1)
 
     def _validate_session_with_server(self):
         """Make a lightweight GET request to verify the session is still valid."""

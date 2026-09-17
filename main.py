@@ -22,13 +22,14 @@ def main():
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="MangaBuff Miner Bot")
-    parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
+    parser.add_argument("--cli", action="store_true", help="Run in CLI mode (single run)")
+    parser.add_argument("--daemon", action="store_true", help="Run in autonomous 24/7 Smart Daemon mode")
     parser.add_argument("--gui", action="store_true", help="Run in GUI mode")
     parser.add_argument("--status", action="store_true", help="Check status and exit")
     parser.add_argument("--proxy", type=str, default=None, help="Proxy (ip:port:user:pass or http://user:pass@ip:port)")
     args = parser.parse_args()
 
-    run_gui = args.gui or (not args.cli and not args.status and not USE_CLI_MODE)
+    run_gui = args.gui or (not args.cli and not args.status and not args.daemon and not USE_CLI_MODE)
 
     if run_gui:
         try:
@@ -42,9 +43,12 @@ def main():
 
     if not run_gui:
         print("=" * 50)
-        print("🤖 MangaBuff Miner — CLI Mode")
-        if args.status:
-            print("📊 Checking Account Status...")
+        if args.daemon:
+            print("🤖 MangaBuff Miner — Smart Daemon Mode (24/7)")
+        elif args.status:
+            print("📊 MangaBuff Miner — Checking Account Status...")
+        else:
+            print("🤖 MangaBuff Miner — CLI Mode (Single Run)")
         print("=" * 50)
 
         email, pwd = DataManager.get_credentials()
@@ -76,6 +80,8 @@ def main():
         )
         if args.status:
             bot.check_status_only()
+        elif args.daemon:
+            bot.run_daemon()
         else:
             bot.run()
 

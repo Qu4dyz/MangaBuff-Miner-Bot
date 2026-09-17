@@ -70,3 +70,28 @@ def mask_proxy_url(proxy_url):
         return ""
     return re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", proxy_url)
 
+
+def parse_card_cooldown_seconds(text):
+    """Parse cooldown duration in seconds from text like '61 мин', '1 ч 20 мин', etc."""
+    if not text:
+        return 0
+    total = 0
+    m_h = re.search(r"(\d+)\s*(?:ч|час)", text, re.IGNORECASE)
+    if m_h:
+        total += int(m_h.group(1)) * 3600
+    m_m = re.search(r"(\d+)\s*(?:м|мин)", text, re.IGNORECASE)
+    if m_m:
+        total += int(m_m.group(1)) * 60
+    return total if total > 0 else 60
+
+
+def get_seconds_until_midnight_msk():
+    """Calculate remaining seconds until next 00:00:10 MSK (UTC+3 daily reset)."""
+    from datetime import datetime, timezone, timedelta
+    msk_offset = timezone(timedelta(hours=3))
+    now_msk = datetime.now(msk_offset)
+    next_reset = (now_msk + timedelta(days=1)).replace(hour=0, minute=0, second=10, microsecond=0)
+    diff = (next_reset - now_msk).total_seconds()
+    return max(60, int(diff))
+
+
