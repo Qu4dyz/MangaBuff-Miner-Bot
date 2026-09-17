@@ -209,10 +209,11 @@ class TelegramNotifier:
         msg = f"⚠️ <b>Внимание: {title}</b>\n{detail}"
         self.send_message(msg)
 
-    def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min):
+    def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min, diamonds=None):
+        diamonds_str = f" | 💎 Алмазы: <b>{diamonds:,}</b>" if diamonds is not None else ""
         msg = (
             "🤖 <b>Отчет цикла MangaBuff</b>\n"
-            f"⚡ Энергия: <b>{energy}</b> | 💎 Баланс: <b>{balance:,}</b>\n"
+            f"⛏️ Руда: <b>{balance:,}</b>{diamonds_str} | ⚡ Энергия: <b>{energy}</b>\n"
             f"📺 Реклама: <b>{ads_count}/3</b> | 🃏 Карты: <b>{cards_count}</b>\n"
             f"🏰 Башня: <b>{tower_str}</b>\n"
             f"💤 Следующее: <b>{next_action}</b> (~{next_wait_min} мин)"

@@ -56,6 +56,9 @@ class MangaMinerBot:
         self.csrf_token = None
         self.user_agent = None
         self.current_balance = 0
+        self.diamonds_balance = 0
+        self.daily_reward_claimed = False
+        self._last_claimed_date = None
 
     def validate_session(self):
         data = DataManager.load_session()
@@ -142,6 +145,13 @@ class MangaMinerBot:
 
     def claim_daily_reward(self):
         """Claim the daily login reward from /balance page."""
+        from datetime import datetime, timezone, timedelta
+        msk_today = datetime.now(timezone(timedelta(hours=3))).date()
+        if self._last_claimed_date != msk_today:
+            self.daily_reward_claimed = False
+        if self.daily_reward_claimed:
+            return
+
         try:
             claim_url = self._find_active_claim_url()
             if not claim_url:
@@ -168,8 +178,12 @@ class MangaMinerBot:
 
             if claim_res.status_code == 422:               
                 _log_reward("ℹ️ Ежедневная награда уже была забрана сегодня.")
+                self.daily_reward_claimed = True
+                self._last_claimed_date = msk_today
             elif claim_res.status_code == 200:                    
                 msg = "✅ Ежедневная награда успешно получена!"
+                self.daily_reward_claimed = True
+                self._last_claimed_date = msk_today
                 try:
                     res_json = claim_res.json()
                     if isinstance(res_json, dict) and res_json.get("message"):
@@ -1403,9 +1417,6 @@ class MangaMinerBot:
             self.log(header + body)
             self.auth_log_buffer.clear()
 
-        # Claim daily login reward if ready
-        self.claim_daily_reward()
-
         while self.running:
             try:
                 # 0. Check and claim daily calendar reward (cards, scrolls, ore)
@@ -1419,6 +1430,11 @@ class MangaMinerBot:
                     hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', res_game.text)
                     if hits_match:
                         energy = parse_smart_number(hits_match.group(1))
+
+                    b_cls = CONFIG["selectors"]["balance_class"]
+                    ore_match = re.search(f'class="[^"]*{b_cls}[^"]*">\\s*([\\d\\.\\s,kKmM]+)\\s*<', res_game.text)
+                    if ore_match:
+                        self.current_balance = parse_smart_number(ore_match.group(1))
                 elif res_game.status_code in (401, 419):
                     self.login_and_steal_keys()
 
@@ -1437,9 +1453,16 @@ class MangaMinerBot:
                     try:
                         res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
                         if res_bal_check.status_code == 200:
-                            btn = BeautifulSoup(res_bal_check.text, "html.parser").find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
+                            soup_bal = BeautifulSoup(res_bal_check.text, "html.parser")
+                            btn = soup_bal.find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
                             if btn:
                                 ads_cnt = int(btn.get("data-count", 0))
+
+                            dia_el = soup_bal.find(class_="menu__balance")
+                            if dia_el:
+                                m_dia = re.search(r"([\d\s]+)", dia_el.get_text())
+                                if m_dia:
+                                    self.diamonds_balance = parse_smart_number(m_dia.group(1))
                     except Exception:
                         pass
 
@@ -1463,6 +1486,7 @@ class MangaMinerBot:
                         if cards_found >= cards_max:
                             # 10/10 cards reached for today! Wait until midnight MSK
                             card_wait_sec = get_seconds_until_midnight_msk()
+                            self.log(f"🃏 Все бонусные карты за сегодня собраны ({cards_found}/{cards_max}). Ожидание сброса в полночь.")
                         elif card_ready:
                             self.log(f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! Читаем главы...")
                             self.read_manga_chapters(target_count=10)
@@ -1475,9 +1499,10 @@ class MangaMinerBot:
                                     card_wait_sec = 60
                         else:
                             card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
+                            self.log(f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). Следующая проверка через ~{card_wait_sec // 60} мин.")
 
-                # 5. Energy recovery wait estimation (1 energy per ~3.5 min, target 15 = ~50 min)
-                mine_wait_sec = 60 * 50 if energy < 15 else 60
+                # 5. Mine wait: energy is once per day at 00:00:10 MSK!
+                mine_wait_sec = get_seconds_until_midnight_msk() if energy < 15 else 60
 
                 # 6. Ads wait (resets at midnight MSK if all 3 watched, else short retry)
                 ads_wait_sec = get_seconds_until_midnight_msk() if ads_cnt >= 3 else 120
@@ -1516,7 +1541,8 @@ class MangaMinerBot:
                     cards_count=cards_cnt_str,
                     tower_str=tower_str,
                     next_action=next_name,
-                    next_wait_min=w_m
+                    next_wait_min=w_m,
+                    diamonds=self.diamonds_balance
                 )
 
                 # Non-blocking sleep: checks self.running every 1 sec
