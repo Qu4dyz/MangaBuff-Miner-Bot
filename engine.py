@@ -357,6 +357,155 @@ class MangaMinerBot:
             print(f"get_reading_stats exception: {e}")
             return None
 
+    def check_trade_offers(self):
+        """
+        Check for incoming trade proposals on MangaBuff.
+        1. Checks /notifications?type=trade and /trades.
+        2. Retrieves trade preview JSON (initiator, give cards, receive cards).
+        3. Sends Telegram alert with details and direct link.
+        """
+        try:
+            trades_found = []
+
+            # Check /notifications?type=trade
+            res_notif = self.session.get("https://mangabuff.ru/notifications?type=trade", timeout=10)
+            if res_notif.status_code == 200:
+                soup_n = BeautifulSoup(res_notif.text, "html.parser")
+                for item in soup_n.select(".notifications__item"):
+                    trade_btn = item.select_one(".js-notification-trade-open") or item.select_one("[data-trade-id]")
+                    trade_id = trade_btn.get("data-trade-id") if trade_btn else None
+                    if not trade_id:
+                        link = item.find("a", href=re.compile(r"/trades/(\d+)"))
+                        if link:
+                            m = re.search(r"/trades/(\d+)", link.get("href", ""))
+                            if m:
+                                trade_id = m.group(1)
+                    if trade_id and str(trade_id) not in trades_found:
+                        trades_found.append(str(trade_id))
+
+            # Also check /trades page directly
+            try:
+                res_trades = self.session.get("https://mangabuff.ru/trades", timeout=10)
+                if res_trades.status_code == 200 and "Предложений нет" not in res_trades.text:
+                    soup_t = BeautifulSoup(res_trades.text, "html.parser")
+                    for a in soup_t.find_all("a", href=re.compile(r"/trades/(\d+)")):
+                        m = re.search(r"/trades/(\d+)", a.get("href", ""))
+                        if m:
+                            tid = m.group(1)
+                            if tid not in trades_found:
+                                trades_found.append(tid)
+            except Exception:
+                pass
+
+            notified_list = DataManager.get_setting("notified_trade_ids", [])
+            notified_set = set(str(x) for x in notified_list)
+            new_trades = [tid for tid in trades_found if tid not in notified_set]
+
+            for tid in new_trades:
+                try:
+                    preview_res = self.session.get(f"https://mangabuff.ru/trades/{tid}/preview", timeout=10)
+                    if preview_res.status_code == 200:
+                        pdata = preview_res.json()
+                        user_name = pdata.get("other_user", {}).get("name", "Пользователь")
+                        recv_cards = [c.get("name") for c in pdata.get("receive_cards", []) if c.get("name")]
+                        give_cards = [c.get("name") for c in pdata.get("give_cards", []) if c.get("name")]
+                        self.notifier.notify_trade_offer(tid, user_name, recv_cards, give_cards)
+                        self.log(f"🤝 Обнаружено предложение обмена #{tid} от {user_name}! Отправлено в Telegram.")
+                    else:
+                        self.notifier.notify_trade_offer(tid, "Пользователь")
+                        self.log(f"🤝 Обнаружено предложение обмена #{tid}! Отправлено в Telegram.")
+                    notified_set.add(tid)
+                except Exception as ex:
+                    self.log(f"⚠️ Ошибка получения информации об обмене #{tid}: {ex}")
+
+            if new_trades:
+                DataManager.set_setting("notified_trade_ids", list(notified_set))
+
+            return trades_found
+        except Exception as e:
+            self.log(f"⚠️ Ошибка проверки предложений обмена: {e}")
+            return []
+
+    def clean_unwanted_notifications(self, active_trade_ids=None):
+        """
+        Automatically delete unwanted MangaBuff notifications (new cards, animated cards, new chapters, etc.)
+        Preserves active trade proposals.
+        """
+        if not DataManager.get_setting("notifs_cleaner_enabled", True):
+            return 0
+
+        try:
+            res = self.session.get("https://mangabuff.ru/notifications", timeout=10)
+            if res.status_code != 200:
+                return 0
+
+            soup = BeautifulSoup(res.text, "html.parser")
+            items = soup.select(".notifications__item")
+            if not items:
+                return 0
+
+            trade_notif_ids = set()
+            unwanted_notif_ids = []
+
+            for item in items:
+                notif_id = item.get("data-id")
+                if not notif_id:
+                    continue
+
+                is_trade = bool(
+                    item.select_one(".js-notification-trade-open") or
+                    item.select_one("[data-trade-id]") or
+                    item.find("a", href=re.compile(r"/trades/\d+")) or
+                    "обмен" in item.get_text().lower()
+                )
+
+                if is_trade:
+                    trade_notif_ids.add(notif_id)
+                else:
+                    unwanted_notif_ids.append(notif_id)
+
+            # If there are no trade notifications on the page, use bulk clear endpoint
+            if not trade_notif_ids:
+                clear_res = self.session.post(
+                    "https://mangabuff.ru/notifications/clear",
+                    data={"_method": "delete", "type": "all"},
+                    headers={"X-Requested-With": "XMLHttpRequest"},
+                    timeout=10
+                )
+                if clear_res.status_code == 200:
+                    cleaned_count = len(items)
+                    self.log(f"🧹 Очищено уведомлений на MangaBuff: {cleaned_count} шт. (все не нужные удалены)")
+                    return cleaned_count
+
+            # If trade notifications exist, delete only unwanted ones individually
+            deleted_count = 0
+            for uid in unwanted_notif_ids:
+                try:
+                    del_res = self.session.post(
+                        f"https://mangabuff.ru/notifications/{uid}",
+                        data={"_method": "delete"},
+                        headers={"X-Requested-With": "XMLHttpRequest"},
+                        timeout=5
+                    )
+                    if del_res.status_code == 200:
+                        deleted_count += 1
+                    time.sleep(0.15)
+                except Exception:
+                    pass
+
+            if deleted_count > 0:
+                self.log(f"🧹 Очищено не нужных уведомлений на MangaBuff: {deleted_count} шт. (предложения обмена сохранены)")
+            return deleted_count
+
+        except Exception as e:
+            self.log(f"⚠️ Ошибка очистки уведомлений MangaBuff: {e}")
+            return 0
+
+    def process_mangabuff_notifications(self):
+        """Parse notifications tab for trade offers and clean unwanted site notifications."""
+        active_trades = self.check_trade_offers()
+        return self.clean_unwanted_notifications(active_trade_ids=active_trades)
+
     def get_popular_manga_slugs(self):
         """Fetch top manga slugs dynamically from /manga/top with verified fallback."""
         verified = [
@@ -1508,6 +1657,9 @@ class MangaMinerBot:
         # Claim daily reward
         self.claim_daily_reward()
 
+        # Check trade proposals & clean unwanted MangaBuff notifications
+        self.process_mangabuff_notifications()
+
         if self.auth_log_buffer:
             header = tr("log_startup_header")
             body = "🔸 " + "\n🔸 ".join(self.auth_log_buffer)
@@ -1562,6 +1714,9 @@ class MangaMinerBot:
             try:
                 # 0. Check and claim daily calendar reward (cards, scrolls, ore)
                 self.claim_daily_reward()
+
+                # Check for incoming trade proposals & clean unwanted site notifications
+                self.process_mangabuff_notifications()
 
                 # 1. Mining & Energy check
                 energy = 0
@@ -1673,6 +1828,9 @@ class MangaMinerBot:
                         else:
                             card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
                             self.log(f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). Следующая проверка через ~{card_wait_sec // 60} мин.")
+
+                # Clean up site notifications after reading (card drops, new chapters, etc.)
+                self.process_mangabuff_notifications()
 
                 # 5. Mine wait: energy is once per day at 00:00:10 MSK!
                 mine_wait_sec = get_seconds_until_midnight_msk() if energy < 15 else 60

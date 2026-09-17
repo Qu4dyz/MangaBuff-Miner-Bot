@@ -265,6 +265,19 @@ class TelegramNotifier:
         )
         self.send_message(msg, silent=True)
 
+    def notify_trade_offer(self, trade_id, user_name="Пользователь", receive_cards=None, give_cards=None):
+        msg = "🤝 <b>Новое предложение обмена на MangaBuff!</b>\n"
+        if user_name:
+            msg += f"👤 <b>Пользователь:</b> <code>{user_name}</code>\n"
+        if receive_cards:
+            cards_str = ", ".join(receive_cards)
+            msg += f"📥 <b>Вы получите ({len(receive_cards)}):</b> <i>{cards_str}</i>\n"
+        if give_cards:
+            cards_str = ", ".join(give_cards)
+            msg += f"📤 <b>Вы отдадите ({len(give_cards)}):</b> <i>{cards_str}</i>\n"
+        msg += f'🔗 <a href="https://mangabuff.ru/trades/{trade_id}">Открыть обмен на сайте</a>'
+        self.send_message(msg, disable_preview=True)
+
     def notify_jackpot(self, card_rarity, card_title=None):
         msg = (
             "🔥 <b>ДЖЕКПОТ! ВЫПАЛА РЕДКАЯ КАРТА!</b> 🔥\n"
