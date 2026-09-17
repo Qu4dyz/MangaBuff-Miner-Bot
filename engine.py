@@ -470,19 +470,25 @@ class MangaMinerBot:
                 if is_trade:
                     continue
 
-                # 3. IDENTIFY UNWANTED: card drops, animated cards, card announcements
-                is_junk_card_notif = any(k in item_text for k in [
+                # 3. PRESERVE CARD DROPS: User wants card drop notifications preserved on MangaBuff to check market prices
+                is_card_drop = any(k in item_text for k in [
                     "получили новую карту",
                     "вы получили карту",
-                    "новая карта",
-                    "новую карту",
+                    "вам выпала карта",
+                    "выпала карта",
+                    "получена карта"
+                ])
+                if is_card_drop:
+                    continue
+
+                # 4. IDENTIFY UNWANTED PROMO SPAM: animated card advertisements, announcements
+                is_junk_promo = any(k in item_text for k in [
                     "анимированн",
                     "анимированная",
-                    "карточки",
-                    "карточка"
+                    "добавлена анимированная"
                 ])
 
-                if is_junk_card_notif:
+                if is_junk_promo:
                     unwanted_notif_ids.append(notif_id)
 
             # Delete only the identified unwanted items individually (leaving chapters & trades 100% untouched)
@@ -817,8 +823,12 @@ class MangaMinerBot:
                                         or resp_data.get("number")
                                         or (resp_data.get("card", {}).get("copy_number") if isinstance(resp_data.get("card"), dict) else None)
                                     )
-                                    if not copy_num:
-                                        copy_num = self._fetch_latest_card_copy_number(card_name)
+                                    if not copy_num or not card_img:
+                                        fetched_num, fetched_img = self._fetch_latest_card_details(card_name)
+                                        if not copy_num:
+                                            copy_num = fetched_num
+                                        if not card_img:
+                                            card_img = fetched_img
 
                                     copy_info = classify_card_copy_number(copy_num) if copy_num else None
 
@@ -892,8 +902,8 @@ class MangaMinerBot:
             self.log(f"⚠️ read_manga_chapters error: {e}")
             return False
 
-    def _fetch_latest_card_copy_number(self, card_name=None):
-        """Fetch the copy number of the newest card in user inventory."""
+    def _fetch_latest_card_details(self, card_name=None):
+        """Fetch the copy number and image URL of the newest card in user inventory."""
         try:
             if not self.user_id:
                 res_bal = self.session.get("https://mangabuff.ru/balance", timeout=8)
@@ -903,7 +913,7 @@ class MangaMinerBot:
                         self.user_id = m.group(1)
 
             if not self.user_id:
-                return None
+                return None, None
 
             cards_url = f"https://mangabuff.ru/users/{self.user_id}/cards?sort=new"
             res_c = self.session.get(cards_url, timeout=8)
@@ -913,13 +923,24 @@ class MangaMinerBot:
                 for item in items[:5]:
                     c_name = item.get("data-name", "")
                     c_num = item.get("data-copy-number")
-                    if c_num and (not card_name or (card_name.lower() in c_name.lower() or c_name.lower() in card_name.lower())):
-                        return int(c_num)
-                if items and items[0].get("data-copy-number"):
-                    return int(items[0].get("data-copy-number"))
+                    if not card_name or (card_name.lower() in c_name.lower() or c_name.lower() in card_name.lower()):
+                        img_el = item.find(class_=re.compile(r"manga-cards__image"))
+                        img_url = img_el.get("data-src") if img_el else None
+                        copy_int = int(c_num) if c_num and str(c_num).isdigit() else None
+                        return copy_int, img_url
+                if items:
+                    c_num = items[0].get("data-copy-number")
+                    img_el = items[0].find(class_=re.compile(r"manga-cards__image"))
+                    img_url = img_el.get("data-src") if img_el else None
+                    copy_int = int(c_num) if c_num and str(c_num).isdigit() else None
+                    return copy_int, img_url
         except Exception as e:
-            self.log(f"⚠️ Ошибка получения номера карты из инвентаря: {e}")
-        return None
+            self.log(f"⚠️ Ошибка получения инфо карты из инвентаря: {e}")
+        return None, None
+
+    def _fetch_latest_card_copy_number(self, card_name=None):
+        num, _ = self._fetch_latest_card_details(card_name)
+        return num
 
     def check_and_claim_quests(self):
         """Parse all daily quests on /battle and claim any completed unclaimed quests."""

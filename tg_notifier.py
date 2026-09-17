@@ -317,8 +317,13 @@ class TelegramNotifier:
         self.send_message(msg, silent=True)
 
     def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None):
-        msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
-        msg += f"🃏 Карта: <b>{card_name}</b>\n"
+        import urllib.parse
+        encoded_name = urllib.parse.quote(card_name)
+        market_url = f"https://mangabuff.ru/market?search={encoded_name}"
+        notifs_url = "https://mangabuff.ru/notifications"
+
+        msg = f'🎁 <b>Найдена <a href="{notifs_url}">бонусная карта</a> за чтение!</b>\n'
+        msg += f'🃏 Карта: <a href="{market_url}"><b>{card_name}</b></a>\n'
         if copy_info and copy_info.get("copy_number"):
             num = copy_info["copy_number"]
             title = copy_info.get("title", "")
@@ -328,6 +333,7 @@ class TelegramNotifier:
             msg += f"🔢 <b>Экземпляр:</b> <code>{formatted_num}</code> (<b>{title}</b>{special_fire})\n"
         if cards_today:
             msg += f"📦 Найдено сегодня: <b>{cards_today}/10</b>\n"
+        msg += f'🔗 <a href="{notifs_url}">Уведомление на MangaBuff</a> | <a href="{market_url}">Цены на маркете</a>\n'
 
         if photo_bytes:
             self.send_photo(photo_bytes, caption=msg, parse_mode="HTML")
