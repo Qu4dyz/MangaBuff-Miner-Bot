@@ -428,8 +428,10 @@ class MangaMinerBot:
 
     def clean_unwanted_notifications(self, active_trade_ids=None):
         """
-        Automatically delete unwanted MangaBuff notifications (new cards, animated cards, new chapters, etc.)
-        Preserves active trade proposals.
+        Automatically delete unwanted MangaBuff notifications (card drops, animated card announcements).
+        PRESERVES:
+        - All chapter notifications ('добавлена новая ... глава')
+        - All trade offers ('предложение обмена')
         """
         if not DataManager.get_setting("notifs_cleaner_enabled", True):
             return 0
@@ -444,7 +446,6 @@ class MangaMinerBot:
             if not items:
                 return 0
 
-            trade_notif_ids = set()
             unwanted_notif_ids = []
 
             for item in items:
@@ -452,32 +453,39 @@ class MangaMinerBot:
                 if not notif_id:
                     continue
 
+                item_text = item.get_text(strip=True, separator=" ").lower()
+
+                # 1. PRESERVE CHAPTERS: If it's about new chapters, DO NOT touch it!
+                if any(w in item_text for w in ["глава", "главы", "главу", "глав"]):
+                    continue
+
+                # 2. PRESERVE TRADES: If it's a trade offer, DO NOT touch it!
                 is_trade = bool(
                     item.select_one(".js-notification-trade-open") or
                     item.select_one("[data-trade-id]") or
                     item.find("a", href=re.compile(r"/trades/\d+")) or
-                    "обмен" in item.get_text().lower()
+                    "обмен" in item_text or
+                    "trade" in item_text
                 )
-
                 if is_trade:
-                    trade_notif_ids.add(notif_id)
-                else:
+                    continue
+
+                # 3. IDENTIFY UNWANTED: card drops, animated cards, card announcements
+                is_junk_card_notif = any(k in item_text for k in [
+                    "получили новую карту",
+                    "вы получили карту",
+                    "новая карта",
+                    "новую карту",
+                    "анимированн",
+                    "анимированная",
+                    "карточки",
+                    "карточка"
+                ])
+
+                if is_junk_card_notif:
                     unwanted_notif_ids.append(notif_id)
 
-            # If there are no trade notifications on the page, use bulk clear endpoint
-            if not trade_notif_ids:
-                clear_res = self.session.post(
-                    "https://mangabuff.ru/notifications/clear",
-                    data={"_method": "delete", "type": "all"},
-                    headers={"X-Requested-With": "XMLHttpRequest"},
-                    timeout=10
-                )
-                if clear_res.status_code == 200:
-                    cleaned_count = len(items)
-                    self.log(f"🧹 Очищено уведомлений на MangaBuff: {cleaned_count} шт. (все не нужные удалены)")
-                    return cleaned_count
-
-            # If trade notifications exist, delete only unwanted ones individually
+            # Delete only the identified unwanted items individually (leaving chapters & trades 100% untouched)
             deleted_count = 0
             for uid in unwanted_notif_ids:
                 try:
@@ -494,7 +502,7 @@ class MangaMinerBot:
                     pass
 
             if deleted_count > 0:
-                self.log(f"🧹 Очищено не нужных уведомлений на MangaBuff: {deleted_count} шт. (предложения обмена сохранены)")
+                self.log(f"🧹 Очищено уведомлений о картах на MangaBuff: {deleted_count} шт. (главы и обмены сохранены)")
             return deleted_count
 
         except Exception as e:
