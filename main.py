@@ -4,11 +4,11 @@ import time
 import argparse
 from dotenv import load_dotenv
 
-# Ensure UTF-8 output on Windows consoles
+# Ensure UTF-8 output and immediate line buffering on consoles and systemd
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 from path import BASE_DIR
 from data_management import DataManager

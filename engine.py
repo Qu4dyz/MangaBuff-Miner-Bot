@@ -1492,7 +1492,7 @@ class MangaMinerBot:
         try:
             res = self.session.get(CONFIG["urls"]["game"], timeout=10)
             if res.status_code == 200:
-                if "login" in res.url.lower() or "csrf-token" in res.text.lower():
+                if "/login" in res.url.lower() or "auth-form" in res.text.lower():
                     self.auth_log_buffer.append("⚠️ Session validation failed: redirected to login")
                     return False
                 self.auth_log_buffer.append(tr("log_session_valid"))
