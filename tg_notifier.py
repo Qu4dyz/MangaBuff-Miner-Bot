@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 import os
 import queue
 import threading
@@ -10,12 +11,13 @@ load_dotenv()
 
 
 class TelegramNotifier:
-    """Asynchronous, rate-limited, HTML-formatted Telegram Notifier."""
+    """Asynchronous, rate-limited, HTML-formatted Telegram Notifier with Silent & Night Mode."""
 
     def __init__(self):
         self._queue = queue.Queue()
         self._worker_thread = threading.Thread(target=self._process_queue, daemon=True)
         self._worker_thread.start()
+        self._last_heartbeat_time = 0
 
     def get_credentials(self):
         """Retrieve credentials prioritizing user_data.json, fallback to .env."""
@@ -26,6 +28,58 @@ class TelegramNotifier:
             enabled = bool(token and chat_id)
         return token, chat_id, enabled
 
+    def is_silent_all_enabled(self):
+        """Retrieve whether all notifications should be delivered silently."""
+        val = DataManager.get_setting("tg_silent_all")
+        if val is not None:
+            return bool(val)
+        return os.getenv("TG_SILENT_ALL", "0").lower() in ("1", "true", "yes")
+
+    def is_night_time(self):
+        """
+        Check if current time falls within configured quiet hours (default: 23:00 - 08:00 MSK).
+        During night time, routine status updates are suppressed and important
+        notifications (e.g. card drops) are sent strictly silently (disable_notification=True).
+        """
+        night_mode = DataManager.get_setting("tg_night_mode")
+        if night_mode is None:
+            night_mode = os.getenv("TG_NIGHT_MODE", "1").lower() in ("1", "true", "yes")
+        if not night_mode:
+            return False
+
+        try:
+            tz_offset = int(DataManager.get_setting("tg_night_tz_offset") or os.getenv("TG_NIGHT_TZ_OFFSET", "3"))
+            start_hour = int(DataManager.get_setting("tg_night_start") or os.getenv("TG_NIGHT_START", "23"))
+            end_hour = int(DataManager.get_setting("tg_night_end") or os.getenv("TG_NIGHT_END", "8"))
+
+            tz = timezone(timedelta(hours=tz_offset))
+            current_hour = datetime.now(tz).hour
+
+            if start_hour > end_hour:
+                return current_hour >= start_hour or current_hour < end_hour
+            elif start_hour < end_hour:
+                return start_hour <= current_hour < end_hour
+            else:
+                return False
+        except Exception:
+            return False
+
+    def should_silence(self, silent=None):
+        """
+        Determine if a notification should be delivered without sound or vibration.
+        - If silent=True: always silent.
+        - If global silent mode (tg_silent_all) is active: always silent.
+        - If night quiet hours are active: always silent.
+        - Otherwise, honor the passed silent parameter (default False).
+        """
+        if silent is True:
+            return True
+        if self.is_silent_all_enabled():
+            return True
+        if self.is_night_time():
+            return True
+        return bool(silent)
+
     def _process_queue(self):
         while True:
             item = self._queue.get()
@@ -33,22 +87,35 @@ class TelegramNotifier:
                 break
             try:
                 if isinstance(item, tuple) and len(item) > 0 and item[0] == "__PHOTO__":
-                    _, photo_bytes, caption, parse_mode = item
-                    self._send_photo_http(photo_bytes, caption=caption, parse_mode=parse_mode)
+                    # Format: ("__PHOTO__", photo_bytes, caption, parse_mode, disable_notification)
+                    photo_bytes = item[1]
+                    caption = item[2] if len(item) > 2 else None
+                    parse_mode = item[3] if len(item) > 3 else "HTML"
+                    disable_notification = item[4] if len(item) > 4 else False
+                    self._send_photo_http(
+                        photo_bytes,
+                        caption=caption,
+                        parse_mode=parse_mode,
+                        disable_notification=disable_notification
+                    )
                 else:
-                    if len(item) == 3:
-                        text, parse_mode, disable_preview = item
-                    else:
-                        text, parse_mode = item
-                        disable_preview = True
-                    self._send_http(text, parse_mode, disable_preview=disable_preview)
+                    text = item[0]
+                    parse_mode = item[1] if len(item) > 1 else "HTML"
+                    disable_preview = item[2] if len(item) > 2 else True
+                    disable_notification = item[3] if len(item) > 3 else False
+                    self._send_http(
+                        text,
+                        parse_mode=parse_mode,
+                        disable_preview=disable_preview,
+                        disable_notification=disable_notification
+                    )
             except Exception as e:
                 print(f"Telegram queue error: {e}")
             self._queue.task_done()
-            # Slight delay to respect Telegram's rate limits (max 30/sec, safe: 2/sec)
+            # Slight delay to respect Telegram's rate limits
             time.sleep(0.5)
 
-    def _send_http(self, text, parse_mode="HTML", disable_preview=True):
+    def _send_http(self, text, parse_mode="HTML", disable_preview=True, disable_notification=False):
         token, chat_id, enabled = self.get_credentials()
         if not enabled or not token or not chat_id:
             return False, "Telegram notifications disabled or credentials missing."
@@ -57,7 +124,8 @@ class TelegramNotifier:
         payload = {
             "chat_id": chat_id,
             "text": text,
-            "disable_web_page_preview": disable_preview
+            "disable_web_page_preview": disable_preview,
+            "disable_notification": bool(disable_notification)
         }
         if parse_mode:
             payload["parse_mode"] = parse_mode
@@ -80,13 +148,16 @@ class TelegramNotifier:
         except requests.RequestException as e:
             return False, str(e)
 
-    def _send_photo_http(self, photo_bytes, caption=None, parse_mode="HTML"):
+    def _send_photo_http(self, photo_bytes, caption=None, parse_mode="HTML", disable_notification=False):
         token, chat_id, enabled = self.get_credentials()
         if not enabled or not token or not chat_id:
             return False, "Telegram notifications disabled or credentials missing."
 
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
-        payload = {"chat_id": chat_id}
+        payload = {
+            "chat_id": chat_id,
+            "disable_notification": bool(disable_notification)
+        }
         if caption:
             payload["caption"] = caption
         if parse_mode:
@@ -110,20 +181,32 @@ class TelegramNotifier:
         except requests.RequestException as e:
             return False, str(e)
 
-    def send_message(self, text, parse_mode="HTML", wait=False, disable_preview=True):
+    def send_message(self, text, parse_mode="HTML", wait=False, disable_preview=True, silent=None):
         """Send message asynchronously (or synchronously if wait=True)."""
+        disable_notif = self.should_silence(silent)
         if wait:
-            return self._send_http(text, parse_mode, disable_preview=disable_preview)
+            return self._send_http(
+                text,
+                parse_mode=parse_mode,
+                disable_preview=disable_preview,
+                disable_notification=disable_notif
+            )
         else:
-            self._queue.put((text, parse_mode, disable_preview))
+            self._queue.put((text, parse_mode, disable_preview, disable_notif))
             return True, "Queued"
 
-    def send_photo(self, photo_bytes, caption=None, parse_mode="HTML", wait=False):
+    def send_photo(self, photo_bytes, caption=None, parse_mode="HTML", wait=False, silent=None):
         """Send a photo asynchronously (or synchronously if wait=True)."""
+        disable_notif = self.should_silence(silent)
         if wait:
-            return self._send_photo_http(photo_bytes, caption=caption, parse_mode=parse_mode)
+            return self._send_photo_http(
+                photo_bytes,
+                caption=caption,
+                parse_mode=parse_mode,
+                disable_notification=disable_notif
+            )
         else:
-            self._queue.put(("__PHOTO__", photo_bytes, caption, parse_mode))
+            self._queue.put(("__PHOTO__", photo_bytes, caption, parse_mode, disable_notif))
             return True, "Queued"
 
     # ==========================================
@@ -138,11 +221,11 @@ class TelegramNotifier:
             msg += f"💎 <b>Руда:</b> <code>{ore:,}</code>\n"
         if essence is not None:
             msg += f"🔮 <b>Эссенция:</b> <code>{essence:,}</code>\n"
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_daily_reward(self, message):
         msg = f"🎁 <b>Ежедневная награда</b>\n{message}"
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_quests_claimed(self, count, essence=None, energy=None):
         msg = (
@@ -153,7 +236,7 @@ class TelegramNotifier:
             msg += f"🔮 Текущая эссенция: <b>{essence}</b>\n"
         if energy:
             msg += f"⚡ Энергия пробуждения: <b>{energy}</b>\n"
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_mining_summary(self, clicks, added_ore, total_ore):
         msg = (
@@ -162,7 +245,7 @@ class TelegramNotifier:
             f"💎 Добыто руды: <b>+{added_ore:,}</b>\n"
             f"💰 Всего руды: <b>{total_ore:,}</b>"
         )
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_upgrade(self, title, level=None, cost=None):
         msg = f"⬆️ <b>Улучшение в магазине!</b>\n<b>{title}</b>\n"
@@ -170,7 +253,7 @@ class TelegramNotifier:
             msg += f"Новый уровень: <b>{level}</b>\n"
         if cost:
             msg += f"Потрачено: <b>{cost:,} руды</b>"
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_battle_summary(self, battles, wins, losses, essence_earned, daily_cap_reached=False):
         cap_str = " (достигнут лимит 1000/день)" if daily_cap_reached else ""
@@ -180,7 +263,7 @@ class TelegramNotifier:
             f"🏆 Побед: <b>{wins}</b> | 💀 Поражений: <b>{losses}</b>\n"
             f"🔮 Заработано эссенции: <b>+{essence_earned:,}</b>{cap_str}"
         )
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_jackpot(self, card_rarity, card_title=None):
         msg = (
@@ -210,7 +293,7 @@ class TelegramNotifier:
         )
         if ends_at:
             msg += f"🏁 Окончание: <code>{ends_at}</code>\n"
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_ads_watched(self, count, diamonds):
         msg = (
@@ -218,7 +301,7 @@ class TelegramNotifier:
             f"🎬 Просмотрено: <b>{count}/3</b>\n"
             f"💎 Получено: <b>+{diamonds} алмазов</b>"
         )
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None):
         msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
@@ -246,9 +329,13 @@ class TelegramNotifier:
         msg += f"✨ Свиток: <b>{scroll_name}</b>"
         if rank:
             msg += f" (Ранг {rank})"
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_reading_summary(self, chapters_read, total_today=None, cards_gained=0, scrolls_gained=0):
+        # In night mode, suppress routine reading progress completely if no drops occurred
+        if self.is_night_time() and cards_gained == 0 and scrolls_gained == 0:
+            return
+
         msg = (
             "📖 <b>Чтение глав завершено!</b>\n"
             f"📚 Прочитано в сессии: <b>{chapters_read} глав</b>\n"
@@ -259,13 +346,38 @@ class TelegramNotifier:
             msg += f"🃏 Найдено карт: <b>+{cards_gained}</b>\n"
         if scrolls_gained > 0:
             msg += f"📜 Найдено свитков: <b>+{scrolls_gained}</b>\n"
-        self.send_message(msg)
+        self.send_message(msg, silent=True)
 
     def notify_alert(self, title, detail):
         msg = f"⚠️ <b>Внимание: {title}</b>\n{detail}"
         self.send_message(msg)
 
-    def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min, diamonds=None, chapters_str=None):
+    def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min, diamonds=None, chapters_str=None, force=False):
+        """
+        Send periodic cycle status report.
+        - Suppressed entirely during night quiet hours (23:00 - 08:00 MSK) unless force=True.
+        - Throttled to at most once every 4 hours (configurable via tg_heartbeat_interval_hours) unless force=True.
+        - Always delivered silently (disable_notification=True).
+        """
+        # 1. Suppress during night hours
+        if self.is_night_time() and not force:
+            return
+
+        # 2. Check throttle interval
+        interval_hours = DataManager.get_setting("tg_heartbeat_interval_hours")
+        if interval_hours is None:
+            try:
+                interval_hours = float(os.getenv("TG_HEARTBEAT_INTERVAL_HOURS", "4.0"))
+            except (ValueError, TypeError):
+                interval_hours = 4.0
+
+        interval_sec = max(900, int(float(interval_hours) * 3600))  # At least 15 min
+        now = time.time()
+        if not force and (now - self._last_heartbeat_time < interval_sec):
+            return
+
+        self._last_heartbeat_time = now
+
         ore_dia = (balance // 100) if balance else 0
         dia_part = f" | 💎 Баланс: <b>{diamonds:,}</b>" if diamonds is not None else ""
 
@@ -282,17 +394,16 @@ class TelegramNotifier:
         msg += f"{ch_part}📺 Реклама: <b>{ads_count}/3</b> | 🃏 Карты: <b>{cards_count}</b>\n"
         msg += f"🏰 Башня: <b>{tower_str}</b>\n"
         msg += f"💤 Следующее: <b>{next_action}</b> (~{next_wait_min} мин)"
-        self.send_message(msg)
-
+        self.send_message(msg, silent=True)
 
 
 # Global singleton instance
 _notifier = TelegramNotifier()
 
 
-def send_message(report_text, parse_mode="HTML", wait=False):
+def send_message(report_text, parse_mode="HTML", wait=False, silent=None):
     """Module-level entry point for backward compatibility."""
-    return _notifier.send_message(report_text, parse_mode=parse_mode, wait=wait)
+    return _notifier.send_message(report_text, parse_mode=parse_mode, wait=wait, silent=silent)
 
 
 def get_notifier():

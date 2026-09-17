@@ -57,32 +57,44 @@ class TelegramDialog(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Telegram Notifier")
-        self.geometry("360x320")
+        self.geometry("380x410")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
 
-        ctk.CTkLabel(self, text="Настройки Telegram", font=("Arial", 14, "bold")).pack(pady=15)
+        ctk.CTkLabel(self, text="Настройки Telegram", font=("Arial", 14, "bold")).pack(pady=12)
 
         notifier = get_notifier()
         token, chat_id, enabled = notifier.get_credentials()
 
         self.entry_token = ctk.CTkEntry(self, placeholder_text="Bot Token (e.g. 123456:ABC...)")
-        self.entry_token.pack(pady=5, padx=20, fill="x")
+        self.entry_token.pack(pady=4, padx=20, fill="x")
         if token:
             self.entry_token.insert(0, token)
 
         self.entry_chat_id = ctk.CTkEntry(self, placeholder_text="Chat ID (e.g. 713822262)")
-        self.entry_chat_id.pack(pady=5, padx=20, fill="x")
+        self.entry_chat_id.pack(pady=4, padx=20, fill="x")
         if chat_id:
             self.entry_chat_id.insert(0, str(chat_id))
 
         self.enabled_var = ctk.BooleanVar(value=enabled)
         self.chk_enabled = ctk.CTkSwitch(self, text="Включить уведомления", variable=self.enabled_var)
-        self.chk_enabled.pack(pady=10, padx=20, anchor="w")
+        self.chk_enabled.pack(pady=6, padx=20, anchor="w")
+
+        silent_all = notifier.is_silent_all_enabled()
+        self.silent_var = ctk.BooleanVar(value=silent_all)
+        self.chk_silent = ctk.CTkSwitch(self, text="🔕 Тихий режим (всегда без звука)", variable=self.silent_var)
+        self.chk_silent.pack(pady=6, padx=20, anchor="w")
+
+        night_mode = DataManager.get_setting("tg_night_mode")
+        if night_mode is None:
+            night_mode = os.getenv("TG_NIGHT_MODE", "1").lower() in ("1", "true", "yes")
+        self.night_var = ctk.BooleanVar(value=bool(night_mode))
+        self.chk_night = ctk.CTkSwitch(self, text="🌙 Ночной режим (23:00 - 08:00 МСК)", variable=self.night_var)
+        self.chk_night.pack(pady=6, padx=20, anchor="w")
 
         btn_box = ctk.CTkFrame(self, fg_color="transparent")
-        btn_box.pack(pady=15, padx=20, fill="x")
+        btn_box.pack(pady=12, padx=20, fill="x")
 
         ctk.CTkButton(btn_box, text="🔔 Тест", width=100, fg_color="#3B8ED0", command=self.on_test).pack(side="left", padx=5)
         ctk.CTkButton(btn_box, text="💾 Сохранить", width=140, fg_color="#2CC985", command=self.on_save).pack(side="right", padx=5)
@@ -97,6 +109,8 @@ class TelegramDialog(ctk.CTkToplevel):
         DataManager.set_setting("tg_token", token)
         DataManager.set_setting("tg_chat_id", chat_id)
         DataManager.set_setting("tg_enabled", True)
+        DataManager.set_setting("tg_silent_all", self.silent_var.get())
+        DataManager.set_setting("tg_night_mode", self.night_var.get())
 
         ok, err = send_message("🔔 <b>MangaBuff Miner</b>: Тестовое уведомление успешно доставлено!", wait=True)
         if ok:
@@ -112,6 +126,8 @@ class TelegramDialog(ctk.CTkToplevel):
         DataManager.set_setting("tg_token", token)
         DataManager.set_setting("tg_chat_id", chat_id)
         DataManager.set_setting("tg_enabled", enabled)
+        DataManager.set_setting("tg_silent_all", self.silent_var.get())
+        DataManager.set_setting("tg_night_mode", self.night_var.get())
         self.destroy()
 
 
