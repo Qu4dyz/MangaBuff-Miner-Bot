@@ -1160,8 +1160,9 @@ class MangaMinerBot:
                     claim_url,
                     json={},
                     headers={
+                        "Accept": "application/json",
                         "Content-Type": "application/json",
-                        "X-CSRF-TOKEN": self.csrf_token,
+                        "X-CSRF-TOKEN": root.get("data-csrf-token") or self.csrf_token,
                         "X-Requested-With": "XMLHttpRequest",
                         "Referer": "https://mangabuff.ru/tower"
                     },
@@ -1176,43 +1177,63 @@ class MangaMinerBot:
                         lvl_ups = len(c_data.get("data", {}).get("level_ups", []))
                         self.log(tr("log_tower_claimed", diamonds=diamonds, crystals=crystals))
                         self.notifier.notify_tower_claimed(diamonds, crystals, lvl_ups)
-                        is_active = False
                     except Exception as e:
                         self.log(f"⚠️ Tower claim parse error: {e}")
+
+                    # Refresh tower interface right after claim so we have fresh state & CSRF to start next expedition immediately!
+                    time.sleep(1)
+                    res = self.session.get("https://mangabuff.ru/tower", timeout=12)
+                    if res.status_code == 200:
+                        soup = BeautifulSoup(res.text, "html.parser")
+                        fresh_root = soup.find(class_="mbf-abyss-tower") or soup.find(attrs={"data-tower-root": True})
+                        if fresh_root:
+                            root = fresh_root
+                            start_url = root.get("data-start-url", start_url)
+                            is_active = str(root.get("data-expedition-active", "0")) == "1"
+                            is_complete = str(root.get("data-expedition-complete", "0")) == "1"
+                    else:
+                        is_active = False
                 else:
                     self.log(f"⚠️ Tower claim failed with status {claim_res.status_code}")
 
             # 2. Start a new expedition if idle
             if not is_active:
-                raw_ids = root.get("data-selected-card-ids")
+                raw_ids = root.get("data-selected-card-ids", "") if root else ""
                 card_ids = []
                 if raw_ids:
                     try:
-                        parsed = json.loads(raw_ids) if isinstance(raw_ids, str) else raw_ids
-                        if isinstance(parsed, list):
-                            card_ids = [int(x) for x in parsed if x]
+                        card_ids = [int(x.strip()) for x in str(raw_ids).split(",") if x.strip().isdigit()][:4]
                     except Exception:
                         pass
 
                 if not card_ids:
-                    saved_squad = DataManager.get_setting("tower_squad")
-                    if isinstance(saved_squad, list) and len(saved_squad) > 0:
-                        card_ids = [int(x) for x in saved_squad]
-
-                if not card_ids:
-                    slot_cards = soup.select(".mbf-tower-slot[data-card-user-id]")
+                    slot_cards = soup.select(".mbf-abyss-tower__squad-slot[data-card-user-id], [data-tower-squad-slot][data-card-user-id]")
                     for sc in slot_cards:
                         cid = sc.get("data-card-user-id")
-                        if cid and int(cid) not in card_ids:
+                        if cid and str(cid).isdigit() and int(cid) not in card_ids:
                             card_ids.append(int(cid))
+
+                if not card_ids:
+                    saved_squad = DataManager.get_setting("tower_squad")
+                    if isinstance(saved_squad, list) and len(saved_squad) > 0:
+                        card_ids = [int(x) for x in saved_squad if str(x).isdigit()][:4]
 
                 if card_ids:
                     DataManager.set_setting("tower_squad", card_ids)
 
-                duration_mins = int(root.get("data-selected-duration") or DataManager.get_setting("tower_duration") or 720)
-                difficulty = root.get("data-selected-difficulty") or DataManager.get_setting("tower_difficulty") or "nightmare"
-                route = root.get("data-selected-route") or "depths"
-                order = root.get("data-selected-order") or "attack"
+                dur_val = (root.get("data-selected-duration") if root else None) or DataManager.get_setting("tower_duration") or 12
+                dur_int = int(dur_val) if str(dur_val).isdigit() else 12
+                duration_mins = (dur_int * 60) if dur_int <= 24 else dur_int
+
+                difficulty = (root.get("data-selected-difficulty") if root else None) or DataManager.get_setting("tower_difficulty") or "nightmare"
+                route = (root.get("data-selected-route") if root else None) or DataManager.get_setting("tower_route") or "frontier"
+                order = (root.get("data-selected-order") if root else None) or DataManager.get_setting("tower_order") or "balanced"
+
+                # Persist settings
+                DataManager.set_setting("tower_duration", dur_int)
+                DataManager.set_setting("tower_difficulty", difficulty)
+                DataManager.set_setting("tower_route", route)
+                DataManager.set_setting("tower_order", order)
 
                 if card_ids:
                     payload = {
@@ -1224,12 +1245,14 @@ class MangaMinerBot:
                         "resonance_offer_token": "",
                         "resonance_accept": 0
                     }
+                    csrf = (root.get("data-csrf-token") if root else None) or self.csrf_token
                     start_res = self.session.post(
                         start_url,
                         json=payload,
                         headers={
+                            "Accept": "application/json",
                             "Content-Type": "application/json",
-                            "X-CSRF-TOKEN": self.csrf_token,
+                            "X-CSRF-TOKEN": csrf,
                             "X-Requested-With": "XMLHttpRequest",
                             "Referer": "https://mangabuff.ru/tower"
                         },
@@ -1239,10 +1262,11 @@ class MangaMinerBot:
                         try:
                             s_data = start_res.json()
                             ends_at = s_data.get("data", {}).get("ends_at", "")
+                            rem_sec = s_data.get("data", {}).get("remaining_seconds") or (duration_mins * 60)
                             dur_hours = duration_mins // 60
                             self.log(tr("log_tower_started", diff=difficulty.capitalize(), dur=dur_hours))
                             self.notifier.notify_tower_started(difficulty.capitalize(), dur_hours, ends_at)
-                            return duration_mins * 60
+                            return max(60, int(rem_sec))
                         except Exception:
                             return duration_mins * 60
                     else:
