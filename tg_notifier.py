@@ -265,18 +265,42 @@ class TelegramNotifier:
         )
         self.send_message(msg, silent=True)
 
-    def notify_trade_offer(self, trade_id, user_name="Пользователь", receive_cards=None, give_cards=None):
+    def notify_trade_offer(self, trade_id, user_name="Пользователь", receive_cards=None, give_cards=None, photo_bytes=None):
         msg = "🤝 <b>Новое предложение обмена на MangaBuff!</b>\n"
         if user_name:
             msg += f"👤 <b>Пользователь:</b> <code>{user_name}</code>\n"
         if receive_cards:
-            cards_str = ", ".join(receive_cards)
-            msg += f"📥 <b>Вы получите ({len(receive_cards)}):</b> <i>{cards_str}</i>\n"
+            cards_str = "\n• " + "\n• ".join(receive_cards)
+            msg += f"📥 <b>Вы получите ({len(receive_cards)}):</b>{cards_str}\n"
         if give_cards:
-            cards_str = ", ".join(give_cards)
-            msg += f"📤 <b>Вы отдадите ({len(give_cards)}):</b> <i>{cards_str}</i>\n"
+            cards_str = "\n• " + "\n• ".join(give_cards)
+            msg += f"📤 <b>Вы отдадите ({len(give_cards)}):</b>{cards_str}\n"
         msg += f'🔗 <a href="https://mangabuff.ru/trades/{trade_id}">Открыть обмен на сайте</a>'
-        self.send_message(msg, disable_preview=True)
+
+        if photo_bytes:
+            self.send_photo(photo_bytes, caption=msg, parse_mode="HTML")
+        else:
+            self.send_message(msg, disable_preview=True)
+
+    def notify_trade_status(self, trade_id, user_name="Пользователь", status="canceled"):
+        if status == "canceled":
+            msg = (
+                f"❌ <b>Обмен #{trade_id} отменён</b>\n"
+                f"👤 Пользователь <b>{user_name}</b> отозвал предложение обмена."
+            )
+        elif status == "accepted":
+            msg = (
+                f"🎉 <b>Обмен #{trade_id} успешно завершён!</b>\n"
+                f"Обмен с пользователем <b>{user_name}</b> принят."
+            )
+        elif status == "rejected":
+            msg = (
+                f"🚫 <b>Обмен #{trade_id} отклонён</b>\n"
+                f"Обмен с пользователем <b>{user_name}</b> отклонён."
+            )
+        else:
+            msg = f"ℹ️ <b>Статус обмена #{trade_id} изменён:</b> <code>{status}</code> ({user_name})"
+        self.send_message(msg, silent=True)
 
     def notify_jackpot(self, card_rarity, card_title=None):
         msg = (
@@ -318,12 +342,7 @@ class TelegramNotifier:
 
     def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None, user_id=None, card_id=None):
         import urllib.parse
-        # Exact market URL by card_id if available, otherwise fall back to name search
-        if card_id:
-            market_url = f"https://mangabuff.ru/market?card={card_id}"
-        else:
-            encoded_name = urllib.parse.quote(card_name)
-            market_url = f"https://mangabuff.ru/market?search={encoded_name}"
+        market_url = f"https://mangabuff.ru/market?q={urllib.parse.quote_plus(card_name)}"
         inventory_url = f"https://mangabuff.ru/users/{user_id}/cards?sort=new" if user_id else None
 
         msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
