@@ -303,13 +303,21 @@ class App(ctk.CTk):
         )
         self.chk_ads.grid(row=9, column=0, padx=20, pady=(0, 5), sticky="w")
 
+        # Daily Quiz toggle (10 correct streak reward)
+        is_quiz = DataManager.get_setting("quiz_enabled", True)
+        self.quiz_var = ctk.BooleanVar(value=is_quiz)
+        self.chk_quiz = ctk.CTkSwitch(
+            self.sidebar, text=tr("quiz_enabled"), variable=self.quiz_var, command=self._toggle_quiz
+        )
+        self.chk_quiz.grid(row=10, column=0, padx=20, pady=(0, 5), sticky="w")
+
         # Manga reading toggle (bonus cards & 75-chapter quest)
         is_reading = DataManager.get_setting("reading_enabled", True)
         self.reading_var = ctk.BooleanVar(value=is_reading)
         self.chk_reading = ctk.CTkSwitch(
             self.sidebar, text=tr("reading_enabled"), variable=self.reading_var, command=self._toggle_reading
         )
-        self.chk_reading.grid(row=10, column=0, padx=20, pady=(0, 5), sticky="w")
+        self.chk_reading.grid(row=11, column=0, padx=20, pady=(0, 5), sticky="w")
 
         # Stop reading on card cooldown toggle
         is_wait_cd = DataManager.get_setting("reading_wait_card_cooldown", False)
@@ -317,48 +325,48 @@ class App(ctk.CTk):
         self.chk_card_cd = ctk.CTkSwitch(
             self.sidebar, text=tr("reading_wait_card_cd"), variable=self.card_cd_var, command=self._toggle_card_cd
         )
-        self.chk_card_cd.grid(row=11, column=0, padx=20, pady=(0, 5), sticky="w")
+        self.chk_card_cd.grid(row=12, column=0, padx=20, pady=(0, 5), sticky="w")
 
         # Telegram Settings Button
         self.btn_tg_settings = ctk.CTkButton(
             self.sidebar, text="📲 Telegram Bot", height=26, width=160, fg_color="#333",
             hover_color="#555", font=("Arial", 11), command=self._open_telegram_dialog
         )
-        self.btn_tg_settings.grid(row=12, column=0, padx=20, pady=(5, 3))
+        self.btn_tg_settings.grid(row=13, column=0, padx=20, pady=(5, 3))
 
         # Proxy Settings Button
         self.btn_proxy_settings = ctk.CTkButton(
             self.sidebar, text="🌐 Настройки Прокси", height=26, width=160, fg_color="#333",
             hover_color="#555", font=("Arial", 11), command=self._open_proxy_dialog
         )
-        self.btn_proxy_settings.grid(row=13, column=0, padx=20, pady=(3, 10))
+        self.btn_proxy_settings.grid(row=14, column=0, padx=20, pady=(3, 10))
 
         self.lbl_actions = ctk.CTkLabel(
             self.sidebar, text=tr("controls"), anchor="w", text_color="gray",
             font=ctk.CTkFont(size=11, weight="bold")
         )
-        self.lbl_actions.grid(row=14, column=0, padx=20, pady=(10, 0), sticky="w")
+        self.lbl_actions.grid(row=15, column=0, padx=20, pady=(10, 0), sticky="w")
 
         self.btn_start = ctk.CTkButton(
             self.sidebar, text=tr("btn_start"), height=40, fg_color="#2CC985",
             hover_color="#229A65", command=self.start_bot
         )
-        self.btn_start.grid(row=15, column=0, padx=20, pady=(8, 4))
+        self.btn_start.grid(row=16, column=0, padx=20, pady=(8, 4))
 
         self.btn_status = ctk.CTkButton(
             self.sidebar, text=tr("btn_status"), height=40, fg_color="#3B8ED0",
             hover_color="#2D6D9E", command=self.check_status
         )
-        self.btn_status.grid(row=16, column=0, padx=20, pady=4)
+        self.btn_status.grid(row=17, column=0, padx=20, pady=4)
 
         self.btn_stop = ctk.CTkButton(
             self.sidebar, text=tr("btn_stop"), height=40, fg_color="#D94448",
             hover_color="#A83236", state="disabled", command=self.stop_bot
         )
-        self.btn_stop.grid(row=17, column=0, padx=20, pady=(4, 10))
+        self.btn_stop.grid(row=18, column=0, padx=20, pady=(4, 10))
 
         self.progress_bar = ctk.CTkProgressBar(self.sidebar, orientation="horizontal", height=10)
-        self.progress_bar.grid(row=18, column=0, padx=20, pady=(15, 10))
+        self.progress_bar.grid(row=19, column=0, padx=20, pady=(15, 10))
         self.progress_bar.set(0)
 
         # Main frame
@@ -401,6 +409,10 @@ class App(ctk.CTk):
         val = self.ads_var.get()
         DataManager.set_setting("ads_enabled", val)
 
+    def _toggle_quiz(self):
+        val = self.quiz_var.get()
+        DataManager.set_setting("quiz_enabled", val)
+
     def _toggle_reading(self):
         val = self.reading_var.get()
         DataManager.set_setting("reading_enabled", val)
@@ -428,6 +440,7 @@ class App(ctk.CTk):
         self.chk_auto_upgrade.configure(text=tr("auto_upgrade"))
         self.chk_tower.configure(text=tr("tower_enabled"))
         self.chk_ads.configure(text=tr("ads_enabled"))
+        self.chk_quiz.configure(text=tr("quiz_enabled"))
         self.chk_reading.configure(text=tr("reading_enabled"))
         self.chk_card_cd.configure(text=tr("reading_wait_card_cd"))
         self.lbl_actions.configure(text=tr("controls"))

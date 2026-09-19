@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+import json
 import os
 import queue
 import threading
@@ -98,6 +99,18 @@ class TelegramNotifier:
                         parse_mode=parse_mode,
                         disable_notification=disable_notification
                     )
+                elif isinstance(item, tuple) and len(item) > 0 and item[0] == "__MEDIA_GROUP__":
+                    # Format: ("__MEDIA_GROUP__", [photo_bytes...], caption, parse_mode, disable_notification)
+                    photos = item[1] if len(item) > 1 else []
+                    caption = item[2] if len(item) > 2 else None
+                    parse_mode = item[3] if len(item) > 3 else "HTML"
+                    disable_notification = item[4] if len(item) > 4 else False
+                    self._send_media_group_http(
+                        photos,
+                        caption=caption,
+                        parse_mode=parse_mode,
+                        disable_notification=disable_notification
+                    )
                 else:
                     text = item[0]
                     parse_mode = item[1] if len(item) > 1 else "HTML"
@@ -181,6 +194,61 @@ class TelegramNotifier:
         except requests.RequestException as e:
             return False, str(e)
 
+    def _send_media_group_http(self, photos, caption=None, parse_mode="HTML", disable_notification=False):
+        """Send 2–10 photos as a Telegram album. Caption attaches to the first photo."""
+        token, chat_id, enabled = self.get_credentials()
+        if not enabled or not token or not chat_id:
+            return False, "Telegram notifications disabled or credentials missing."
+
+        photos = [p for p in (photos or []) if p]
+        if not photos:
+            return False, "No photos"
+        if len(photos) == 1:
+            return self._send_photo_http(
+                photos[0],
+                caption=caption,
+                parse_mode=parse_mode,
+                disable_notification=disable_notification
+            )
+
+        # Telegram album limit is 10
+        photos = photos[:10]
+        url = f"https://api.telegram.org/bot{token}/sendMediaGroup"
+        media = []
+        files = {}
+        for i, photo_bytes in enumerate(photos):
+            attach_name = f"photo{i}"
+            item = {"type": "photo", "media": f"attach://{attach_name}"}
+            if i == 0 and caption:
+                # Telegram caption hard limit ~1024
+                item["caption"] = caption[:1024]
+                if parse_mode:
+                    item["parse_mode"] = parse_mode
+            media.append(item)
+            files[attach_name] = (f"card_{i}.png", photo_bytes, "image/png")
+
+        payload = {
+            "chat_id": chat_id,
+            "media": json.dumps(media),
+            "disable_notification": str(bool(disable_notification)).lower()
+        }
+        try:
+            response = requests.post(url, data=payload, files=files, timeout=30)
+            if response.status_code == 200:
+                return True, "OK"
+            elif response.status_code == 429:
+                try:
+                    retry_after = response.json().get("parameters", {}).get("retry_after", 5)
+                except Exception:
+                    retry_after = 5
+                time.sleep(retry_after)
+                requests.post(url, data=payload, files=files, timeout=30)
+                return False, f"Rate limited, waited {retry_after}s"
+            else:
+                return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        except requests.RequestException as e:
+            return False, str(e)
+
     def send_message(self, text, parse_mode="HTML", wait=False, disable_preview=True, silent=None):
         """Send message asynchronously (or synchronously if wait=True)."""
         disable_notif = self.should_silence(silent)
@@ -208,6 +276,30 @@ class TelegramNotifier:
         else:
             self._queue.put(("__PHOTO__", photo_bytes, caption, parse_mode, disable_notif))
             return True, "Queued"
+
+    def send_media_group(self, photos, caption=None, parse_mode="HTML", wait=False, silent=None):
+        """Send multiple photos as one Telegram album (async by default)."""
+        disable_notif = self.should_silence(silent)
+        photos = [p for p in (photos or []) if p]
+        if not photos:
+            return False, "No photos"
+        if len(photos) == 1:
+            return self.send_photo(
+                photos[0],
+                caption=caption,
+                parse_mode=parse_mode,
+                wait=wait,
+                silent=silent
+            )
+        if wait:
+            return self._send_media_group_http(
+                photos,
+                caption=caption,
+                parse_mode=parse_mode,
+                disable_notification=disable_notif
+            )
+        self._queue.put(("__MEDIA_GROUP__", photos, caption, parse_mode, disable_notif))
+        return True, "Queued"
 
     # ==========================================
     # STRUCTURED NOTIFICATIONS (Clean HTML format)
@@ -265,22 +357,54 @@ class TelegramNotifier:
         )
         self.send_message(msg, silent=True)
 
-    def notify_trade_offer(self, trade_id, user_name="Пользователь", receive_cards=None, give_cards=None, photo_bytes=None):
-        msg = "🤝 <b>Новое предложение обмена на MangaBuff!</b>\n"
+    def notify_trade_offer(
+        self,
+        trade_id,
+        user_name="Пользователь",
+        receive_cards=None,
+        give_cards=None,
+        photo_bytes=None,
+        receive_photos=None,
+        give_photos=None,
+    ):
+        """
+        Notify about a trade offer with clear visual separation:
+        1) text summary + link
+        2) album/photo «📥 ВЫ ПОЛУЧИТЕ»
+        3) album/photo «📤 ВЫ ОТДАДИТЕ»
+        """
+        recv_photos = [p for p in (receive_photos or []) if p]
+        give_photos_list = [p for p in (give_photos or []) if p]
+        if not recv_photos and photo_bytes:
+            recv_photos = [photo_bytes]
+
+        header = "🤝 <b>Новое предложение обмена на MangaBuff!</b>\n"
         if user_name:
-            msg += f"👤 <b>Пользователь:</b> <code>{user_name}</code>\n"
+            header += f"👤 <b>Пользователь:</b> <code>{user_name}</code>\n"
         if receive_cards:
             cards_str = "\n• " + "\n• ".join(receive_cards)
-            msg += f"📥 <b>Вы получите ({len(receive_cards)}):</b>{cards_str}\n"
+            header += f"📥 <b>Вы получите ({len(receive_cards)}):</b>{cards_str}\n"
         if give_cards:
             cards_str = "\n• " + "\n• ".join(give_cards)
-            msg += f"📤 <b>Вы отдадите ({len(give_cards)}):</b>{cards_str}\n"
-        msg += f'🔗 <a href="https://mangabuff.ru/trades/{trade_id}">Открыть обмен на сайте</a>'
+            header += f"📤 <b>Вы отдадите ({len(give_cards)}):</b>{cards_str}\n"
+        header += f'🔗 <a href="https://mangabuff.ru/trades/{trade_id}">Открыть обмен на сайте</a>'
 
-        if photo_bytes:
-            self.send_photo(photo_bytes, caption=msg, parse_mode="HTML")
-        else:
-            self.send_message(msg, disable_preview=True)
+        # Always send text first so sides stay readable even without photos
+        self.send_message(header, disable_preview=True)
+
+        if recv_photos:
+            recv_cap = f"📥 <b>ВЫ ПОЛУЧИТЕ</b> ({len(recv_photos)})"
+            if len(recv_photos) == 1:
+                self.send_photo(recv_photos[0], caption=recv_cap, parse_mode="HTML")
+            else:
+                self.send_media_group(recv_photos[:10], caption=recv_cap, parse_mode="HTML")
+
+        if give_photos_list:
+            give_cap = f"📤 <b>ВЫ ОТДАДИТЕ</b> ({len(give_photos_list)})"
+            if len(give_photos_list) == 1:
+                self.send_photo(give_photos_list[0], caption=give_cap, parse_mode="HTML")
+            else:
+                self.send_media_group(give_photos_list[:10], caption=give_cap, parse_mode="HTML")
 
     def notify_trade_status(self, trade_id, user_name="Пользователь", status="canceled"):
         if status == "canceled":
@@ -338,6 +462,16 @@ class TelegramNotifier:
             f"🎬 Просмотрено: <b>{count}/3</b>\n"
             f"💎 Получено: <b>+{diamonds} алмазов</b>"
         )
+        self.send_message(msg, silent=True)
+
+    def notify_quiz_completed(self, streak, detail=None):
+        msg = (
+            "🧩 <b>Ежедневный квиз пройден!</b>\n"
+            f"✅ Серия: <b>{streak}</b> верных подряд\n"
+            "🎁 Награда: <b>~20 💎 + случайная заточка</b>"
+        )
+        if detail:
+            msg += f"\n📝 {detail}"
         self.send_message(msg, silent=True)
 
     def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None, user_id=None, card_id=None):
