@@ -378,19 +378,12 @@ class MangaMinerBot:
         today = now.strftime("%Y-%m-%d")
         state = DataManager.load_reading_state() or {}
         prev = state.get("stats") or {}
-        # Our own grind counter — site often sticky-reports 75/75 after midnight.
-        grinded = int(prev.get("chapters_grinded_today") or 0)
-        if prev.get("date") != today:
-            grinded = 0
-        if "chapters_grinded_today" in stats:
-            grinded = int(stats.get("chapters_grinded_today") or 0)
         state["stats"] = {
             "date": today,
-            "chapters_read": stats.get("chapters_read", 0),
-            "chapters_max": stats.get("chapters_max", 75),
-            "chapters_grinded_today": grinded,
-            "cards_found": stats.get("cards_found", 0),
-            "cards_max": stats.get("cards_max", 10),
+            "chapters_read": int(stats.get("chapters_read") or 0),
+            "chapters_max": int(stats.get("chapters_max") or 75),
+            "cards_found": int(stats.get("cards_found") or 0),
+            "cards_max": int(stats.get("cards_max") or 10),
             "card_ready": bool(stats.get("card_ready", False)),
             "card_cooldown": stats.get("card_cooldown"),
             "card_cooldown_sec": int(stats.get("card_cooldown_sec") or 0),
@@ -398,49 +391,9 @@ class MangaMinerBot:
             # keep current manga slug if known
             "current_manga": state.get("current_manga") or prev.get("current_manga"),
         }
+        # Drop obsolete local grind field if present
+        state["stats"].pop("chapters_grinded_today", None)
         DataManager.save_reading_state(state)
-
-    def _bump_chapters_grinded(self, delta: int) -> int:
-        """Increment local daily chapter grind counter; returns new total."""
-        if not delta:
-            state = DataManager.load_reading_state() or {}
-            return int((state.get("stats") or {}).get("chapters_grinded_today") or 0)
-        now = self._msk_now()
-        today = now.strftime("%Y-%m-%d")
-        state = DataManager.load_reading_state() or {}
-        prev = state.get("stats") or {}
-        grinded = int(prev.get("chapters_grinded_today") or 0)
-        if prev.get("date") != today:
-            grinded = 0
-        grinded += max(0, int(delta))
-        if "stats" not in state or not isinstance(state["stats"], dict):
-            state["stats"] = {"date": today}
-        state["stats"]["date"] = today
-        state["stats"]["chapters_grinded_today"] = grinded
-        state["stats"]["updated_at"] = now.isoformat()
-        DataManager.save_reading_state(state)
-        return grinded
-
-    def _effective_chapters_read(self, site_stats) -> tuple:
-        """
-        Return (chapters_read, chapters_max) for scheduling.
-        Prefer local grind counter when the site sticky-reports 75/75 while
-        daily cards are still incomplete.
-        """
-        ch_max = int((site_stats or {}).get("chapters_max") or 75)
-        site_ch = int((site_stats or {}).get("chapters_read") or 0)
-        cards_found = int((site_stats or {}).get("cards_found") or 0)
-        cards_max = int((site_stats or {}).get("cards_max") or 10)
-        state = DataManager.load_reading_state() or {}
-        prev = state.get("stats") or {}
-        today = self._msk_now().strftime("%Y-%m-%d")
-        grinded = int(prev.get("chapters_grinded_today") or 0)
-        if prev.get("date") != today:
-            grinded = 0
-        # Sticky 75/75 after reset: trust our grind progress until we hit the cap.
-        if site_ch >= ch_max and cards_found < cards_max and grinded < ch_max:
-            return grinded, ch_max
-        return site_ch, ch_max
 
     def _persist_panel_state(
         self,
@@ -1064,7 +1017,6 @@ class MangaMinerBot:
 
                         if post_res.status_code == 200:
                             chapters_read_session += len(buffer)
-                            self._bump_chapters_grinded(len(buffer))
                             for b in buffer:
                                 read_history.add(b["url"])
                                 progress_map[b["slug"]] = {"vol": b["vol"], "ch": b["ch"]}
@@ -1128,23 +1080,25 @@ class MangaMinerBot:
                                     )
                                     wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", True)
                                     if wait_card_cd:
-                                        # Re-fetch live counters — sticky 75/75 after midnight is common
                                         live = None
                                         try:
                                             live = self.get_reading_stats()
                                         except Exception:
                                             live = None
-                                        ch_now, ch_cap = self._effective_chapters_read(live or stats or {})
                                         cards_now = (live or {}).get("cards_found", current_cards)
                                         cards_cap = (live or {}).get("cards_max", 10)
+                                        ch_now = (live or {}).get("chapters_read")
+                                        ch_cap = (live or {}).get("chapters_max", 75)
+                                        if ch_now is None:
+                                            ch_now = (stats or {}).get("chapters_read")
+                                            ch_cap = (stats or {}).get("chapters_max", 75)
                                         if cards_now >= cards_cap:
-                                            self.log("🎁 Бонусная карта получена, дневной лимит карт закрыт. Кулдаун до завтра.")
+                                            self.log("🎁 Бонусная карта получена, дневной лимит карт закрыт.")
                                             buffer.clear()
                                             return True
-                                        # Always pause on card cooldown when wait_card_cd is on
                                         self.log(
                                             f"🎁 Бонусная карта получена ({cards_now}/{cards_cap})! "
-                                            f"Кулдаун ~45–60 мин (глав сегодня ~{ch_now}/{ch_cap})."
+                                            f"Кулдаун ~45–60 мин (на сайте глав {ch_now}/{ch_cap})."
                                         )
                                         buffer.clear()
                                         return True
@@ -2118,7 +2072,9 @@ class MangaMinerBot:
                     if t_sec is not None and t_sec > 0:
                         tower_left_sec = max(60, t_sec)
 
-                # 4. Manga Reading check (cards & 75-chapter quest)
+                # 4. Manga Reading check (cards & 75-chapter quest).
+                # Source of truth = site /balance. After midnight MSK the chapter counter
+                # often lags behind cards — wait for the site reset, do not invent progress.
                 card_wait_sec = 60 * 45
                 chapters_wait_sec = 0
                 ch_read = 0
@@ -2128,7 +2084,6 @@ class MangaMinerBot:
                 if self.running and DataManager.get_setting("reading_enabled", True):
                     reading_stats = self.get_reading_stats()
                     if not reading_stats:
-                        # Site hiccup / rate-limit — fall back to persisted counters
                         persisted = (DataManager.load_reading_state() or {}).get("stats") or {}
                         if persisted:
                             reading_stats = {
@@ -2143,37 +2098,37 @@ class MangaMinerBot:
                             self.log("⚠️ Не удалось обновить /balance — используем сохранённую стату чтения.")
 
                     if reading_stats:
-                        cards_found = reading_stats.get("cards_found", 0)
-                        cards_max = reading_stats.get("cards_max", 10)
-                        card_ready = reading_stats.get("card_ready", False)
+                        ch_read = int(reading_stats.get("chapters_read") or 0)
+                        ch_max = int(reading_stats.get("chapters_max") or 75)
+                        cards_found = int(reading_stats.get("cards_found") or 0)
+                        cards_max = int(reading_stats.get("cards_max") or 10)
+                        card_ready = bool(reading_stats.get("card_ready", False))
                         cd_str = reading_stats.get("card_cooldown") or ""
-                        ch_read, ch_max = self._effective_chapters_read(reading_stats)
 
-                        # Site sometimes still shows 75/75 right after midnight while cards
-                        # already reset to 0/10. _effective_chapters_read uses local grind counter.
-                        if (
-                            cards_found == 0
-                            and reading_stats.get("chapters_read", 0) >= ch_max
-                            and card_ready
-                            and ch_read == 0
-                        ):
+                        midnight_lag = (
+                            ch_read >= ch_max
+                            and cards_found < cards_max
+                            and self._msk_now().hour < 6
+                        )
+
+                        if midnight_lag and not card_ready:
                             self.log(
-                                "⚠️ Счётчик глав 75/75 при 0 картах после сброса — "
-                                "читаем дневной лимит заново."
+                                f"⏳ На сайте главы ещё {ch_read}/{ch_max} после полуночи "
+                                f"(карты {cards_found}/{cards_max}) — ждём сброса счётчика глав."
                             )
-
-                        # If daily 75 chapters limit not yet reached, read a batch of up to 15 chapters
-                        if ch_read < ch_max:
+                            chapters_wait_sec = random.randint(120, 240)
+                        elif ch_read < ch_max:
                             batch_size = min(15, ch_max - ch_read)
                             self.log(f"📖 Дневной лимит глав ({ch_read}/{ch_max}): читаем пачку из {batch_size} глав...")
                             self.read_manga_chapters(target_count=batch_size)
                             fresh_stats = self.get_reading_stats()
                             if fresh_stats:
                                 reading_stats = fresh_stats
-                                cards_found = fresh_stats.get("cards_found", cards_found)
-                                card_ready = fresh_stats.get("card_ready", False)
+                                ch_read = int(fresh_stats.get("chapters_read") or ch_read)
+                                ch_max = int(fresh_stats.get("chapters_max") or ch_max)
+                                cards_found = int(fresh_stats.get("cards_found") or cards_found)
+                                card_ready = bool(fresh_stats.get("card_ready", False))
                                 cd_str = fresh_stats.get("card_cooldown") or ""
-                                ch_read, ch_max = self._effective_chapters_read(fresh_stats)
 
                             if ch_read < ch_max:
                                 chapters_wait_sec = random.randint(90, 150)
@@ -2182,30 +2137,34 @@ class MangaMinerBot:
                         else:
                             chapters_wait_sec = get_seconds_until_midnight_msk()
 
-                        # Card availability check
                         if cards_found >= cards_max:
                             card_wait_sec = get_seconds_until_midnight_msk()
                             self.log(f"🃏 Все бонусные карты за сегодня собраны ({cards_found}/{cards_max}).")
                         elif card_ready:
-                            # If card is ready and chapters >= 75, read chapters specifically for card drop
-                            if ch_read >= ch_max:
-                                self.log(f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! Читаем главы до выпадения карты...")
-                                self.read_manga_chapters(target_count=10)
-                                fresh_r = self.get_reading_stats()
-                                if fresh_r:
-                                    reading_stats = fresh_r
-                                    cards_found = fresh_r.get("cards_found", cards_found)
-                                    if not fresh_r.get("card_ready", True):
-                                        card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
-                                    else:
-                                        card_wait_sec = 60
-                            else:
-                                card_wait_sec = chapters_wait_sec
+                            self.log(
+                                f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! "
+                                f"Читаем до выпадения (сайт: главы {ch_read}/{ch_max})..."
+                            )
+                            self.read_manga_chapters(target_count=10)
+                            fresh_r = self.get_reading_stats()
+                            if fresh_r:
+                                reading_stats = fresh_r
+                                ch_read = int(fresh_r.get("chapters_read") or ch_read)
+                                ch_max = int(fresh_r.get("chapters_max") or ch_max)
+                                cards_found = int(fresh_r.get("cards_found") or cards_found)
+                                if not fresh_r.get("card_ready", True):
+                                    card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
+                                else:
+                                    card_wait_sec = 60
+                            if ch_read < ch_max:
+                                chapters_wait_sec = random.randint(60, 120)
                         else:
                             card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
-                            self.log(f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). Следующая проверка через ~{card_wait_sec // 60} мин.")
+                            self.log(
+                                f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). "
+                                f"Следующая проверка через ~{card_wait_sec // 60} мин."
+                            )
                     else:
-                        # No live and no persisted stats — retry soon instead of sleeping until midnight
                         chapters_wait_sec = random.randint(120, 180)
                         ch_read, ch_max = 0, 75
                         self.log("⚠️ Стата чтения недоступна — повтор через ~2–3 мин.")
@@ -2227,14 +2186,16 @@ class MangaMinerBot:
                     candidates.append(("Башня", tower_left_sec))
 
                 if ch_read < ch_max:
-                    # Never schedule chapter wait as 0 — that drops it from the candidate list
                     if chapters_wait_sec <= 0:
                         chapters_wait_sec = random.randint(90, 150)
                     candidates.append(("Главы (до 75)", chapters_wait_sec))
-                elif cards_found < cards_max:
-                    if card_wait_sec <= 0:
-                        card_wait_sec = 60
-                    candidates.append(("Карта", card_wait_sec))
+                else:
+                    if chapters_wait_sec and chapters_wait_sec < 600 and cards_found < cards_max:
+                        candidates.append(("Сброс глав (сайт)", chapters_wait_sec))
+                    if cards_found < cards_max:
+                        if card_wait_sec <= 0:
+                            card_wait_sec = 60
+                        candidates.append(("Карта", card_wait_sec))
 
                 positive = [(name, s) for name, s in candidates if s > 0]
                 if not positive:
