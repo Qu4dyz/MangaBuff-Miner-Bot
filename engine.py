@@ -295,171 +295,6 @@ class MangaMinerBot:
         except Exception as e:
             self.log(f"⚠️ watch_daily_ads error: {e}")
 
-    def _quiz_headers(self):
-        return {
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-CSRF-TOKEN": self.csrf_token or "",
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": "https://mangabuff.ru/quiz",
-        }
-
-    def _quiz_sleep(self, seconds):
-        """Interruptible sleep for quiz pacing / rate-limit backoff."""
-        end = time.time() + max(0.0, float(seconds))
-        while self.running and time.time() < end:
-            time.sleep(min(0.25, end - time.time()))
-
-    def do_daily_quiz(self, target_streak=10):
-        """
-        Pass the daily quiz streak for the max reward (10 correct in a row).
-        Uses /quiz/start + /quiz/answer. Stops on milestone or target streak.
-        """
-        if not DataManager.get_setting("quiz_enabled", True):
-            return False
-
-        from datetime import datetime, timezone, timedelta
-        msk_today = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
-        if DataManager.get_setting("quiz_completed_date") == msk_today:
-            self.log(tr("log_quiz_already"))
-            return True
-
-        self.log(tr("log_quiz_check"))
-        try:
-            res = self.session.get("https://mangabuff.ru/quiz", timeout=15)
-            if res.status_code != 200:
-                self.log(f"⚠️ Failed to open /quiz: {res.status_code}")
-                return False
-
-            soup = BeautifulSoup(res.text, "html.parser")
-            meta = soup.find("meta", attrs={"name": "csrf-token"})
-            if meta and meta.get("content"):
-                self.csrf_token = meta.get("content")
-
-            headers = self._quiz_headers()
-            start = self.session.post(
-                "https://mangabuff.ru/quiz/start",
-                headers=headers,
-                data={},
-                timeout=15,
-            )
-            try:
-                data = start.json() if start.text else {}
-            except Exception:
-                data = {}
-            if start.status_code == 429 or data.get("message") == "Too Many Attempts.":
-                self.log("⏳ Quiz rate-limited on start, will retry later.")
-                return False
-            if start.status_code != 200:
-                self.log(f"⚠️ Quiz start failed: {start.status_code}")
-                return False
-
-            if not data.get("question"):
-                msg = data.get("message") or "no question"
-                self.log(f"ℹ️ Quiz start: {msg}")
-                # Treat "already done / no questions" style responses as completed for today
-                low = str(msg).lower()
-                if any(k in low for k in ("уже", "нет", "доступн", "завтра", "лимит", "прошли")):
-                    DataManager.set_setting("quiz_completed_date", msk_today)
-                    return True
-                return False
-
-            correct = 0
-            max_steps = max(20, int(target_streak) * 2)
-            for _step in range(max_steps):
-                if not self.running:
-                    return False
-
-                q = data.get("question") or {}
-                answer = (q.get("correct_text") or "").strip()
-                if not answer:
-                    opts = q.get("answers") or []
-                    answer = (opts[0] if opts else "").strip()
-                if not answer:
-                    self.log("⚠️ Quiz question has no answer options.")
-                    return False
-
-                # Human-like delay; site rate-limits aggressive answering
-                self._quiz_sleep(random.uniform(1.4, 2.4))
-                if not self.running:
-                    return False
-
-                ans_res = self.session.post(
-                    "https://mangabuff.ru/quiz/answer",
-                    headers=headers,
-                    data={"answer": answer},
-                    timeout=15,
-                )
-                try:
-                    data = ans_res.json() if ans_res.text else {}
-                except Exception:
-                    data = {}
-
-                # Rate-limit backoff
-                if ans_res.status_code == 429 or data.get("message") == "Too Many Attempts.":
-                    self.log("⏳ Quiz rate-limited, waiting ~45s...")
-                    self._quiz_sleep(random.uniform(40.0, 50.0))
-                    if not self.running:
-                        return False
-                    # Re-start streak after cooldown
-                    start = self.session.post(
-                        "https://mangabuff.ru/quiz/start",
-                        headers=self._quiz_headers(),
-                        data={},
-                        timeout=15,
-                    )
-                    try:
-                        data = start.json() if start.status_code == 200 and start.text else {}
-                    except Exception:
-                        data = {}
-                    correct = 0
-                    continue
-
-                if ans_res.status_code != 200:
-                    self.log(f"⚠️ Quiz answer failed: {ans_res.status_code}")
-                    return False
-
-                status = data.get("status")
-                msg = data.get("message") or ""
-
-                if status == "restart":
-                    self.log(f"❌ Quiz wrong answer / reset: {msg}")
-                    correct = 0
-                    # API restarts — load fresh question
-                    if not data.get("question"):
-                        start = self.session.post(
-                            "https://mangabuff.ru/quiz/start",
-                            headers=self._quiz_headers(),
-                            data={},
-                            timeout=15,
-                        )
-                        try:
-                            data = start.json() if start.status_code == 200 and start.text else {}
-                        except Exception:
-                            data = {}
-                    continue
-
-                if status in ("success", "milestone", "end"):
-                    correct = int(data.get("correct_count") or (correct + 1))
-                    if status == "milestone" or status == "end" or correct >= int(target_streak):
-                        self.log(tr("log_quiz_done", count=correct, detail=msg or status))
-                        DataManager.set_setting("quiz_completed_date", msk_today)
-                        try:
-                            self.notifier.notify_quiz_completed(correct, msg)
-                        except Exception:
-                            pass
-                        return True
-                    continue
-
-                # Unknown payload — stop safely
-                self.log(f"⚠️ Unexpected quiz response: {data}")
-                return False
-
-            self.log("⚠️ Quiz stopped: step limit reached without milestone.")
-            return False
-        except Exception as e:
-            self.log(f"⚠️ do_daily_quiz error: {e}")
-            return False
-
     def get_reading_stats(self, soup=None):
         """Parse current daily chapter reading progress and card drops from /balance."""
         try:
@@ -1274,7 +1109,18 @@ class MangaMinerBot:
                                     )
                                     wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", True)
                                     if wait_card_cd:
-                                        if not stats or (stats["chapters_read"] + chapters_read_session) >= stats["chapters_max"]:
+                                        # Re-fetch live counters — stale pre-batch stats can falsely look like 75/75
+                                        live = None
+                                        try:
+                                            live = self.get_reading_stats()
+                                        except Exception:
+                                            live = None
+                                        ch_now = (live or {}).get("chapters_read")
+                                        ch_cap = (live or {}).get("chapters_max", 75)
+                                        if ch_now is None:
+                                            ch_now = (stats or {}).get("chapters_read", 0) + chapters_read_session
+                                            ch_cap = (stats or {}).get("chapters_max", 75)
+                                        if ch_now >= ch_cap:
                                             self.log("🎁 Бонусная карта получена и дневной лимит 75 глав закрыт! Кулдаун активирован (~45–60 мин).")
                                             buffer.clear()
                                             return True
@@ -2137,9 +1983,6 @@ class MangaMinerBot:
         # Watch daily ads (3x7 💎)
         self.watch_daily_ads()
 
-        # Daily quiz streak reward (10 correct)
-        self.do_daily_quiz()
-
         # Check Tower of Rift expeditions (claim & start)
         self.check_tower_expedition()
 
@@ -2246,14 +2089,6 @@ class MangaMinerBot:
                     else:
                         ads_cnt = 3
 
-                # 2b. Daily quiz (10 correct streak → max reward)
-                quiz_done = DataManager.get_setting("quiz_completed_date") == msk_today.strftime("%Y-%m-%d")
-                if self.running and DataManager.get_setting("quiz_enabled", True):
-                    if not quiz_done:
-                        quiz_done = bool(self.do_daily_quiz())
-                else:
-                    quiz_done = True
-
                 # 3. Abyss Tower check (claim rewards & restart 12h)
                 tower_left_sec = None
                 if self.running and DataManager.get_setting("tower_enabled", True):
@@ -2277,6 +2112,15 @@ class MangaMinerBot:
                         cards_max = reading_stats.get("cards_max", 10)
                         card_ready = reading_stats.get("card_ready", False)
                         cd_str = reading_stats.get("card_cooldown") or ""
+
+                        # Site sometimes still shows 75/75 right after midnight while cards
+                        # already reset to 0/10. Treat that as "chapters not done yet".
+                        if cards_found == 0 and ch_read >= ch_max and card_ready:
+                            self.log(
+                                "⚠️ Счётчик глав 75/75 при 0 картах после сброса — "
+                                "читаем дневной лимит заново."
+                            )
+                            ch_read = 0
 
                         # If daily 75 chapters limit not yet reached, read a batch of up to 15 chapters
                         if ch_read < ch_max:
@@ -2330,13 +2174,9 @@ class MangaMinerBot:
                 # 6. Ads wait (resets at midnight MSK if all 3 watched, else short retry)
                 ads_wait_sec = get_seconds_until_midnight_msk() if ads_cnt >= 3 else 120
 
-                # 6b. Quiz wait (once per day after streak reward)
-                quiz_wait_sec = get_seconds_until_midnight_msk() if quiz_done else 180
-
                 candidates = [
                     ("Шахта", mine_wait_sec),
                     ("Реклама", ads_wait_sec),
-                    ("Квиз", quiz_wait_sec),
                 ]
                 if tower_left_sec is not None:
                     candidates.append(("Башня", tower_left_sec))

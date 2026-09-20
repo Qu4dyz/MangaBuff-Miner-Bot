@@ -464,17 +464,6 @@ class TelegramNotifier:
         )
         self.send_message(msg, silent=True)
 
-    def notify_quiz_completed(self, streak, detail=None):
-        msg = (
-            "🧩 <b>Ежедневный квиз: серия собрана</b>\n"
-            f"✅ Верных подряд: <b>{streak}</b>\n"
-            "ℹ️ Сейчас сайт за 10 верных алмазы не начисляет "
-            "(награда с квиза убрана) — остаётся только серия/рекорд."
-        )
-        if detail:
-            msg += f"\n📝 {detail}"
-        self.send_message(msg, silent=True)
-
     def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None, user_id=None, card_id=None):
         import urllib.parse
         market_url = f"https://mangabuff.ru/market?q={urllib.parse.quote_plus(card_name)}"
