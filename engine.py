@@ -1017,88 +1017,116 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
 
     def clean_unwanted_notifications(self, active_trade_ids=None):
         """
-        Mark as read: card drops, sharpening scrolls, promo banners, and trade offers
-        (trades are already pushed to Telegram by check_trade_offers before this runs).
-        Leaves chapter/manga notifications strictly UNREAD.
+        Mark as read: card drops, sharpening scrolls, promo banners, club rewards, and trade offers.
+        Leaves manga chapter alerts and user comments strictly UNREAD.
         """
         if not DataManager.get_setting("notifs_cleaner_enabled", True):
             return 0
 
         try:
-            res = self.session.get("https://mangabuff.ru/notifications", timeout=10)
-            if res.status_code != 200:
-                return 0
-            blocked = is_anti_bot_page(res)
-            if blocked:
-                self.log(f"🛡️ Уведомления недоступны — anti-bot ({blocked})")
-                return 0
+            unwanted_notif_ids = set()
+            urls_to_check = [
+                "https://mangabuff.ru/notifications",
+                "https://mangabuff.ru/notifications?type=other",
+            ]
 
-            soup = BeautifulSoup(res.text, "html.parser")
-            items = soup.select(".notifications__item")
-            if not items:
-                return 0
+            for url in urls_to_check:
+                res = self.session.get(url, timeout=10)
+                if res.status_code != 200:
+                    continue
+                blocked = is_anti_bot_page(res)
+                if blocked:
+                    self.log(f"🛡️ Уведомления недоступны — anti-bot ({blocked})")
+                    return 0
 
-            unwanted_notif_ids = []
-
-            for item in items:
-                notif_id = item.get("data-id")
-                if not notif_id:
+                soup = BeautifulSoup(res.text, "html.parser")
+                items = soup.select(".notifications__item")
+                if not items:
                     continue
 
-                item_text = item.get_text(strip=True, separator=" ").lower()
+                for item in items:
+                    notif_id = item.get("data-id")
+                    if not notif_id or notif_id in unwanted_notif_ids:
+                        continue
 
-                # PRESERVE CHAPTERS: manga chapter alerts stay unread.
-                if any(w in item_text for w in ["глава", "главы", "главу", "глав"]):
-                    continue
+                    # Skip already read items
+                    classes = item.get("class", [])
+                    if not any("not-read" in c or "unread" in c for c in classes):
+                        continue
 
-                # Trades: mark read after Telegram alert (handled upstream).
-                is_trade = bool(
-                    item.select_one(".js-notification-trade-open") or
-                    item.select_one("[data-trade-id]") or
-                    item.find("a", href=re.compile(r"/trades/\d+")) or
-                    "обмен" in item_text or
-                    "trade" in item_text
-                )
+                    item_text = item.get_text(strip=True, separator=" ").lower()
 
-                # Clutter: card drops, scrolls, animated promo, finished tower expeditions.
-                # NOTE: do NOT match bare "добавлена новая" — appears in chapter notifs.
-                is_clutter = any(k in item_text for k in [
-                    "получили новую карту",
-                    "вы получили карту",
-                    "вам выпала карта",
-                    "выпала карта",
-                    "получена карта",
-                    "новая x карта",
-                    "новая карта",
-                    "новую карту",
-                    "новые карты",
-                    "свиток заточки",
-                    "свитки заточки",
-                    "благословенный свиток",
-                    "заточки",
-                    "заточка",
-                    "анимированн",
-                    "анимированная",
-                    "добавлена анимированная",
-                ])
+                    # 1. PRESERVE CHAPTERS: manga chapter alerts stay unread.
+                    if any(w in item_text for w in ["глава", "главы", "главу", "глав"]):
+                        continue
 
-                # Tower expedition finished — claim is handled by check_tower_expedition.
-                is_tower_done = (
-                    ("экспедиц" in item_text and "башн" in item_text)
-                    or "экспедиция завершилась" in item_text
-                    or ("экспедиция в башне" in item_text and "наград" in item_text)
-                )
+                    # 2. PRESERVE COMMENTS: user comments & replies stay unread.
+                    if any(w in item_text for w in ["комментар", "ответил на ваш", "ответил вам"]):
+                        continue
 
-                if is_trade or is_clutter or is_tower_done:
-                    unwanted_notif_ids.append(notif_id)
+                    # Trades: mark read after Telegram alert (handled upstream).
+                    is_trade = bool(
+                        item.select_one(".js-notification-trade-open") or
+                        item.select_one("[data-trade-id]") or
+                        item.find("a", href=re.compile(r"/trades/\d+")) or
+                        "обмен" in item_text or
+                        "trade" in item_text
+                    )
+
+                    # Clutter: card drops, scrolls, animated promo, club card rewards, finished tower expeditions.
+                    is_card_or_scroll = any(k in item_text for k in [
+                        "карту", "карта", "карты",
+                        "свиток", "свитки", "заточка", "заточки",
+                        "анимированн",
+                    ]) and any(v in item_text for v in [
+                        "получили", "выпал", "выпала", "достижен", "бесплатн", "наград", "нов"
+                    ])
+
+                    is_clutter = is_card_or_scroll or any(k in item_text for k in [
+                        "получили новую карту",
+                        "вы получили карту",
+                        "получили бесплатную карту",
+                        "бесплатную карту",
+                        "достижение клуба",
+                        "достижения клуба",
+                        "вам выпала карта",
+                        "выпала карта",
+                        "получена карта",
+                        "новая x карта",
+                        "новая карта",
+                        "новую карту",
+                        "новые карты",
+                        "свиток заточки",
+                        "свитки заточки",
+                        "благословенный свиток",
+                        "заточки",
+                        "заточка",
+                        "анимированн",
+                        "анимированная",
+                        "добавлена анимированная",
+                    ])
+
+                    # Tower expedition finished — claim is handled by check_tower_expedition.
+                    is_tower_done = (
+                        ("экспедиц" in item_text and "башн" in item_text)
+                        or "экспедиция завершилась" in item_text
+                        or ("экспедиция в башне" in item_text and "наград" in item_text)
+                    )
+
+                    if is_trade or is_clutter or is_tower_done:
+                        unwanted_notif_ids.add(notif_id)
 
             read_count = 0
+            headers = {
+                "X-Requested-With": "XMLHttpRequest",
+                "X-CSRF-TOKEN": getattr(self, "csrf_token", "")
+            }
             for uid in unwanted_notif_ids:
                 try:
                     read_res = self.session.post(
                         f"https://mangabuff.ru/notifications/{uid}/read",
                         data={},
-                        headers={"X-Requested-With": "XMLHttpRequest"},
+                        headers=headers,
                         timeout=5
                     )
                     if read_res.status_code == 200:
@@ -1110,7 +1138,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
             if read_count > 0:
                 self.log(
                     f"🧹 Прочитано уведомлений MangaBuff: {read_count} шт. "
-                    f"(уведы о главах оставлены непрочитанными)"
+                    f"(главы манги и комментарии оставлены непрочитанными)"
                 )
             return read_count
 
