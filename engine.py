@@ -3016,13 +3016,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                             cup_busy[0] = cup_busy[0] or bool(DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_state.json')).get('active_fight'))
                     self._run_module('evening_cup', _mod_cup, 5 * 60)
                     if cup_busy[0]:
-                        if time.time() >= getattr(self, '_chests_next_check_at', 0):
-                            self.claim_battle_chests()
-                            self._chests_next_check_at = time.time() + 15 * 60
                         wait = min(30, max(1, getattr(self, '_cup_next_check_at', 0) - time.time()))
                         self._touch_heartbeat()
                         time.sleep(wait)
                         continue
+
 
 
                 def _mod_daily():
@@ -3071,14 +3069,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
 
                     self._run_module("mining", _mod_mining, 25 * 60)
 
-                # Arena/chests have their own state and deadline, even with zero mine hits.
+                # Arena module (checks battles and weekly seasonal chests)
                 arena_now = time.time()
                 if arena_now >= getattr(self, '_arena_next_check_at', 0):
                     self._arena_next_check_at = arena_now + 30 * 60
                     self._run_module('arena', self.run_arena_cycle, 15 * 60)
-                elif arena_now >= getattr(self, '_chests_next_check_at', 0):
-                    self._run_module('battle_chests', self.claim_battle_chests, 3 * 60)
-                self._chests_next_check_at = time.time() + 15 * 60
+
 
                 # 2. Daily Ads check (3x7 💎)
                 ads_cnt = 3
@@ -3252,9 +3248,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                     ("Шахта", mine_wait_sec),
                     ("Реклама", ads_wait_sec),
                     ('Арена', max(1, getattr(self, '_arena_next_check_at', time.time()) - time.time())),
-                    ('Боевые сундуки', max(1, self._chests_next_check_at - time.time())),
                     ('Клуб (вклады)', max(60, int(30 * 60 - (time.time() - getattr(self, '_last_club_check_at', 0))))),
                 ]
+
 
                 if DataManager.get_setting('arena_cup_enabled',True):
                     cup_now=self._msk_now()
