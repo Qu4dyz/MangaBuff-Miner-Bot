@@ -22,19 +22,29 @@ def parse_smart_number(text):
 
 
 def safe_cookies_to_dict(session):
-    """Build a plain {name: value} dict from a requests cookie jar.
+    """Build a plain {name: value} dict from requests or curl_cffi cookie jars.
 
-    Iterates the jar (an iterator of Cookie objects) and overwrites on
-    duplicate names, so DDoS-Guard's repeated __ddg8_ / __ddg1_ cookies
-    collapse to a single entry (last value wins). This avoids
-    requests.utils.dict_from_cookiejar(), which raises
-    MultipleCookiesWithSameNameError on duplicate names, and avoids any
-    create_cookie()/jar.set() reconstruction that would corrupt the
-    essential auth cookies (mangabuff_session, XSRF-TOKEN).
+    Collapses duplicate DDoS-Guard __ddg* cookies to a single entry (last wins).
     """
+    try:
+        from http_session import cookies_to_dict
+        d = cookies_to_dict(session)
+        if d:
+            return d
+    except Exception:
+        pass
     out = {}
-    for c in session.cookies:
-        out[c.name] = c.value  # last write wins
+    try:
+        for c in session.cookies:
+            if isinstance(c, str):
+                try:
+                    out[c] = session.cookies.get(c)
+                except Exception:
+                    out[c] = session.cookies[c]
+            else:
+                out[c.name] = c.value
+    except Exception:
+        pass
     return out
 
 

@@ -1,4 +1,3 @@
-import requests
 from data_management import DataManager
 from languages import tr
 from bs4 import BeautifulSoup
@@ -14,16 +13,27 @@ from utils import (
     get_seconds_until_midnight_msk,
     classify_card_copy_number
 )
+from http_session import (
+    CHROME_UA,
+    GuardedSession,
+    create_raw_session,
+    has_curl_cffi,
+    is_anti_bot_page,
+    load_cookies_into,
+    try_refresh_ddos_guard,
+)
 import os
 import random
+import threading
 import time
 from tg_notifier import get_notifier
+from arena_automation import ArenaAutomationMixin
 
 
 # ==========================================
 # BOT ENGINE
 # ==========================================
-class MangaMinerBot:
+class MangaMinerBot(ArenaAutomationMixin):
     def __init__(self, log_callback, progress_callback, stats_callback, headless=True, proxy=None):
         self.log = log_callback       
         self.auth_log_buffer = []
@@ -33,43 +43,252 @@ class MangaMinerBot:
         self.running = False
         self.API_URL = "https://mangabuff.ru/mine/hit"
         self.notifier = get_notifier()
-        self.session = requests.Session()
+        self._anti_bot_paused_until = 0.0
+        self._anti_bot_down_since = 0.0
+        self._anti_bot_fail_streak = 0
+        self._anti_bot_user_notified = False
+        self._last_hard_alert_at = 0.0
+        # Module isolation: abort current step without stopping the whole daemon.
+        self._module_abort = threading.Event()
+        self._heartbeat_at = time.monotonic()
+        self._heartbeat_lock = threading.Lock()
+        self._watchdog_started = False
 
         # Configure proxy if provided or found in settings/environment
         raw_proxy = proxy or os.getenv("MANGABUFF_PROXY") or os.getenv("PROXY") or DataManager.get_setting("proxy")
         self.proxy = normalize_proxy_url(raw_proxy)
+
+        raw = create_raw_session(proxy=self.proxy, impersonate="chrome131")
+        self.session = GuardedSession(
+            raw,
+            on_block=self._on_anti_bot_block,
+            on_recovered=self._on_anti_bot_recovered,
+            persist_cookies=self._persist_session_cookies,
+            should_abort=self._module_cancelled,
+            on_heartbeat=self._touch_heartbeat,
+            proxy=self.proxy,
+            impersonate="chrome131",
+        )
         if self.proxy:
-            self.session.proxies.update({
-                "http": self.proxy,
-                "https": self.proxy
-            })
             masked = mask_proxy_url(self.proxy)
             self.auth_log_buffer.append(f"🌐 Прокси подключен: {masked}")
+        engine = "curl_cffi/chrome131" if has_curl_cffi() else "requests"
+        self.auth_log_buffer.append(f"🛡️ HTTP-клиент: {engine} (обход DDoS-Guard fingerprint)")
 
         # Default modern browser UA (overridden after login if a saved one exists)
-        self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
-        })
+        self.session.headers.update({"User-Agent": CHROME_UA})
         self.email, self.password = DataManager.get_credentials()
         self.csrf_token = None
-        self.user_agent = None
+        self.user_agent = CHROME_UA
         self.user_id = None
         self.current_balance = 0
         self.diamonds_balance = 0
         self.daily_reward_claimed = False
         self._last_claimed_date = None
+        self._visit_ping_done_day = None
+        self._tower_next_check_at = 0.0
+        self._tower_ends_at = 0.0
+        self._last_notif_poll_at = 0.0
+
+    def _persist_session_cookies(self):
+        """Save current cookies/csrf/ua so DDoS-Guard tokens survive restarts."""
+        if not self.csrf_token:
+            return
+        try:
+            cookies_dict = safe_cookies_to_dict(self.session)
+            if not cookies_dict:
+                return
+            DataManager.save_session(
+                cookies_dict,
+                self.csrf_token,
+                self.user_agent or CHROME_UA,
+            )
+        except Exception:
+            pass
+
+    def _touch_heartbeat(self):
+        with self._heartbeat_lock:
+            self._heartbeat_at = time.monotonic()
+
+    def _module_cancelled(self):
+        return self._module_abort.is_set()
+
+    def _alive(self):
+        """True while daemon runs and current module is not aborted."""
+        return bool(self.running) and not self._module_abort.is_set()
+
+    def _start_watchdog(self):
+        """Force-exit if the main loop stops heartbeating (hung curl/sleep)."""
+        if self._watchdog_started:
+            return
+        self._watchdog_started = True
+        # Monotonic clock: NTP jumps must never disable the watchdog.
+        limit = 8 * 60
+
+        def _watch():
+            while True:
+                time.sleep(15)
+                with self._heartbeat_lock:
+                    age = time.monotonic() - self._heartbeat_at
+                if age > limit:
+                    try:
+                        self.log(
+                            f"🛑 Watchdog: нет heartbeat {int(age)}с — "
+                            f"принудительный рестарт процесса"
+                        )
+                    except Exception:
+                        pass
+                    os._exit(1)
+
+        threading.Thread(target=_watch, name="mb-watchdog", daemon=True).start()
+
+    def _run_module(self, name, fn, timeout_sec):
+        """
+        Run one daemon step with a hard deadline.
+        Cooperative abort via _module_abort; if still stuck after grace → process exit
+        (systemd restarts the service). Session stays on the main thread.
+        """
+        self._module_abort.clear()
+        self._touch_heartbeat()
+        self.log(f"▶️ Модуль «{name}» (лимит ~{max(1, timeout_sec // 60)} мин)")
+
+        done = threading.Event()
+
+        def _killer():
+            if done.wait(timeout_sec):
+                return
+            try:
+                self.log(f"⏱️ Модуль «{name}» превысил лимит — abort")
+            except Exception:
+                pass
+            self._module_abort.set()
+            try:
+                self.notifier.notify_alert(
+                    f"Модуль «{name}» завис",
+                    f"Лимит {timeout_sec // 60} мин. Прерываю; если не отпустит — рестарт.",
+                )
+            except Exception:
+                pass
+            if done.wait(30):
+                return
+            try:
+                self.log(f"🛑 Модуль «{name}» не остановился — рестарт процесса")
+            except Exception:
+                pass
+            os._exit(1)
+
+        killer = threading.Thread(target=_killer, name=f"mb-kill-{name}", daemon=True)
+        killer.start()
+        try:
+            return fn()
+        except Exception as e:
+            self.log(f"⚠️ Модуль «{name}» ошибка: {e}")
+            return None
+        finally:
+            done.set()
+            self._module_abort.clear()
+            self._touch_heartbeat()
+
+    def _on_anti_bot_block(self, reason, url):
+        now = time.time()
+        is_rate_limit = reason == "http_429"
+        if not self._anti_bot_down_since:
+            self._anti_bot_down_since = now
+        self._anti_bot_fail_streak += 1
+        # Back off hard so we don't provoke more challenges: 3 → 6 → 12 → 20 мин.
+        # 429 gets a slightly softer first pause but still stops the burst.
+        if is_rate_limit:
+            base = 180 * (2 ** min(self._anti_bot_fail_streak - 1, 3))
+            pause = min(12 * 60, base)
+        else:
+            pause = min(20 * 60, 180 * (2 ** min(self._anti_bot_fail_streak - 1, 3)))
+        pause += random.randint(20, 60)
+        self._anti_bot_paused_until = max(self._anti_bot_paused_until, now + pause)
+        down_for = now - self._anti_bot_down_since
+        label = "Rate-limit 429" if is_rate_limit else f"Anti-bot ({reason})"
+        self.log(
+            f"🛡️ {label} на {url} — пауза ~{pause // 60} мин "
+            f"(подряд: {self._anti_bot_fail_streak})."
+        )
+        # 429 = temporary throttle, NOT a DDoS interstitial. Never spam TG for it.
+        # Real challenges: alert only when actually stuck (3+ fails or ≥8 min down).
+        if is_rate_limit:
+            return
+        stuck = self._anti_bot_fail_streak >= 3 or down_for >= 8 * 60
+        if stuck and now - self._last_hard_alert_at >= 3 * 3600:
+            self._last_hard_alert_at = now
+            self._anti_bot_user_notified = True
+            try:
+                self.notifier.notify_ddos_stuck(reason, down_for / 60.0)
+            except Exception:
+                pass
+
+    def _clear_anti_bot_state(self, *, silent_log=False, reason="ok"):
+        told_user = self._anti_bot_user_notified
+        had_block = bool(self._anti_bot_down_since or self._anti_bot_fail_streak)
+        self._anti_bot_paused_until = 0.0
+        self._anti_bot_down_since = 0.0
+        self._anti_bot_fail_streak = 0
+        self._anti_bot_user_notified = False
+        # Keep hard-alert cooldown so a flapping challenge doesn't re-ping every recovery.
+        if not silent_log and had_block and reason not in ("http_429", "ok", "probe_ok"):
+            self.log(f"✅ Anti-bot обойдён ({reason})")
+        elif not silent_log and had_block and reason == "http_429":
+            self.log("✅ Rate-limit 429 снят, продолжаю.")
+        if told_user:
+            self._last_hard_alert_at = 0.0
+            try:
+                self.notifier.notify_ddos_recovered()
+            except Exception:
+                pass
+
+    def _on_anti_bot_recovered(self, reason, url):
+        self._clear_anti_bot_state(reason=reason or "ok")
+
+    def _wait_if_anti_bot_paused(self):
+        """Sleep out the backoff in short slices so the daemon can still stop."""
+        while self.running and time.time() < self._anti_bot_paused_until:
+            left = int(self._anti_bot_paused_until - time.time())
+            if left <= 0:
+                break
+            self.log(f"⏳ Anti-bot пауза, ещё ~{max(1, left // 60)} мин. Запросы не шлю.")
+            end = time.monotonic() + min(left, 30)
+            while self.running and time.monotonic() < end:
+                self._touch_heartbeat()
+                time.sleep(0.5)
+
+    def ensure_site_access(self):
+        """Probe homepage; refresh DDoS-Guard cookies if interstitial is shown."""
+        try:
+            res = self.session.get("https://mangabuff.ru/", timeout=20)
+            reason = is_anti_bot_page(res)
+            if reason is None and getattr(res, "status_code", 0) == 200:
+                self._persist_session_cookies()
+                # Homepage OK must clear stale 429/challenge flags (they used to stick for days).
+                if self._anti_bot_down_since or self._anti_bot_fail_streak:
+                    self._clear_anti_bot_state(silent_log=True, reason="probe_ok")
+                return True
+            # Force an explicit refresh even if GuardedSession already tried
+            if try_refresh_ddos_guard(self.session._s if isinstance(self.session, GuardedSession) else self.session):
+                self._persist_session_cookies()
+                self.log("✅ Доступ к сайту восстановлен (DDoS-Guard cookies).")
+                if self._anti_bot_down_since or self._anti_bot_fail_streak:
+                    self._clear_anti_bot_state(reason="ddos_refresh")
+                return True
+            self.log(f"⚠️ Нет доступа к сайту ({reason or res.status_code}). Нужен рабочий прокси.")
+            return False
+        except Exception as e:
+            self.log(f"⚠️ ensure_site_access: {e}")
+            return False
 
     def validate_session(self):
         data = DataManager.load_session()
         if not data or "cookies" not in data or "csrf" not in data:
             return False
 
-        self.session.cookies.update(data["cookies"])
+        load_cookies_into(self.session, data.get("cookies") or {})
         self.csrf_token = data["csrf"]
-        self.user_agent = data["agent"]
+        self.user_agent = data.get("agent") or CHROME_UA
         self.session.headers.update({
             "User-Agent": self.user_agent,
             "X-CSRF-TOKEN": self.csrf_token,
@@ -83,12 +302,17 @@ class MangaMinerBot:
 
     def login_and_steal_keys(self):
         self.auth_log_buffer.append("Logging in via API...")
-        self.session.cookies.clear()
         try:
-            self.user_agent = (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+            self.session.cookies.clear()
+        except Exception:
+            pass
+        # Warm DDoS-Guard cookies before login (critical on datacenter IPs / flagged proxies)
+        try:
+            try_refresh_ddos_guard(self.session._s if isinstance(self.session, GuardedSession) else self.session)
+        except Exception:
+            pass
+        try:
+            self.user_agent = CHROME_UA
             self.session.headers.update({"User-Agent": self.user_agent})
 
             # 1. Initial GET to retrieve the login page (and session cookie)
@@ -146,7 +370,7 @@ class MangaMinerBot:
             return False
 
     def claim_daily_reward(self):
-        """Claim the daily login reward from /balance page."""
+        """Claim the daily login reward from /balance page (monthly calendar, resets on the 1st)."""
         from datetime import datetime, timezone, timedelta
         msk_today = datetime.now(timezone(timedelta(hours=3))).date()
         if self._last_claimed_date != msk_today:
@@ -203,6 +427,76 @@ class MangaMinerBot:
                 self.log(err)
             else:
                 self.auth_log_buffer.append(err)
+
+    def ping_daily_visit(self):
+        """
+        Maintain profile login streak («Дней подряд») via POST /visit/ping.
+
+        MangaBuff frontend sends this once per day when opening /, /users/{id}
+        or /manga/* outside 00:00–02:00 local time. Pure HTTP scraping never
+        runs that JS, so the streak resets unless we ping explicitly.
+        """
+        from datetime import datetime, timezone, timedelta
+
+        msk = datetime.now(timezone(timedelta(hours=3)))
+        # Same quiet window as site JS (account is MSK-oriented).
+        if 0 <= msk.hour < 2:
+            return False
+
+        msk_day = msk.strftime("%Y-%m-%d")
+        if self._visit_ping_done_day == msk_day:
+            return False
+        if DataManager.get_setting("visit_ping_day") == msk_day:
+            self._visit_ping_done_day = msk_day
+            return False
+
+        try:
+            # Homepage is an allowed visit path; also refreshes CSRF.
+            home = self.session.get("https://mangabuff.ru/", timeout=12)
+            if home.status_code != 200:
+                self.log(f"⚠️ Visit ping: главная HTTP {home.status_code}")
+                return False
+            soup = BeautifulSoup(home.text, "html.parser")
+            meta = soup.find("meta", attrs={"name": "csrf-token"})
+            if meta and meta.get("content"):
+                self.csrf_token = meta.get("content")
+
+            resp = self.session.post(
+                "https://mangabuff.ru/visit/ping",
+                data={},
+                headers={
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
+                    "X-CSRF-TOKEN": self.csrf_token,
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": "https://mangabuff.ru/",
+                    "Origin": "https://mangabuff.ru",
+                },
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                self.log(f"⚠️ Visit ping HTTP {resp.status_code}")
+                return False
+
+            status = ""
+            try:
+                status = str((resp.json() or {}).get("status") or "")
+            except Exception:
+                status = ""
+
+            if status in ("recorded", "already"):
+                self._visit_ping_done_day = msk_day
+                DataManager.set_setting("visit_ping_day", msk_day)
+                if status == "recorded":
+                    self.log("📅 Логин-стрик: визит засчитан (/visit/ping).")
+                else:
+                    self.log("📅 Логин-стрик: визит за сегодня уже учтён.")
+                return True
+
+            self.log(f"⚠️ Visit ping unexpected: {resp.text[:160]}")
+            return False
+        except Exception as e:
+            self.log(f"⚠️ Visit ping error: {e}")
+            return False
 
     def watch_daily_ads(self):
         """Watch up to 3 daily ads on /balance page for +7 diamonds each (+21 diamonds total)."""
@@ -310,8 +604,8 @@ class MangaMinerBot:
                 if m_dia:
                     self.diamonds_balance = parse_smart_number(m_dia.group(1))
 
-            chapters_read = 0
-            chapters_max = 75
+            chapters_read = None
+            chapters_max = None
             for span in soup.find_all(string=lambda t: t and "Главы" in t):
                 parent = span.parent
                 grand = parent.parent if parent else None
@@ -322,13 +616,14 @@ class MangaMinerBot:
                     chapters_max = int(m.group(2))
                     break
 
-            cards_found = 0
-            cards_max = 10
-            card_ready = True
+            cards_found = None
+            cards_max = None
+            card_ready = False
             card_cooldown = None
 
-            drop_container = soup.find(class_=lambda c: c and "wallet-panel__drop" in c)
+            drop_container = soup.find(class_="wallet-panel__drop")
             if drop_container:
+                card_ready = True
                 tooltip = drop_container.get("data-tooltip", "")
                 m_cd = re.search(r"через\s*([^.]+)", tooltip)
                 if m_cd:
@@ -344,6 +639,14 @@ class MangaMinerBot:
                 if m:
                     cards_found = int(m.group(1))
                     cards_max = int(m.group(2))
+
+            # An auth/interstitial page or changed wallet markup is unavailable,
+            # not evidence of an empty daily counter or a ready card.
+            if (chapters_read is None or chapters_max is None or
+                    cards_found is None or cards_max is None or not drop_container or
+                    chapters_max <= 0 or cards_max <= 0 or
+                    chapters_read > chapters_max or cards_found > cards_max):
+                return None
 
             stats = {
                 "chapters_read": chapters_read,
@@ -543,6 +846,45 @@ class MangaMinerBot:
         except Exception:
             return False
 
+    def _download_image_bytes(self, img_path_or_url, referer="https://mangabuff.ru/", retries=3):
+        """Download card/image bytes via raw session; validate magic header."""
+        if not img_path_or_url:
+            return None
+        full_img_url = (
+            f"https://mangabuff.ru{img_path_or_url}"
+            if str(img_path_or_url).startswith("/")
+            else img_path_or_url
+        )
+        raw = self.session._s if hasattr(self.session, "_s") else self.session
+        last_err = None
+        for attempt in range(retries):
+            try:
+                r_img = raw.get(
+                    full_img_url,
+                    timeout=20,
+                    headers={
+                        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                        "Referer": referer,
+                    },
+                )
+                body = bytes(r_img.content or b"")
+                if r_img.status_code == 200 and len(body) > 256:
+                    head = body[:16]
+                    if head.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"RIFF")):
+                        return body
+                    if attempt == 0:
+                        try:
+                            try_refresh_ddos_guard(raw)
+                        except Exception:
+                            pass
+                last_err = f"status={getattr(r_img, 'status_code', '?')} len={len(body)}"
+            except Exception as e:
+                last_err = str(e)
+            time.sleep(0.35 * (attempt + 1))
+        if last_err:
+            self.log(f"⚠️ Не удалось скачать картинку: {last_err}")
+        return None
+
     def check_trade_offers(self):
         """
         Check for incoming trade proposals on MangaBuff.
@@ -608,17 +950,10 @@ class MangaMinerBot:
                             return f"«{c_name}»{num_str}"
 
                         def _download_card_image(c):
-                            img = c.get("image")
-                            if not img:
-                                return None
-                            try:
-                                full_img_url = f"https://mangabuff.ru{img}" if img.startswith("/") else img
-                                r_img = self.session.get(full_img_url, timeout=8)
-                                if r_img.status_code == 200 and r_img.content:
-                                    return r_img.content
-                            except Exception:
-                                pass
-                            return None
+                            return self._download_image_bytes(
+                                c.get("image"),
+                                referer="https://mangabuff.ru/trades",
+                            )
 
                         recv_list = pdata.get("receive_cards", []) or []
                         give_list = pdata.get("give_cards", []) or []
@@ -626,6 +961,11 @@ class MangaMinerBot:
                         give_cards = [_card_label(c) for c in give_list]
                         recv_photos = [p for p in (_download_card_image(c) for c in recv_list) if p]
                         give_photos = [p for p in (_download_card_image(c) for c in give_list) if p]
+                        if (recv_list and not recv_photos) or (give_list and not give_photos):
+                            self.log(
+                                f"⚠️ Обмен #{tid}: картинки частично не загрузились "
+                                f"(recv {len(recv_photos)}/{len(recv_list)}, give {len(give_photos)}/{len(give_list)})"
+                            )
 
                         self.notifier.notify_trade_offer(
                             tid,
@@ -675,9 +1015,9 @@ class MangaMinerBot:
 
     def clean_unwanted_notifications(self, active_trade_ids=None):
         """
-        Mark all unread MangaBuff notifications as read (chapters, cards, scrolls,
-        season rewards, trade statuses). Trade alerts are already sent to Telegram
-        by check_trade_offers before this runs.
+        Mark as read: card drops, sharpening scrolls, promo banners, and trade offers
+        (trades are already pushed to Telegram by check_trade_offers before this runs).
+        Leaves chapter/manga notifications strictly UNREAD.
         """
         if not DataManager.get_setting("notifs_cleaner_enabled", True):
             return 0
@@ -686,34 +1026,72 @@ class MangaMinerBot:
             res = self.session.get("https://mangabuff.ru/notifications", timeout=10)
             if res.status_code != 200:
                 return 0
+            blocked = is_anti_bot_page(res)
+            if blocked:
+                self.log(f"🛡️ Уведомления недоступны — anti-bot ({blocked})")
+                return 0
 
             soup = BeautifulSoup(res.text, "html.parser")
             items = soup.select(".notifications__item")
             if not items:
                 return 0
 
-            to_read = []
+            unwanted_notif_ids = []
+
             for item in items:
                 notif_id = item.get("data-id")
                 if not notif_id:
                     continue
-                classes = item.get("class") or []
-                # Prefer explicit unread markers used by the site
-                is_unread = (
-                    "notifications__item--not-read" in classes
-                    or "notifications__item--unread" in classes
-                )
-                if not is_unread and "notifications__item--read" in classes:
+
+                item_text = item.get_text(strip=True, separator=" ").lower()
+
+                # PRESERVE CHAPTERS: manga chapter alerts stay unread.
+                if any(w in item_text for w in ["глава", "главы", "главу", "глав"]):
                     continue
-                # If class is ambiguous, still clear anything with an id (safe for badge)
-                if not is_unread and "notifications__item--not-read" not in classes:
-                    # Older markup without not-read: skip clearly read-looking rows only
-                    if any("read" in c and "not-read" not in c for c in classes):
-                        continue
-                to_read.append(notif_id)
+
+                # Trades: mark read after Telegram alert (handled upstream).
+                is_trade = bool(
+                    item.select_one(".js-notification-trade-open") or
+                    item.select_one("[data-trade-id]") or
+                    item.find("a", href=re.compile(r"/trades/\d+")) or
+                    "обмен" in item_text or
+                    "trade" in item_text
+                )
+
+                # Clutter: card drops, scrolls, animated promo, finished tower expeditions.
+                # NOTE: do NOT match bare "добавлена новая" — appears in chapter notifs.
+                is_clutter = any(k in item_text for k in [
+                    "получили новую карту",
+                    "вы получили карту",
+                    "вам выпала карта",
+                    "выпала карта",
+                    "получена карта",
+                    "новая x карта",
+                    "новая карта",
+                    "новую карту",
+                    "новые карты",
+                    "свиток заточки",
+                    "свитки заточки",
+                    "благословенный свиток",
+                    "заточки",
+                    "заточка",
+                    "анимированн",
+                    "анимированная",
+                    "добавлена анимированная",
+                ])
+
+                # Tower expedition finished — claim is handled by check_tower_expedition.
+                is_tower_done = (
+                    ("экспедиц" in item_text and "башн" in item_text)
+                    or "экспедиция завершилась" in item_text
+                    or ("экспедиция в башне" in item_text and "наград" in item_text)
+                )
+
+                if is_trade or is_clutter or is_tower_done:
+                    unwanted_notif_ids.append(notif_id)
 
             read_count = 0
-            for uid in to_read:
+            for uid in unwanted_notif_ids:
                 try:
                     read_res = self.session.post(
                         f"https://mangabuff.ru/notifications/{uid}/read",
@@ -723,12 +1101,15 @@ class MangaMinerBot:
                     )
                     if read_res.status_code == 200:
                         read_count += 1
-                    time.sleep(0.08)
+                    time.sleep(0.1)
                 except Exception:
                     pass
 
             if read_count > 0:
-                self.log(f"🧹 Прочитано уведомлений MangaBuff: {read_count} шт.")
+                self.log(
+                    f"🧹 Прочитано уведомлений MangaBuff: {read_count} шт. "
+                    f"(уведы о главах оставлены непрочитанными)"
+                )
             return read_count
 
         except Exception as e:
@@ -800,11 +1181,16 @@ class MangaMinerBot:
         if not DataManager.get_setting("reading_enabled", True):
             return
 
-        if not self.running:
+        if not self._alive():
             return
 
         self.log(tr("log_reading_check"))
+        self._touch_heartbeat()
         stats = self.get_reading_stats()
+        if not stats:
+            self.log("⚠️ Статистика чтения недоступна — жду корректную страницу /balance.")
+            return False
+        initial_cards = stats["cards_found"]
         if stats:
             if stats["chapters_read"] >= stats["chapters_max"] and stats["cards_found"] >= stats["cards_max"]:
                 self.log(tr("log_reading_limit_reached", chapters=stats["chapters_read"], cards=stats["cards_found"]))
@@ -812,7 +1198,7 @@ class MangaMinerBot:
 
             # Card cooldown only blocks reading IF the daily 75 chapters are already finished!
             wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", False)
-            if wait_card_cd and stats["chapters_read"] >= stats["chapters_max"] and not stats.get("card_ready", True):
+            if stats["chapters_read"] >= stats["chapters_max"] and not stats.get("card_ready", False):
                 cd_msg = stats.get("card_cooldown") or "ожидание"
                 self.log(f"⏳ 75 глав уже закрыто, а бонусные карты на кулдауне ({cd_msg}). Пропуск чтения глав.")
                 return
@@ -833,7 +1219,8 @@ class MangaMinerBot:
         delay_max = float(DataManager.get_setting("reading_delay_max", 32.0))
 
         state = DataManager.load_reading_state() or {}
-        read_history = set(state.get("history", []))
+        history_order = list(dict.fromkeys(state.get("history", [])))
+        read_history = set(history_order)
         progress_map = state.get("progress", {})
 
         manga_list = self.get_popular_manga_slugs()
@@ -851,12 +1238,18 @@ class MangaMinerBot:
 
         try:
             attempts = 0
-            while chapters_read_session < target_count and self.running and attempts < len(manga_list):
+            while chapters_read_session < target_count and self._alive() and attempts < len(manga_list):
+                self._touch_heartbeat()
                 current_slug = manga_list[manga_idx % len(manga_list)]
                 attempts += 1
 
                 title_url = f"https://mangabuff.ru/manga/{current_slug}"
-                res_title = self.session.get(title_url, timeout=10)
+                try:
+                    res_title = self.session.get(title_url, timeout=10)
+                except Exception as e:
+                    self.log(f"⚠️ Manga title fetch fail «{current_slug}»: {e}")
+                    manga_idx = (manga_idx + 1) % len(manga_list)
+                    continue
                 if res_title.status_code != 200:
                     manga_idx = (manga_idx + 1) % len(manga_list)
                     state["current_manga"] = manga_list[manga_idx]
@@ -915,36 +1308,72 @@ class MangaMinerBot:
 
                 # Check saved sequential progress for this manga
                 prog = progress_map.get(current_slug, {})
-                last_v = prog.get("vol", 0)
-                last_c = prog.get("ch", 0)
+                last_v = int(prog.get("vol", 0) or 0)
+                last_c = float(prog.get("ch", 0) or 0)
 
-                # Prioritize chapters strictly after our last read chapter
-                unread_chapters = [
+                # Strict forward-only: NEVER fall back to older chapters.
+                # Old bug: history truncated to 2000 → bot re-read early chapters,
+                # site daily counter stayed frozen (re-reads don't count).
+                forward = [
                     item for item in ch_links
-                    if item[2] not in read_history and (item[0] > last_v or (item[0] == last_v and item[1] > last_c))
+                    if item[0] > last_v or (item[0] == last_v and item[1] > last_c)
                 ]
-                # Fallback to any unread chapter in this title
-                if not unread_chapters:
-                    unread_chapters = [item for item in ch_links if item[2] not in read_history]
-
-                if not unread_chapters:
-                    # All chapters of this manga completed, advance to next title
+                if not forward:
+                    self.log(f"📖 «{current_slug}» пройден до конца (т.{last_v} гл.{last_c}) — следующий тайтл.")
                     manga_idx = (manga_idx + 1) % len(manga_list)
                     state["current_manga"] = manga_list[manga_idx]
                     state["manga_idx"] = manga_idx
                     DataManager.save_reading_state(state)
                     continue
 
+                unread_chapters = [item for item in forward if item[2] not in read_history]
+                if not unread_chapters:
+                    # Forward chapters already in local history — jump progress to the end
+                    # of known forward list so we don't loop forever.
+                    end_v, end_c, _ = forward[-1]
+                    progress_map[current_slug] = {"vol": end_v, "ch": end_c}
+                    state["progress"] = progress_map
+                    manga_idx = (manga_idx + 1) % len(manga_list)
+                    state["current_manga"] = manga_list[manga_idx]
+                    state["manga_idx"] = manga_idx
+                    DataManager.save_reading_state(state)
+                    self.log(
+                        f"📖 «{current_slug}»: все следующие главы уже в истории, "
+                        f"прогресс → т.{end_v} гл.{end_c}, беру следующий тайтл."
+                    )
+                    continue
+
+                skip_bad = 0
+                stale_site_batches = 0
+                site_chapters_before = (stats or {}).get("chapters_read")
                 for vol, ch, ch_url in unread_chapters:
-                    if chapters_read_session >= target_count or not self.running:
+                    if chapters_read_session >= target_count or not self._alive():
                         break
 
-                    ch_res = self.session.get(ch_url, timeout=10)
+                    try:
+                        ch_res = self.session.get(ch_url, timeout=10)
+                    except Exception as e:
+                        self.log(f"⚠️ Chapter fetch fail: {e}")
+                        skip_bad += 1
+                        if skip_bad >= 25:
+                            self.log(f"⚠️ Слишком много битых глав в «{current_slug}», переключаюсь.")
+                            break
+                        continue
                     if ch_res.status_code != 200:
+                        skip_bad += 1
+                        if skip_bad >= 25:
+                            self.log(f"⚠️ Слишком много HTTP-ошибок глав в «{current_slug}», переключаюсь.")
+                            break
                         continue
 
                     m_ch = re.search(r"window\.current_chapter\s*=\s*({[^;]+});", ch_res.text)
                     if not m_ch:
+                        skip_bad += 1
+                        if skip_bad == 1 or skip_bad % 10 == 0:
+                            self.log(f"⚠️ Нет current_chapter у «{current_slug}» т.{vol} гл.{ch} (skip {skip_bad})")
+                        if skip_bad >= 25:
+                            self.log(f"⚠️ «{current_slug}» не отдаёт главы — беру следующий тайтл.")
+                            break
                         continue
 
                     try:
@@ -952,10 +1381,14 @@ class MangaMinerBot:
                         manga_id = ch_data.get("id")
                         chapter_id = ch_data.get("chapter_id")
                     except Exception:
+                        skip_bad += 1
                         continue
 
                     if not manga_id or not chapter_id:
+                        skip_bad += 1
                         continue
+
+                    skip_bad = 0  # found a readable chapter
 
                     meta_csrf = BeautifulSoup(ch_res.text, "html.parser").find("meta", attrs={"name": "csrf-token"})
                     if meta_csrf and meta_csrf.get("content"):
@@ -965,11 +1398,12 @@ class MangaMinerBot:
                     delay = random.uniform(delay_min, delay_max)
                     self.log(f"📖 Читаем «{current_slug}» (т.{vol} гл.{ch})... имитация чтения ({delay:.0f}с)")
                     for _ in range(int(delay * 4)):
-                        if not self.running:
+                        if not self._alive():
                             break
+                        self._touch_heartbeat()
                         time.sleep(0.25)
 
-                    if not self.running:
+                    if not self._alive():
                         break
 
                     buffer.append({
@@ -996,35 +1430,46 @@ class MangaMinerBot:
                             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
                         }
 
-                        post_res = self.session.post(
-                            "https://mangabuff.ru/addHistory?r=702",
-                            data=payload,
-                            headers=headers,
-                            timeout=10
-                        )
-
-                        # Handle rate limit (429) backoff
-                        if post_res.status_code == 429:
-                            retry_after = int(post_res.headers.get("Retry-After", 10))
-                            self.log(f"⏳ Лимит запросов (429): ждем {retry_after + 2}с перед повторной отправкой...")
-                            time.sleep(retry_after + 2)
+                        try:
                             post_res = self.session.post(
                                 "https://mangabuff.ru/addHistory?r=702",
                                 data=payload,
                                 headers=headers,
                                 timeout=10
                             )
+                        except Exception as e:
+                            self.log(f"⚠️ addHistory fail: {e}")
+                            buffer.clear()
+                            continue
+
+                        # Handle rate limit (429) backoff — do NOT count as read
+                        if post_res.status_code == 429:
+                            retry_after = int(post_res.headers.get("Retry-After", 60))
+                            wait_429 = max(45, min(180, retry_after + 5))
+                            self.log(
+                                f"⏳ addHistory 429 Too Many Attempts — пауза {wait_429}с, "
+                                f"чтение глав останавливаю (чтобы не жечь лимит)."
+                            )
+                            for _ in range(int(wait_429 * 4)):
+                                if not self._alive():
+                                    break
+                                self._touch_heartbeat()
+                                time.sleep(0.25)
+                            buffer.clear()
+                            return False
 
                         if post_res.status_code == 200:
                             chapters_read_session += len(buffer)
                             for b in buffer:
+                                if b["url"] not in read_history:
+                                    history_order.append(b["url"])
                                 read_history.add(b["url"])
                                 progress_map[b["slug"]] = {"vol": b["vol"], "ch": b["ch"]}
 
                             state["current_manga"] = current_slug
                             state["manga_idx"] = manga_idx
                             state["progress"] = progress_map
-                            state["history"] = list(read_history)[-2000:]
+                            state["history"] = history_order[-8000:]
                             DataManager.save_reading_state(state)
 
                             # Parse drop responses
@@ -1034,7 +1479,7 @@ class MangaMinerBot:
                                     card_name = resp_data.get("name")
                                     card_img = resp_data.get("image")
                                     cards_gained_session += 1
-                                    current_cards = (stats["cards_found"] if stats else 0) + cards_gained_session
+                                    current_cards = initial_cards + cards_gained_session
 
                                     # Extract copy number
                                     copy_num = (
@@ -1062,13 +1507,10 @@ class MangaMinerBot:
                                     # Download card preview to send as real photo to Telegram
                                     photo_bytes = None
                                     if card_img:
-                                        try:
-                                            full_img_url = f"https://mangabuff.ru{card_img}" if card_img.startswith("/") else card_img
-                                            img_res = self.session.get(full_img_url, timeout=10)
-                                            if img_res.status_code == 200 and img_res.content:
-                                                photo_bytes = img_res.content
-                                        except Exception as err:
-                                            self.log(f"⚠️ Не удалось загрузить превью карты: {err}")
+                                        photo_bytes = self._download_image_bytes(
+                                            card_img,
+                                            referer="https://mangabuff.ru/",
+                                        )
 
                                     self.notifier.notify_card_dropped(
                                         card_name,
@@ -1078,7 +1520,8 @@ class MangaMinerBot:
                                         copy_info=copy_info,
                                         user_id=self.user_id
                                     )
-                                    wait_card_cd = DataManager.get_setting("reading_wait_card_cooldown", True)
+                                    wait_card_cd = (stats["chapters_read"] >= stats["chapters_max"] or
+                                                    DataManager.get_setting("reading_wait_card_cooldown", True))
                                     if wait_card_cd:
                                         live = None
                                         try:
@@ -1111,16 +1554,47 @@ class MangaMinerBot:
                             except Exception:
                                 pass
 
+                            # Process the addHistory reward first: a capped chapter
+                            # counter cannot tell us whether the card roll succeeded.
+                            live = self.get_reading_stats()
+                            if not live:
+                                self.log("⚠️ Статистика после чтения недоступна — продолжу в следующем цикле.")
+                                buffer.clear()
+                                return False
+                            now_ch = live["chapters_read"]
+                            now_cap = live["chapters_max"]
+                            stats = live
+                            if now_ch >= now_cap:
+                                stale_site_batches = 0
+                                if live["cards_found"] >= live["cards_max"] or not live["card_ready"]:
+                                    buffer.clear()
+                                    return True
+                            elif site_chapters_before is not None and now_ch <= site_chapters_before:
+                                stale_site_batches += 1
+                                if stale_site_batches >= 2:
+                                    self.log("🛑 Сайт не засчитывает новые главы до лимита — продолжу в следующем цикле.")
+                                    buffer.clear()
+                                    return False
+                            else:
+                                stale_site_batches = 0
+                            site_chapters_before = now_ch
+
                             self.log(tr("log_reading_batch", count=chapters_read_session, current=chapters_read_session, total=target_count))
 
                         else:
                             self.log(f"⚠️ Ошибка отправки истории (HTTP {post_res.status_code})")
                         buffer.clear()
 
+                if skip_bad >= 25:
+                    manga_idx = (manga_idx + 1) % len(manga_list)
+                    state["current_manga"] = manga_list[manga_idx]
+                    state["manga_idx"] = manga_idx
+                    DataManager.save_reading_state(state)
+
             state["current_manga"] = manga_list[manga_idx % len(manga_list)]
             state["manga_idx"] = manga_idx
             state["progress"] = progress_map
-            state["history"] = list(read_history)[-2000:]
+            state["history"] = history_order[-8000:]
             DataManager.save_reading_state(state)
 
             if chapters_read_session > 0:
@@ -1216,6 +1690,85 @@ class MangaMinerBot:
         except Exception as e:
             print(f"check_and_claim_quests exception: {e}")
 
+    def claim_battle_chests(self):
+        """Open owned battle chests sequentially; never purchase packs or chests."""
+        from urllib.parse import urljoin, urlparse
+        from html import escape
+
+        opened = 0
+        if not self._alive():
+            return opened
+        try:
+            page = self.session.get("https://mangabuff.ru/battle", timeout=10)
+            if page.status_code != 200:
+                return opened
+            soup = BeautifulSoup(page.text, "html.parser")
+            root = soup.find(attrs={"data-chest-open-url": True})
+            token = soup.find("meta", attrs={"name": "csrf-token"})
+            if not root or not token or not token.get("content"):
+                return opened
+            url = urljoin("https://mangabuff.ru/battle", root["data-chest-open-url"])
+            parsed = urlparse(url)
+            if (parsed.scheme != "https" or parsed.netloc != "mangabuff.ru" or
+                    parsed.path != "/chests/open" or parsed.query or parsed.fragment):
+                self.log("⚠️ Неизвестный маршрут боевых сундуков — пропуск.")
+                return opened
+            self.csrf_token = token["content"]
+            headers = {
+                "X-CSRF-TOKEN": self.csrf_token,
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://mangabuff.ru/battle",
+                "Accept": "application/json",
+            }
+            seen = set()
+            for button in root.select("[data-chest-open][data-chest-code][data-chest-amount]"):
+                code = button["data-chest-code"]
+                amount = str(button["data-chest-amount"])
+                if (code in seen or not re.fullmatch(r"battle_[a-z0-9_]+_chest", code) or
+                        not amount.isdigit() or button.has_attr("disabled")):
+                    continue
+                seen.add(code)
+                # Bounded work per daemon cycle; remaining inventory is collected next cycle.
+                for _ in range(min(int(amount), 20 - opened)):
+                    if not self._alive():
+                        return opened
+                    self._touch_heartbeat()
+                    response = self.session.post(url, data={"code": code, "_token": self.csrf_token},
+                                                 headers=headers, timeout=15)
+                    if response.status_code != 200:
+                        self.log(f"⚠️ Открытие боевого сундука HTTP {response.status_code}; остановка до следующего цикла.")
+                        return opened
+                    data = response.json()
+                    if not isinstance(data, dict) or data.get("success") is not True:
+                        self.log("⚠️ Сайт не подтвердил открытие боевого сундука; остановка.")
+                        return opened
+                    opened += 1
+                    name = button.get("data-chest-name") or "Боевой сундук"
+                    self.log(f"🎁 Открыт {name}.")
+                    labels = {"coins": "Алмазики", "random_scroll": "Заточки", "scroll": "Заточки",
+                              "random_scroll_100": "Заточки 100%", "random_card": "Карты", "essence": "Эссенция"}
+                    rewards = data.get("rewards")
+                    lines = []
+                    for reward in rewards if isinstance(rewards, list) else []:
+                        if isinstance(reward, dict):
+                            label = labels.get(reward.get("type"), reward.get("type") or "Награда")
+                            lines.append(f"{escape(str(label))}: {escape(str(reward.get('amount', 1)))}")
+                    try:
+                        self.notifier.send_message(f"🎁 <b>{escape(name)}</b> открыт" +
+                                                   ("\n" + "\n".join(lines) if lines else ""))
+                    except Exception as exc:
+                        self.log(f"⚠️ Уведомление о сундуке: {exc}")
+                    for _ in range(8):
+                        if not self._alive():
+                            return opened
+                        self._touch_heartbeat()
+                        time.sleep(0.25)
+            return opened
+        except Exception as exc:
+            # Never retry an ambiguous POST immediately; reread inventory next cycle.
+            self.log(f"⚠️ Сбор боевых сундуков остановлен: {exc}")
+            return opened
+
     def claim_quest(self, quest_id, claim_url="https://mangabuff.ru/battle/daily-quests/claim"):
         """Claim a single completed daily quest using application/x-www-form-urlencoded."""
         if not quest_id:
@@ -1303,6 +1856,364 @@ class MangaMinerBot:
             print(f"auto_upgrade_pickaxe exception: {e}")
         return False
 
+    # Base HQ weights — crystal snowball first, then combat pair, then niche.
+    _TOWER_HQ_PRIORITY = {
+        "supply": 100,      # +% dark crystals
+        "assault": 92,      # +% ATK
+        "fortitude": 90,    # +% HP
+        "hunt": 55,         # +% vs bosses
+        "mentorship": 30,   # +% tempering XP
+    }
+    _TOWER_HQ_NAMES = {
+        "supply": "Снабжение",
+        "assault": "Натиск",
+        "fortitude": "Оплот",
+        "hunt": "Знание Хранителей",
+        "mentorship": "Наставление",
+    }
+    _TOWER_ORDER_NAMES = {
+        "gathering": "Сбор (+25% кристаллов)",
+        "balanced": "Баланс",
+        "breakthrough": "Прорыв (+15% прогресс)",
+        "hunt": "Охота (+20% vs босс)",
+        "mentorship": "Наставничество (+30% XP карт)",
+    }
+
+    @staticmethod
+    def _parse_tower_int(text, default=0):
+        try:
+            digits = re.sub(r"[^\d]", "", str(text or ""))
+            return int(digits) if digits else default
+        except Exception:
+            return default
+
+    def _parse_tower_hq_cards(self, soup):
+        """Read HQ upgrade cards (level/cost) from tower page DOM."""
+        cards = {}
+        if soup is None:
+            return cards
+        for art in soup.select("[data-hq-upgrade-card]"):
+            key = art.get("data-hq-upgrade-card")
+            if key not in self._TOWER_HQ_PRIORITY:
+                continue
+            btn = art.select_one("button[data-upgrade-key]:not([data-upgrade-mode])") or art.select_one(
+                f'button[data-upgrade-key="{key}"]'
+            )
+            lvl_el = art.select_one("[data-hq-upgrade-level]")
+            cost_el = art.select_one("[data-hq-upgrade-cost]")
+            level = self._parse_tower_int(
+                (btn.get("data-upgrade-level") if btn else None)
+                or (lvl_el.get_text(strip=True) if lvl_el else 0)
+            )
+            cost = self._parse_tower_int(
+                (btn.get("data-upgrade-cost") if btn else None)
+                or (cost_el.get_text(strip=True) if cost_el else 0)
+            )
+            cards[key] = {"level": level, "cost": cost}
+        return cards
+
+    def _hq_upgrade_score(self, key, level, cards):
+        """Weighted relative marginal bonus per crystal, using the site's HQ formulas.
+
+        Supply/mentorship have logarithmic softcaps; combat gains 0.075%/level.
+        Weights express growth preferences, not a claim of globally optimal spending.
+        """
+        import math
+        cost = int(cards.get(key, {}).get("cost") or 0)
+        if cost <= 0:
+            return 0.0
+        level = max(0, int(level))
+        if key in ("supply", "mentorship"):
+            softcap = 100 if key == "supply" else 200
+            current = 1 + .01 * softcap * math.log1p(level / softcap)
+            following = 1 + .01 * softcap * math.log1p((level + 1) / softcap)
+        else:
+            current = 1 + .00075 * level
+            following = current + .00075
+        return self._TOWER_HQ_PRIORITY.get(key, 1) * (following / current - 1) / cost
+
+    def _choose_tower_order(self, cards=None):
+        """
+        Pick expedition order for HQ growth.
+        Autopilot sticks to gathering (+25% crystals) — best fuel for HQ.
+        Override with tower_order_auto=False + tower_order=<name>.
+        """
+        if not DataManager.get_setting("tower_order_auto", True):
+            return DataManager.get_setting("tower_order") or "gathering"
+        # HQ snowball: no other order beats +25% dark crystals for further upgrades.
+        return "gathering"
+
+    def upgrade_tower_headquarters(self, soup=None, root=None, max_buys=40, reserve=0):
+        """
+        Spend Dark Crystals on Banner HQ upgrades using live level balancing.
+        Works even during an active expedition.
+        """
+        if not DataManager.get_setting("tower_hq_auto", True):
+            return 0
+
+        try:
+            if soup is None or root is None:
+                res = self.session.get("https://mangabuff.ru/tower", timeout=12)
+                if res.status_code != 200:
+                    return 0
+                soup = BeautifulSoup(res.text, "html.parser")
+                root = soup.find(class_="mbf-abyss-tower") or soup.find(attrs={"data-tower-root": True})
+                if not root:
+                    return 0
+
+            upgrade_url = root.get("data-upgrade-url") or "https://mangabuff.ru/tower/headquarters/upgrade"
+            csrf = root.get("data-csrf-token") or self.csrf_token
+
+            currency_el = soup.select_one("[data-hq-currency-value]") or soup.select_one("[data-hq-currency]")
+            crystals = self._parse_tower_int(
+                (currency_el.get_text(strip=True) if currency_el else None)
+                or (currency_el.get("data-hq-currency") if currency_el else None)
+            )
+            if crystals <= reserve:
+                return 0
+
+            cards = self._parse_tower_hq_cards(soup)
+            if not cards:
+                return 0
+
+            bought = 0
+            gained = {k: 0 for k in cards}
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-CSRF-TOKEN": csrf,
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": "https://mangabuff.ru/tower",
+                "Origin": "https://mangabuff.ru",
+            }
+
+            attempts = 0
+            deadline = time.monotonic() + 180
+            while bought < max_buys and crystals > reserve:
+                if self._module_cancelled() or time.monotonic() >= deadline:
+                    break
+                attempts += 1
+                if attempts > max_buys + 3:
+                    break
+                candidates = []
+                for key, info in cards.items():
+                    cost = int(info.get("cost") or 0)
+                    level = int(info.get("level") or 0)
+                    if cost <= 0 or cost > crystals - reserve:
+                        continue
+                    score = self._hq_upgrade_score(key, level, cards)
+                    candidates.append((score, -cost, key))
+                if not candidates:
+                    break
+                candidates.sort(reverse=True)
+                key = candidates[0][2]
+                expected = int(cards[key]["level"])
+
+                resp = self.session.post(
+                    upgrade_url,
+                    json={
+                        "upgrade_type": key,
+                        "expected_level": expected,
+                        "buy_max": False,
+                    },
+                    headers=headers,
+                    timeout=12,
+                )
+                if resp.status_code == 429:
+                    self.log("⏳ Штаб Башни: лимит запросов, продолжу в следующем цикле.")
+                    break
+                if resp.status_code == 409:
+                    # expected_level stale (race / concurrent UI) — refresh cards and continue.
+                    self.log("⏳ Штаб Башни: уровень рассинхронился, обновляю карту штаба...")
+                    time.sleep(0.8)
+                    try:
+                        fres = self.session.get("https://mangabuff.ru/tower", timeout=12)
+                        if fres.status_code == 200:
+                            soup = BeautifulSoup(fres.text, "html.parser")
+                            root = soup.find(class_="mbf-abyss-tower") or soup.find(attrs={"data-tower-root": True}) or root
+                            upgrade_url = (root.get("data-upgrade-url") if root else None) or upgrade_url
+                            csrf = (root.get("data-csrf-token") if root else None) or csrf
+                            headers["X-CSRF-TOKEN"] = csrf
+                            currency_el = soup.select_one("[data-hq-currency-value]") or soup.select_one("[data-hq-currency]")
+                            crystals = self._parse_tower_int(
+                                (currency_el.get_text(strip=True) if currency_el else None)
+                                or (currency_el.get("data-hq-currency") if currency_el else None)
+                            )
+                            fresh_cards = self._parse_tower_hq_cards(soup)
+                            if fresh_cards:
+                                for k, info in fresh_cards.items():
+                                    if k in cards:
+                                        cards[k]["level"] = info["level"]
+                                        cards[k]["cost"] = info["cost"]
+                                    else:
+                                        cards[k] = info
+                                        gained.setdefault(k, 0)
+                    except Exception:
+                        pass
+                    continue
+                if resp.status_code != 200:
+                    self.log(f"⚠️ Штаб Башни: апгрейд {key} → HTTP {resp.status_code}")
+                    break
+                try:
+                    payload = resp.json()
+                    data = payload.get("data") or payload
+                except Exception:
+                    break
+
+                # Never infer a successful purchase or retain an old balance when it is zero.
+                if data.get("level") is None or data.get("dark_crystals") is None or data.get("next_cost") is None:
+                    break
+                new_lvl = int(data["level"])
+                crystals = int(data["dark_crystals"])
+                next_cost = int(data["next_cost"])
+                if new_lvl <= expected or crystals < 0:
+                    break
+                cards[key]["level"] = new_lvl
+                cards[key]["cost"] = next_cost
+                gained[key] += int(data.get("levels_added") or 1)
+                bought += 1
+                time.sleep(0.45)
+
+            if bought > 0:
+                parts = [
+                    f"{self._TOWER_HQ_NAMES.get(k, k)} +{v}"
+                    for k, v in gained.items() if v > 0
+                ]
+                try:
+                    rank = sum(int(cards[k]["level"]) for k in cards)
+                    rank_s = f", ранг Знамени ~{rank}"
+                except Exception:
+                    rank_s = ""
+                self.log(
+                    f"🏛️ Штаб Башни: вложено {bought} улучшений "
+                    f"({', '.join(parts)}), кристаллов осталось {crystals:,}{rank_s}"
+                )
+            return bought
+        except Exception as e:
+            self.log(f"⚠️ Ошибка прокачки Штаба Башни: {e}")
+            return 0
+
+    def _prepare_tower_order(self, root, soup=None, preferred_order=None):
+        """Save HQ order for the next expedition (only works while idle)."""
+        cards = self._parse_tower_hq_cards(soup) if soup is not None else {}
+        order = preferred_order or self._choose_tower_order(cards)
+        prep_url = (root.get("data-save-preparation-url") if root else None) or "https://mangabuff.ru/tower/preparation/save"
+        csrf = (root.get("data-csrf-token") if root else None) or self.csrf_token
+        try:
+            resp = self.session.post(
+                prep_url,
+                json={"order_type": order},
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-CSRF-TOKEN": csrf,
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": "https://mangabuff.ru/tower",
+                    "Origin": "https://mangabuff.ru",
+                },
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                if root is not None:
+                    root["data-selected-order"] = order
+                DataManager.set_setting("tower_order", order)
+                return order
+            return None
+        except Exception:
+            return None
+
+    def _plan_tower_expedition(self, root, soup, payload):
+        """Bounded coordinate search using fresh server previews, no paid actions.
+
+        Prefer reliable progress/hour, then crystal income/hour; preserve the squad.
+        Twelve requests maximum; this is a heuristic, not an exhaustive search.
+        """
+        preview_url = root.get("data-preview-url")
+        if not preview_url or len(payload.get("card_user_ids", [])) != 4:
+            return None
+        headers = {
+            "Accept": "application/json", "Content-Type": "application/json",
+            "X-CSRF-TOKEN": root.get("data-csrf-token") or self.csrf_token,
+            "X-Requested-With": "XMLHttpRequest", "Referer": "https://mangabuff.ru/tower",
+        }
+        best = None
+        seen = set()
+        count = 0
+        deadline = time.monotonic() + 120
+        min_chance = 70.0
+        def evaluate(candidate):
+            nonlocal best, count
+            signature = tuple((key, str(candidate[key])) for key in sorted(candidate))
+            if signature in seen or count >= 12:
+                return True
+            if self._module_cancelled() or time.monotonic() >= deadline:
+                return False
+            seen.add(signature)
+            count += 1
+            response = self.session.post(preview_url, json=candidate, headers=headers, timeout=10)
+            if response.status_code != 200:
+                return False
+            envelope = response.json()
+            data = envelope.get("data", envelope)
+            if not isinstance(data, dict) or data.get("power_ratio") is None or data.get("estimated_progress") is None:
+                return False
+            import math
+            ratio = float(data["power_ratio"])
+            progress = float(data["estimated_progress"])
+            hours = float(candidate["duration_minutes"]) / 60
+            reward = (data.get("rewards") or {}).get("dark_crystals") or {}
+            low, high = float(reward.get("min", 0)), float(reward.get("max", 0))
+            if hours <= 0 or not all(math.isfinite(x) for x in (ratio, progress, low, high)):
+                return False
+            chance = max(5, min(99, ratio * 85))  # same display estimate as site JS
+            if data.get("warning") or chance < min_chance or progress < 0 or low < 0 or high < low:
+                return True
+            score = (progress / hours, (low + high) / (2 * hours), chance, -hours)
+            if best is None or score > best[0]:
+                best = (score, dict(candidate), chance, data)
+            return True
+        try:
+            if not evaluate(payload):
+                return None
+            for group, field in (("difficulty", "difficulty_type"), ("duration", "duration_minutes"), ("route", "route_type"), ("order", "order_type")):
+                if group == "order" and not DataManager.get_setting("tower_order_auto", True):
+                    continue
+                selector = '[data-tower-option="%s"][data-value]' % group
+                nodes = soup.select(selector)
+                if group == "order":
+                    nodes += soup.select('[data-hq-order-select][data-order-key]')
+                values = []
+                for node in nodes:
+                    if node.has_attr("disabled") or node.get("data-locked") == "1" or "is-locked" in node.get("class", []):
+                        continue
+                    value = node.get("data-value") or node.get("data-order-key")
+                    if group == "duration":
+                        if not str(value).isdigit():
+                            continue
+                        value = int(value) * 60
+                    if value and value not in values:
+                        values.append(value)
+                anchor = dict(best[1] if best else payload)
+                for value in values:
+                    candidate = dict(anchor)
+                    candidate[field] = value
+                    if not evaluate(candidate):
+                        # A rate limit/error ends the search. Never launch with unverified fallback.
+                        return None
+                if count >= 12:
+                    break
+            if best is None:
+                self.log("⚠️ Башня: прогноз не нашёл безопасный вариант (шанс ≥70%, без предупреждений).")
+                return None
+            score, chosen, chance, data = best
+            self.log(f"🔎 Башня: {chosen['difficulty_type']}, {chosen['duration_minutes']//60}ч, "
+                     f"{chosen['route_type']}/{chosen['order_type']}; прогноз {chance:.0f}%, "
+                     f"прогресс/ч {score[0]:.2f}, кристаллы/ч ~{score[1]:.0f}.")
+            return chosen
+        except Exception as exc:
+            self.log(f"⚠️ Башня: прогноз недоступен: {exc}")
+            return None
+
     def check_tower_expedition(self):
         """Check Abyss Tower (/tower), claim completed expeditions, and start a new one if idle."""
         if not DataManager.get_setting("tower_enabled", True):
@@ -1323,6 +2234,10 @@ class MangaMinerBot:
             if not root:
                 self.log("⚠️ Could not locate Tower container.")
                 return None
+
+            # HQ upgrades work even during an active expedition — spend crystals first.
+            # No currency reserve: compare marginal value before each bounded purchase.
+            self.upgrade_tower_headquarters(soup=soup, root=root, max_buys=40, reserve=0)
 
             claim_url = root.get("data-claim-url", "https://mangabuff.ru/tower/expedition/claim")
             start_url = root.get("data-start-url", "https://mangabuff.ru/tower/expedition/start")
@@ -1376,13 +2291,19 @@ class MangaMinerBot:
                             start_url = root.get("data-start-url", start_url)
                             is_active = str(root.get("data-expedition-active", "0")) == "1"
                             is_complete = str(root.get("data-expedition-complete", "0")) == "1"
+                            # Spend newly claimed crystals before the next launch.
+                            self.upgrade_tower_headquarters(soup=soup, root=root, max_buys=40, reserve=0)
+                        else:
+                            return None
                     else:
-                        is_active = False
+                        return None
                 else:
                     self.log(f"⚠️ Tower claim failed with status {claim_res.status_code}")
+                    return None
 
             # 2. Start a new expedition if idle
             if not is_active:
+                chosen_order = self._choose_tower_order(self._parse_tower_hq_cards(soup))
                 raw_ids = root.get("data-selected-card-ids", "") if root else ""
                 card_ids = []
                 if raw_ids:
@@ -1412,7 +2333,12 @@ class MangaMinerBot:
 
                 difficulty = (root.get("data-selected-difficulty") if root else None) or DataManager.get_setting("tower_difficulty") or "nightmare"
                 route = (root.get("data-selected-route") if root else None) or DataManager.get_setting("tower_route") or "frontier"
-                order = (root.get("data-selected-order") if root else None) or DataManager.get_setting("tower_order") or "balanced"
+                order = (
+                    chosen_order
+                    or (root.get("data-selected-order") if root else None)
+                    or DataManager.get_setting("tower_order")
+                    or "gathering"
+                )
 
                 # Persist settings
                 DataManager.set_setting("tower_duration", dur_int)
@@ -1430,6 +2356,17 @@ class MangaMinerBot:
                         "resonance_offer_token": "",
                         "resonance_accept": 0
                     }
+                    payload = self._plan_tower_expedition(root, soup, payload)
+                    if payload is None or self._module_cancelled():
+                        return None
+                    duration_mins = payload["duration_minutes"]
+                    difficulty = payload["difficulty_type"]
+                    route = payload["route_type"]
+                    order = payload["order_type"]
+                    DataManager.set_setting("tower_duration", duration_mins // 60)
+                    DataManager.set_setting("tower_difficulty", difficulty)
+                    DataManager.set_setting("tower_route", route)
+                    DataManager.set_setting("tower_order", order)
                     csrf = (root.get("data-csrf-token") if root else None) or self.csrf_token
                     start_res = self.session.post(
                         start_url,
@@ -1472,7 +2409,7 @@ class MangaMinerBot:
         """POST to the matchmaking endpoint; return redirect_url or error code."""
         try:
             res = self.session.post(
-                "https://mangabuff.ru/battle/fight/start",
+                getattr(self, '_arena_start_url', 'https://mangabuff.ru/battle/fight/start'),
                 headers={
                     "X-CSRF-TOKEN": self.csrf_token,
                     "X-Requested-With": "XMLHttpRequest",
@@ -1528,6 +2465,15 @@ class MangaMinerBot:
 
             if res.status_code != 200:
                 return None
+
+            # Retain structured server replays for future comparative deck choices.
+            # No page HTML, auth cookies, credentials or CSRF are stored.
+            try:
+                from arena_observations import replay_from_html, save_observation
+                observation = replay_from_html(res.text)
+                save_observation(os.path.join(BASE_DIR, 'arena_observations.json'), observation)
+            except Exception as exc:
+                self.log(f'⚠️ Арена: журнал для модели не сохранён ({type(exc).__name__}).')
 
             # 1. Parse earned essence
             m = re.search(r'"essence"\s*:\s*(\d+)', res.text)
@@ -1657,9 +2603,9 @@ class MangaMinerBot:
             print(f"_find_active_claim_url exception: {e}")
         return None
 
-    def run_farm_loop(self):
-        """Continuously grind battles until the daily essence limit is reached (3 consecutive +0)."""
-        if not self.check_active_deck():
+    def run_farm_loop(self, prepared=False):
+        """Farm in bounded batches; stop after three consecutive zero rewards."""
+        if not prepared and not self.prepare_arena_deck():
             return
 
         # Claim daily quests before battling
@@ -1675,11 +2621,20 @@ class MangaMinerBot:
         consecutive_unknown = 0
         next_micro_break = random.randint(10, 15)
         cap_reached = False
+        attempts = 0
+        max_battles = max(1, min(50, int(DataManager.get_setting('arena_batch_battles', 30))))
 
-        while self.running:
-            time.sleep(random.uniform(4.5, 12.2))
+        while self._alive() and battles_done < max_battles and attempts < max_battles + 5:
+            for _ in range(int(random.uniform(4.5, 12.2) * 4)):
+                if not self._alive():
+                    break
+                self._touch_heartbeat()
+                time.sleep(0.25)
+            if not self._alive():
+                break
 
             match_url = self.start_battle()
+            attempts += 1
             if match_url == "NO_ENERGY":
                 print("Out of battle energy.")
                 break
@@ -1702,13 +2657,16 @@ class MangaMinerBot:
             consecutive_unknown = 0
             earned_essence, is_win = result
 
-            # STOP ON FIRST 0 ESSENCE BATTLE: Daily essence limit reached
+            # A single loss/zero is not proof of a daily cap.
             if earned_essence == 0:
-                outcome = "Win" if is_win else "Loss"
-                print(f"[BATTLE] Result: {outcome} | Earned: +0. Daily cap reached, stopping.")
-                self.log("Daily essence limit reached (+0)")
-                cap_reached = True
-                break
+                consecutive_zero_essence += 1
+                if consecutive_zero_essence >= 3 and not DataManager.get_setting('arena_rank_mode', True):
+                    self.log('⏳ Арена: три боя подряд без эссенции — фарм до следующего дня приостановлен.')
+                    cap_reached = True
+                    self._arena_cap_date = self._msk_now().date()
+                    break
+            else:
+                consecutive_zero_essence = 0
 
             battles_done += 1
             total_essence_ += earned_essence
@@ -1716,6 +2674,19 @@ class MangaMinerBot:
                 wins += 1
             else:
                 losses += 1
+
+            if getattr(self,'_arena_buff_remaining',None) is not None:
+                self._arena_buff_remaining=max(0,self._arena_buff_remaining-1)
+                if self._arena_buff_remaining==0:
+                    self._arena_buff_depleted=True
+                    self.log('✦ Запас выбранного бафа закончился — завершаю пачку для нового подбора.')
+                    break
+
+            if getattr(self, '_arena_min_energy', None) is not None:
+                self._arena_min_energy = max(0, self._arena_min_energy - (2 if is_win else 1))
+                if self._arena_min_energy < 10:
+                    self.log('⏳ Арена: энергия состава снизилась — завершаю пачку для нового подбора/ротации.')
+                    break
 
             outcome = "Win" if is_win else "Loss"
             print(f"[BATTLE] #{battles_done} {outcome} | +{earned_essence} essence (Total: +{total_essence_})")
@@ -1838,7 +2809,7 @@ class MangaMinerBot:
         consecutive_errors = 0
         initial_hits = None
 
-        while self.running:
+        while self._alive():
             try:
                 response = self.session.post(self.API_URL, json={"hits": 1}, timeout=5)
 
@@ -1908,11 +2879,13 @@ class MangaMinerBot:
                                 continue
                             break
 
-            except requests.exceptions.Timeout:
-                self.log(tr("log_timeout"))
             except Exception as e:
-                self.log(tr("log_error_generic", e=e))
-                time.sleep(1)
+                err_name = type(e).__name__
+                if "Timeout" in err_name or "timeout" in str(e).lower():
+                    self.log(tr("log_timeout"))
+                else:
+                    self.log(tr("log_error_generic", e=e))
+                    time.sleep(1)
 
         if clicks > 0:
             self.log(tr("log_mining_summary", clicks=clicks, added=total_added))
@@ -1944,7 +2917,8 @@ class MangaMinerBot:
         # Notify Telegram about start
         self.notifier.notify_session_start(self.email, ore=self.current_balance)
 
-        # Claim daily reward
+        # Login streak («Дней подряд») + monthly calendar reward
+        self.ping_daily_visit()
         self.claim_daily_reward()
 
         # Check trade proposals & clean unwanted MangaBuff notifications
@@ -1985,6 +2959,8 @@ class MangaMinerBot:
     def run_daemon(self):
         """Smart event-driven scheduler daemon. Runs 24/7, sleeping until the earliest event."""
         self.running = True
+        self._touch_heartbeat()
+        self._start_watchdog()
         self.log("🚀 MangaBuff Miner — Запуск автономного Smart Daemon (24/7)")
 
         # Validate session at start
@@ -1993,6 +2969,9 @@ class MangaMinerBot:
                 self.log("❌ Первоначальная авторизация не удалась. Остановка демона.")
                 self.running = False
                 return
+
+        # Warm / refresh DDoS-Guard cookies up front (proxy required on VPS)
+        self.ensure_site_access()
 
         if self.auth_log_buffer:
             header = tr("log_startup_header")
@@ -2004,77 +2983,155 @@ class MangaMinerBot:
             try:
                 from datetime import datetime, timezone, timedelta
                 msk_today = datetime.now(timezone(timedelta(hours=3))).date()
+                self._touch_heartbeat()
 
-                # 0. Check and claim daily calendar reward (cards, scrolls, ore)
-                self.claim_daily_reward()
+                # One probe per backoff window — hammering check.js makes DDoS-Guard stricter.
+                self._wait_if_anti_bot_paused()
+                if self._anti_bot_down_since:
+                    if not self.ensure_site_access():
+                        self.log("🛡️ Сайт всё ещё на проверке. Жду паузу, без лишних запросов.")
+                        if self._anti_bot_paused_until <= time.time():
+                            self._anti_bot_paused_until = time.time() + random.randint(180, 300)
+                        continue
 
-                # Check for incoming trade proposals & clean unwanted site notifications
-                self.process_mangabuff_notifications()
+                # After a long idle, one homepage hit before the work burst
+                # so DDoS-Guard cookies don't go cold and trip a challenge.
+                last_ok = float(getattr(self.session, "last_ok_at", 0) or 0)
+                if last_ok and time.time() - last_ok > 40 * 60:
+                    self.ensure_site_access()
+
+                # 0. Login streak («Дней подряд») + monthly calendar reward
+                # Manual fight deadlines take priority over other modules.
+                cup_busy=[False]
+                def _mod_cup():
+                    try:cup_busy[0]=self.run_evening_cup()
+                    finally:
+                        cup_busy[0]=cup_busy[0] or bool(DataManager.load_json(os.path.join(BASE_DIR,'manual_arena_state.json')).get('active_fight'))
+                self._run_module('evening_cup',_mod_cup,5*60)
+                if cup_busy[0]:
+                    if time.time()>=getattr(self,'_chests_next_check_at',0):
+                        self.claim_battle_chests()
+                        self._chests_next_check_at=time.time()+15*60
+                    wait=min(30,max(1,getattr(self,'_cup_next_check_at',0)-time.time()))
+                    self._touch_heartbeat()
+                    time.sleep(wait)
+                    continue
+
+                def _mod_daily():
+                    self.ping_daily_visit()
+                    self.claim_daily_reward()
+
+                self._run_module("daily", _mod_daily, 3 * 60)
+
+                # Trades / notif cleanup — at most once per ~10 min outside sleep polls
+                if time.time() - self._last_notif_poll_at >= 10 * 60:
+                    self._run_module(
+                        "notifications",
+                        self.process_mangabuff_notifications,
+                        5 * 60,
+                    )
+                    self._last_notif_poll_at = time.time()
 
                 # 1. Mining & Energy check
                 energy = 0
                 if getattr(self, "_energy_exhausted_date", None) != msk_today:
-                    res_game = self.session.get(CONFIG["urls"]["game"], timeout=10)
-                    if res_game.status_code == 200:
-                        e_cls = CONFIG["selectors"]["energy_class"]
-                        hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', res_game.text)
-                        if hits_match:
-                            energy = parse_smart_number(hits_match.group(1))
+                    def _mod_mining():
+                        nonlocal energy
+                        res_game = self.session.get(CONFIG["urls"]["game"], timeout=10)
+                        if res_game.status_code == 200:
+                            e_cls = CONFIG["selectors"]["energy_class"]
+                            hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', res_game.text)
+                            if hits_match:
+                                energy = parse_smart_number(hits_match.group(1))
 
-                        b_cls = CONFIG["selectors"]["balance_class"]
-                        ore_match = re.search(f'class="[^"]*{b_cls}[^"]*">\\s*([\\d\\.\\s,kKmM]+)\\s*<', res_game.text)
-                        if ore_match:
-                            self.current_balance = parse_smart_number(ore_match.group(1))
-                    elif res_game.status_code in (401, 419):
-                        self.login_and_steal_keys()
+                            b_cls = CONFIG["selectors"]["balance_class"]
+                            ore_match = re.search(f'class="[^"]*{b_cls}[^"]*">\\s*([\\d\\.\\s,kKmM]+)\\s*<', res_game.text)
+                            if ore_match:
+                                self.current_balance = parse_smart_number(ore_match.group(1))
+                        elif res_game.status_code in (401, 419):
+                            self.login_and_steal_keys()
 
-                    if energy >= 15:
-                        self.log(f"⚡ Накопилась энергия ({energy}). Запуск добычи руды и боев...")
-                        self._run_mining()
-                        if self.running:
-                            self.run_farm_loop()
-                        self.auto_upgrade_pickaxe()
-                        self.check_and_claim_quests()
-                        self._energy_exhausted_date = msk_today
-                        energy = 0
-                    else:
-                        self._energy_exhausted_date = msk_today
+                        if energy >= 15:
+                            self.log(f"⚡ Накопилась энергия ({energy}). Запуск добычи руды...")
+                            self._run_mining()
+                            if self._alive():
+                                self.auto_upgrade_pickaxe()
+                                self._energy_exhausted_date = msk_today
+                            energy = 0
+                        elif res_game.status_code == 200 and hits_match is not None:
+                            self._energy_exhausted_date = msk_today
+
+                    self._run_module("mining", _mod_mining, 25 * 60)
+
+                # Arena/chests have their own state and deadline, even with zero mine hits.
+                arena_now = time.time()
+                if arena_now >= getattr(self, '_arena_next_check_at', 0):
+                    self._arena_next_check_at = arena_now + 30 * 60
+                    self._run_module('arena', self.run_arena_cycle, 15 * 60)
+                elif arena_now >= getattr(self, '_chests_next_check_at', 0):
+                    self._run_module('battle_chests', self.claim_battle_chests, 3 * 60)
+                self._chests_next_check_at = time.time() + 15 * 60
 
                 # 2. Daily Ads check (3x7 💎)
                 ads_cnt = 3
                 if self.running and DataManager.get_setting("ads_enabled", True):
                     if getattr(self, "_ads_completed_date", None) != msk_today:
-                        self.watch_daily_ads()
-                        try:
-                            res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
-                            if res_bal_check.status_code == 200:
-                                soup_bal = BeautifulSoup(res_bal_check.text, "html.parser")
-                                btn = soup_bal.find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
-                                if btn:
-                                    ads_cnt = int(btn.get("data-count", 0))
-                                    if ads_cnt >= 3:
-                                        self._ads_completed_date = msk_today
+                        def _mod_ads():
+                            nonlocal ads_cnt
+                            self.watch_daily_ads()
+                            try:
+                                res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
+                                if res_bal_check.status_code == 200:
+                                    soup_bal = BeautifulSoup(res_bal_check.text, "html.parser")
+                                    btn = soup_bal.find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
+                                    if btn:
+                                        ads_cnt = int(btn.get("data-count", 0))
+                                        if ads_cnt >= 3:
+                                            self._ads_completed_date = msk_today
 
-                                dia_el = soup_bal.find(class_="menu__balance")
-                                if dia_el:
-                                    m_dia = re.search(r"([\d\s]+)", dia_el.get_text())
-                                    if m_dia:
-                                        self.diamonds_balance = parse_smart_number(m_dia.group(1))
-                        except Exception:
-                            pass
+                                    dia_el = soup_bal.find(class_="menu__balance")
+                                    if dia_el:
+                                        m_dia = re.search(r"([\d\s]+)", dia_el.get_text())
+                                        if m_dia:
+                                            self.diamonds_balance = parse_smart_number(m_dia.group(1))
+                            except Exception:
+                                pass
+
+                        self._run_module("ads", _mod_ads, 5 * 60)
                     else:
                         ads_cnt = 3
 
-                # 3. Abyss Tower check (claim rewards & restart 12h)
+                # 3. Abyss Tower — skip re-fetch while expedition has long time left
                 tower_left_sec = None
                 if self.running and DataManager.get_setting("tower_enabled", True):
-                    t_sec = self.check_tower_expedition()
-                    if t_sec is not None and t_sec > 0:
-                        tower_left_sec = max(60, t_sec)
+                    def _mod_tower():
+                        nonlocal tower_left_sec
+                        now_ts = time.time()
+                        cached_left = int(self._tower_ends_at - now_ts) if self._tower_ends_at else 0
+                        if (
+                            cached_left > 20 * 60
+                            and now_ts < self._tower_next_check_at
+                        ):
+                            tower_left_sec = max(60, cached_left)
+                        else:
+                            t_sec = self.check_tower_expedition()
+                            if t_sec is not None and t_sec > 0:
+                                tower_left_sec = max(60, t_sec)
+                                self._tower_ends_at = now_ts + tower_left_sec
+                                if tower_left_sec > 40 * 60:
+                                    self._tower_next_check_at = now_ts + random.randint(15 * 60, 20 * 60)
+                                else:
+                                    self._tower_next_check_at = now_ts + min(
+                                        tower_left_sec,
+                                        random.randint(6 * 60, 10 * 60),
+                                    )
+                            else:
+                                self._tower_ends_at = 0.0
+                                self._tower_next_check_at = now_ts + random.randint(8 * 60, 12 * 60)
+
+                    self._run_module("tower", _mod_tower, 8 * 60)
 
                 # 4. Manga Reading check (cards & 75-chapter quest).
-                # Source of truth = site /balance. After midnight MSK the chapter counter
-                # often lags behind cards — wait for the site reset, do not invent progress.
                 card_wait_sec = 60 * 45
                 chapters_wait_sec = 0
                 ch_read = 0
@@ -2082,95 +3139,93 @@ class MangaMinerBot:
                 cards_found = 0
                 cards_max = 10
                 if self.running and DataManager.get_setting("reading_enabled", True):
-                    reading_stats = self.get_reading_stats()
-                    if not reading_stats:
-                        persisted = (DataManager.load_reading_state() or {}).get("stats") or {}
-                        if persisted:
-                            reading_stats = {
-                                "chapters_read": persisted.get("chapters_read", 0),
-                                "chapters_max": persisted.get("chapters_max", 75),
-                                "cards_found": persisted.get("cards_found", 0),
-                                "cards_max": persisted.get("cards_max", 10),
-                                "card_ready": bool(persisted.get("card_ready", False)),
-                                "card_cooldown": persisted.get("card_cooldown"),
-                                "card_cooldown_sec": int(persisted.get("card_cooldown_sec") or 0),
-                            }
-                            self.log("⚠️ Не удалось обновить /balance — используем сохранённую стату чтения.")
+                    def _mod_reading():
+                        nonlocal card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max
+                        reading_stats = self.get_reading_stats()
+                        if not reading_stats:
+                            self.log('⚠️ /balance недоступен или разметка изменилась — чтение отложено, cache только для панели.')
 
-                    if reading_stats:
-                        ch_read = int(reading_stats.get("chapters_read") or 0)
-                        ch_max = int(reading_stats.get("chapters_max") or 75)
-                        cards_found = int(reading_stats.get("cards_found") or 0)
-                        cards_max = int(reading_stats.get("cards_max") or 10)
-                        card_ready = bool(reading_stats.get("card_ready", False))
-                        cd_str = reading_stats.get("card_cooldown") or ""
+                        if reading_stats:
+                            ch_read = int(reading_stats.get("chapters_read") or 0)
+                            ch_max = int(reading_stats.get("chapters_max") or 75)
+                            cards_found = int(reading_stats.get("cards_found") or 0)
+                            cards_max = int(reading_stats.get("cards_max") or 10)
+                            card_ready = bool(reading_stats.get("card_ready", False))
+                            cd_str = reading_stats.get("card_cooldown") or ""
 
-                        midnight_lag = (
-                            ch_read >= ch_max
-                            and cards_found < cards_max
-                            and self._msk_now().hour < 6
-                        )
-
-                        if midnight_lag and not card_ready:
-                            self.log(
-                                f"⏳ На сайте главы ещё {ch_read}/{ch_max} после полуночи "
-                                f"(карты {cards_found}/{cards_max}) — ждём сброса счётчика глав."
+                            midnight_lag = (
+                                ch_read >= ch_max
+                                and cards_found < cards_max
+                                and self._msk_now().hour < 6
                             )
-                            chapters_wait_sec = random.randint(120, 240)
-                        elif ch_read < ch_max:
-                            batch_size = min(15, ch_max - ch_read)
-                            self.log(f"📖 Дневной лимит глав ({ch_read}/{ch_max}): читаем пачку из {batch_size} глав...")
-                            self.read_manga_chapters(target_count=batch_size)
-                            fresh_stats = self.get_reading_stats()
-                            if fresh_stats:
-                                reading_stats = fresh_stats
-                                ch_read = int(fresh_stats.get("chapters_read") or ch_read)
-                                ch_max = int(fresh_stats.get("chapters_max") or ch_max)
-                                cards_found = int(fresh_stats.get("cards_found") or cards_found)
-                                card_ready = bool(fresh_stats.get("card_ready", False))
-                                cd_str = fresh_stats.get("card_cooldown") or ""
 
-                            if ch_read < ch_max:
-                                chapters_wait_sec = random.randint(90, 150)
+                            if midnight_lag and not card_ready:
+                                self.log(
+                                    f"⏳ На сайте главы ещё {ch_read}/{ch_max} после полуночи "
+                                    f"(карты {cards_found}/{cards_max}) — ждём сброса счётчика глав."
+                                )
+                                chapters_wait_sec = random.randint(15 * 60, 25 * 60)
+                            elif ch_read < ch_max:
+                                batch_size = min(15, ch_max - ch_read)
+                                self.log(f"📖 Дневной лимит глав ({ch_read}/{ch_max}): читаем пачку из {batch_size} глав...")
+                                self.read_manga_chapters(target_count=batch_size)
+                                fresh_stats = self.get_reading_stats()
+                                if fresh_stats:
+                                    reading_stats = fresh_stats
+                                    ch_read = int(fresh_stats.get("chapters_read") or ch_read)
+                                    ch_max = int(fresh_stats.get("chapters_max") or ch_max)
+                                    cards_found = int(fresh_stats.get("cards_found") or cards_found)
+                                    card_ready = bool(fresh_stats.get("card_ready", False))
+                                    cd_str = fresh_stats.get("card_cooldown") or ""
+
+                                if ch_read < ch_max:
+                                    chapters_wait_sec = random.randint(3 * 60, 5 * 60)
+                                else:
+                                    chapters_wait_sec = get_seconds_until_midnight_msk()
                             else:
                                 chapters_wait_sec = get_seconds_until_midnight_msk()
-                        else:
-                            chapters_wait_sec = get_seconds_until_midnight_msk()
 
-                        if cards_found >= cards_max:
-                            card_wait_sec = get_seconds_until_midnight_msk()
-                            self.log(f"🃏 Все бонусные карты за сегодня собраны ({cards_found}/{cards_max}).")
-                        elif card_ready:
-                            self.log(
-                                f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! "
-                                f"Читаем до выпадения (сайт: главы {ch_read}/{ch_max})..."
-                            )
-                            self.read_manga_chapters(target_count=10)
-                            fresh_r = self.get_reading_stats()
-                            if fresh_r:
-                                reading_stats = fresh_r
-                                ch_read = int(fresh_r.get("chapters_read") or ch_read)
-                                ch_max = int(fresh_r.get("chapters_max") or ch_max)
-                                cards_found = int(fresh_r.get("cards_found") or cards_found)
-                                if not fresh_r.get("card_ready", True):
-                                    card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
-                                else:
-                                    card_wait_sec = 60
-                            if ch_read < ch_max:
-                                chapters_wait_sec = random.randint(60, 120)
+                            if cards_found >= cards_max:
+                                card_wait_sec = get_seconds_until_midnight_msk()
+                                self.log(f"🃏 Все бонусные карты за сегодня собраны ({cards_found}/{cards_max}).")
+                            elif card_ready:
+                                self.log(
+                                    f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! "
+                                    f"Читаем до выпадения (сайт: главы {ch_read}/{ch_max})..."
+                                )
+                                self.read_manga_chapters(target_count=10)
+                                fresh_r = self.get_reading_stats()
+                                if fresh_r:
+                                    reading_stats = fresh_r
+                                    ch_read = int(fresh_r.get("chapters_read") or ch_read)
+                                    ch_max = int(fresh_r.get("chapters_max") or ch_max)
+                                    cards_found = int(fresh_r.get("cards_found") or cards_found)
+                                    if not fresh_r.get("card_ready", True):
+                                        card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
+                                    else:
+                                        card_wait_sec = 3 * 60
+                                if ch_read < ch_max:
+                                    chapters_wait_sec = random.randint(3 * 60, 5 * 60)
+                            else:
+                                card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
+                                self.log(
+                                    f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). "
+                                    f"Следующая проверка через ~{card_wait_sec // 60} мин."
+                                )
                         else:
-                            card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
-                            self.log(
-                                f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). "
-                                f"Следующая проверка через ~{card_wait_sec // 60} мин."
-                            )
-                    else:
-                        chapters_wait_sec = random.randint(120, 180)
-                        ch_read, ch_max = 0, 75
-                        self.log("⚠️ Стата чтения недоступна — повтор через ~2–3 мин.")
+                            chapters_wait_sec = random.randint(10 * 60, 15 * 60)
+                            ch_read, ch_max = 0, 75
+                            self.log("⚠️ Стата чтения недоступна — повтор через ~10–15 мин.")
 
-                # Clean up site notifications after reading (card drops, new chapters, etc.)
-                self.process_mangabuff_notifications()
+                    self._run_module("reading", _mod_reading, 20 * 60)
+                # Clean up site notifications after reading (card drops, etc.) — skip if just polled.
+                if time.time() - self._last_notif_poll_at >= 8 * 60:
+                    self._run_module(
+                        "notifications",
+                        self.process_mangabuff_notifications,
+                        5 * 60,
+                    )
+                    self._last_notif_poll_at = time.time()
 
                 # 5. Mine wait: energy is once per day at 00:00:10 MSK!
                 mine_wait_sec = get_seconds_until_midnight_msk() if energy < 15 else 60
@@ -2181,20 +3236,30 @@ class MangaMinerBot:
                 candidates = [
                     ("Шахта", mine_wait_sec),
                     ("Реклама", ads_wait_sec),
+                    ('Арена', max(1, getattr(self, '_arena_next_check_at', time.time()) - time.time())),
+                    ('Боевые сундуки', max(1, self._chests_next_check_at - time.time())),
                 ]
+                if DataManager.get_setting('arena_cup_enabled',True):
+                    cup_now=self._msk_now()
+                    if 19<=cup_now.hour<22:
+                        candidates.append(('Вечерний кубок',max(1,getattr(self,'_cup_next_check_at',0)-time.time())))
+                    else:
+                        cup_open=cup_now.replace(hour=19,minute=0,second=0,microsecond=0)
+                        if cup_open<=cup_now:cup_open+=timedelta(days=1)
+                        candidates.append(('Вечерний кубок',(cup_open-cup_now).total_seconds()))
                 if tower_left_sec is not None:
                     candidates.append(("Башня", tower_left_sec))
 
                 if ch_read < ch_max:
                     if chapters_wait_sec <= 0:
-                        chapters_wait_sec = random.randint(90, 150)
+                        chapters_wait_sec = random.randint(3 * 60, 5 * 60)
                     candidates.append(("Главы (до 75)", chapters_wait_sec))
                 else:
-                    if chapters_wait_sec and chapters_wait_sec < 600 and cards_found < cards_max:
+                    if chapters_wait_sec and chapters_wait_sec < 40 * 60 and cards_found < cards_max:
                         candidates.append(("Сброс глав (сайт)", chapters_wait_sec))
                     if cards_found < cards_max:
                         if card_wait_sec <= 0:
-                            card_wait_sec = 60
+                            card_wait_sec = 5 * 60
                         candidates.append(("Карта", card_wait_sec))
 
                 positive = [(name, s) for name, s in candidates if s > 0]
@@ -2203,11 +3268,10 @@ class MangaMinerBot:
                 else:
                     next_name, sleep_sec = min(positive, key=lambda x: x[1])
 
-                # Sleep until the real next action (trades still polled every 180s in the loop).
-                # Do NOT clamp to 2h — mine/ads/cards reset only at 00:00:10 MSK.
-                sleep_sec = max(60, int(sleep_sec))
+                # Floor sleeps so we never wake every minute with a full request burst.
+                sleep_sec = max(180, int(sleep_sec))
                 # Small human jitter, but never push midnight waits past ~+1 min
-                sleep_sec += random.randint(15, 45)
+                sleep_sec += random.randint(20, 55)
 
                 w_h = sleep_sec // 3600
                 w_m = (sleep_sec % 3600) // 60
@@ -2257,15 +3321,26 @@ class MangaMinerBot:
                     chapters_str=chapters_str
                 )
 
-                # Non-blocking sleep: checks self.running every 1 sec
-                # Periodically check trade offers and notifications every 3 minutes while sleeping
+                # Non-blocking sleep: checks self.running every 1 sec.
+                # Trades every 12 min (was 6) — fewer hits, fewer DDoS-Guard checks.
+                # Once ~45 min, a single homepage keepalive so cookies don't expire mid-sleep.
                 sleep_ticks = int(sleep_sec)
                 for tick in range(sleep_ticks):
                     if not self.running:
                         break
-                    if tick > 0 and tick % 180 == 0:
+                    self._touch_heartbeat()
+                    if time.time() < self._anti_bot_paused_until:
+                        time.sleep(1)
+                        continue
+                    if tick > 0 and tick % 720 == 0:
                         try:
                             self.process_mangabuff_notifications()
+                            self._last_notif_poll_at = time.time()
+                        except Exception:
+                            pass
+                    elif tick > 0 and tick % 2700 == 0:
+                        try:
+                            self.session.get("https://mangabuff.ru/", timeout=20)
                         except Exception:
                             pass
                     time.sleep(1)
@@ -2275,6 +3350,7 @@ class MangaMinerBot:
                 for _ in range(30):
                     if not self.running:
                         break
+                    self._touch_heartbeat()
                     time.sleep(1)
 
     def _validate_session_with_server(self):

@@ -1,5 +1,6 @@
 venv/
 .idea/
+.vscode/
 __pycache__/
 
 *.pyc
@@ -7,14 +8,22 @@ dist/
 build/
 *.spec
 
-user_data.json
+# Runtime data and state
+*.json
+!package.json
 .env
-session_cache.json
-reading_state.json
 
 geckodriver.log
 chromedriver.log
+*.log
 
 MangaBuffMiner.exe
 main.dist/
 nuitka-crash-report.xml
+
+# Scratch and staging files
+_*
+audit_*/
+.stage_*/
+backup_*/
+.kilo/

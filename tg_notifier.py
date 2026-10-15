@@ -11,6 +11,22 @@ from data_management import DataManager
 load_dotenv()
 
 
+def _image_mime_and_name(photo_bytes, index=0):
+    """Detect image type from magic bytes (site often serves WebP as card art)."""
+    data = bytes(photo_bytes or b"")
+    head = data[:16]
+    if head.startswith(b"\x89PNG"):
+        return f"card_{index}.png", "image/png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return f"card_{index}.jpg", "image/jpeg"
+    if head.startswith(b"GIF8"):
+        return f"card_{index}.gif", "image/gif"
+    if head.startswith(b"RIFF") and b"WEBP" in data[:16]:
+        return f"card_{index}.webp", "image/webp"
+    # Fallback: still send bytes, Telegram often sniffs
+    return f"card_{index}.bin", "application/octet-stream"
+
+
 class TelegramNotifier:
     """Asynchronous, rate-limited, HTML-formatted Telegram Notifier with Silent & Night Mode."""
 
@@ -176,7 +192,8 @@ class TelegramNotifier:
         if parse_mode:
             payload["parse_mode"] = parse_mode
 
-        files = {"photo": ("card.png", photo_bytes, "image/png")}
+        files_name, mime = _image_mime_and_name(photo_bytes, 0)
+        files = {"photo": (files_name, bytes(photo_bytes), mime)}
         try:
             response = requests.post(url, data=payload, files=files, timeout=15)
             if response.status_code == 200:
@@ -225,7 +242,8 @@ class TelegramNotifier:
                 if parse_mode:
                     item["parse_mode"] = parse_mode
             media.append(item)
-            files[attach_name] = (f"card_{i}.png", photo_bytes, "image/png")
+            fname, mime = _image_mime_and_name(photo_bytes, i)
+            files[attach_name] = (fname, bytes(photo_bytes), mime)
 
         payload = {
             "chat_id": chat_id,
@@ -249,9 +267,13 @@ class TelegramNotifier:
         except requests.RequestException as e:
             return False, str(e)
 
-    def send_message(self, text, parse_mode="HTML", wait=False, disable_preview=True, silent=None):
-        """Send message asynchronously (or synchronously if wait=True)."""
-        disable_notif = self.should_silence(silent)
+    def send_message(self, text, parse_mode="HTML", wait=False, disable_preview=True, silent=None, force_sound=False):
+        """Send message asynchronously (or synchronously if wait=True).
+
+        force_sound bypasses night quiet hours — used when the bot is stuck
+        and the user has to open the site themselves.
+        """
+        disable_notif = False if force_sound else self.should_silence(silent)
         if wait:
             return self._send_http(
                 text,
@@ -521,6 +543,26 @@ class TelegramNotifier:
     def notify_alert(self, title, detail):
         msg = f"⚠️ <b>Внимание: {title}</b>\n{detail}"
         self.send_message(msg)
+
+    def notify_ddos_stuck(self, reason, minutes_down):
+        """Loud alert: DDoS-Guard is blocking the bot and auto-recovery failed."""
+        mins = max(1, int(minutes_down))
+        msg = (
+            "🛑 <b>MangaBuff встал на проверке DDoS-Guard</b>\n\n"
+            f"Сайт не пускает бота уже ~{mins} мин ({reason}). "
+            "Обновление кук само не помогло, цикл на паузе.\n\n"
+            "Зайди на <a href=\"https://mangabuff.ru/\">mangabuff.ru</a> "
+            "с телефона или ПК, пройди проверку «не бот» — после этого бот подхватит доступ сам.\n\n"
+            "Если через несколько часов всё ещё глухо, пришлю ещё раз."
+        )
+        self.send_message(msg, disable_preview=False, force_sound=True)
+
+    def notify_ddos_recovered(self):
+        msg = (
+            "✅ <b>MangaBuff снова доступен</b>\n"
+            "Проверка снята, бот продолжает работу."
+        )
+        self.send_message(msg, force_sound=True)
 
     def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min, diamonds=None, chapters_str=None, force=False):
         """
