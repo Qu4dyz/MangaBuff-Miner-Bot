@@ -28,12 +28,14 @@ import threading
 import time
 from tg_notifier import get_notifier
 from arena_automation import ArenaAutomationMixin
+from club_automation import ClubAutomationMixin
 
 
 # ==========================================
 # BOT ENGINE
 # ==========================================
-class MangaMinerBot(ArenaAutomationMixin):
+class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
+
     def __init__(self, log_callback, progress_callback, stats_callback, headless=True, proxy=None):
         self.log = log_callback       
         self.auth_log_buffer = []
@@ -2705,8 +2707,10 @@ class MangaMinerBot(ArenaAutomationMixin):
         if battles_done > 0:
             summary = tr("log_battle_summary", done=battles_done, wins=wins, losses=losses, essence=total_essence_)
             self.log(summary)
-            self.notifier.notify_battle_summary(battles_done, wins, losses, total_essence_, cap_reached)
+            if total_essence_ > 0 or cap_reached:
+                self.notifier.notify_battle_summary(battles_done, wins, losses, total_essence_, cap_reached)
         else:
+
             self.log("No battles completed during this session.")
 
         # Claim any quests completed DURING the battles
@@ -3001,21 +3005,25 @@ class MangaMinerBot(ArenaAutomationMixin):
                     self.ensure_site_access()
 
                 # 0. Login streak («Дней подряд») + monthly calendar reward
-                # Manual fight deadlines take priority over other modules.
-                cup_busy=[False]
-                def _mod_cup():
-                    try:cup_busy[0]=self.run_evening_cup()
-                    finally:
-                        cup_busy[0]=cup_busy[0] or bool(DataManager.load_json(os.path.join(BASE_DIR,'manual_arena_state.json')).get('active_fight'))
-                self._run_module('evening_cup',_mod_cup,5*60)
-                if cup_busy[0]:
-                    if time.time()>=getattr(self,'_chests_next_check_at',0):
-                        self.claim_battle_chests()
-                        self._chests_next_check_at=time.time()+15*60
-                    wait=min(30,max(1,getattr(self,'_cup_next_check_at',0)-time.time()))
-                    self._touch_heartbeat()
-                    time.sleep(wait)
-                    continue
+                # 0. Evening Cup (19:00 - 22:00 MSK only)
+                cup_busy = [False]
+                cup_now_h = self._msk_now().hour
+                if 19 <= cup_now_h < 22 and DataManager.get_setting('arena_cup_enabled', True):
+                    def _mod_cup():
+                        try:
+                            cup_busy[0] = self.run_evening_cup()
+                        finally:
+                            cup_busy[0] = cup_busy[0] or bool(DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_state.json')).get('active_fight'))
+                    self._run_module('evening_cup', _mod_cup, 5 * 60)
+                    if cup_busy[0]:
+                        if time.time() >= getattr(self, '_chests_next_check_at', 0):
+                            self.claim_battle_chests()
+                            self._chests_next_check_at = time.time() + 15 * 60
+                        wait = min(30, max(1, getattr(self, '_cup_next_check_at', 0) - time.time()))
+                        self._touch_heartbeat()
+                        time.sleep(wait)
+                        continue
+
 
                 def _mod_daily():
                     self.ping_daily_visit()
@@ -3227,6 +3235,13 @@ class MangaMinerBot(ArenaAutomationMixin):
                     )
                     self._last_notif_poll_at = time.time()
 
+                # 4.5. Club operations (crystals & card donation alerts)
+                if self.running and DataManager.get_setting("club_enabled", True):
+                    now_ts = time.time()
+                    if now_ts - getattr(self, "_last_club_check_at", 0) >= 30 * 60:
+                        self._run_module("club", self.run_club_cycle, 4 * 60)
+                        self._last_club_check_at = now_ts
+
                 # 5. Mine wait: energy is once per day at 00:00:10 MSK!
                 mine_wait_sec = get_seconds_until_midnight_msk() if energy < 15 else 60
 
@@ -3238,7 +3253,9 @@ class MangaMinerBot(ArenaAutomationMixin):
                     ("Реклама", ads_wait_sec),
                     ('Арена', max(1, getattr(self, '_arena_next_check_at', time.time()) - time.time())),
                     ('Боевые сундуки', max(1, self._chests_next_check_at - time.time())),
+                    ('Клуб (вклады)', max(60, int(30 * 60 - (time.time() - getattr(self, '_last_club_check_at', 0))))),
                 ]
+
                 if DataManager.get_setting('arena_cup_enabled',True):
                     cup_now=self._msk_now()
                     if 19<=cup_now.hour<22:

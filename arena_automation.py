@@ -219,14 +219,19 @@ class ArenaAutomationMixin(ArenaManagementMixin):
         from manual_arena import run_cup_cycle
         from path import BASE_DIR
         import os
-        now=self._msk_now()
-        if not DataManager.get_setting('arena_cup_enabled',True):return False
-        pending=getattr(self,'_cup_active',False) or bool(DataManager.load_json(os.path.join(BASE_DIR,'manual_arena_state.json')).get('active_fight'))
-        in_window=19<=now.hour<22
-        if not in_window and not pending:return False
-        completed=self.management_state().get('cup_completed_date')==now.date().isoformat()
-        if completed and not pending:return False
-        if time.time()<getattr(self,'_cup_next_check_at',0):return pending or in_window
+        now = self._msk_now()
+        if not DataManager.get_setting('arena_cup_enabled', True):
+            return False
+        if not (19 <= now.hour < 22):
+            self._cup_active = False
+            return False
+        pending = getattr(self, '_cup_active', False) or bool(DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_state.json')).get('active_fight'))
+        completed = self.management_state().get('cup_completed_date') == now.date().isoformat()
+        if completed and not pending:
+            return False
+        if time.time() < getattr(self, '_cup_next_check_at', 0):
+            return pending or True
+
         if not pending and not self.prepare_arena_deck():return False
         result=run_cup_cycle(self,max_seconds=180,cancelled=self._module_cancelled,
             state_path=os.path.join(BASE_DIR,'manual_arena_state.json'),allow_repeat_attempts=True)

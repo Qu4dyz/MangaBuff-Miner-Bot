@@ -370,6 +370,8 @@ class TelegramNotifier:
         self.send_message(msg, silent=True)
 
     def notify_battle_summary(self, battles, wins, losses, essence_earned, daily_cap_reached=False):
+        if essence_earned <= 0 and not daily_cap_reached:
+            return  # Suppress rank climbing spam when 0 essence was earned
         cap_str = " (достигнут лимит 1000/день)" if daily_cap_reached else ""
         msg = (
             "⚔️ <b>Итоги карточных боёв</b>\n"
@@ -378,6 +380,22 @@ class TelegramNotifier:
             f"🔮 Заработано эссенции: <b>+{essence_earned:,}</b>{cap_str}"
         )
         self.send_message(msg, silent=True)
+
+    def notify_club_card_available(self, card_id, card_name=None, boost_url=None, photo_bytes=None):
+        """Notify user that a card requested by their club is currently in their collection."""
+        url = boost_url or "https://mangabuff.ru/clubs/klub-garemshchikov/boost"
+        card_str = f"<b>{escape(card_name)}</b> (#{card_id})" if card_name else f"карту <b>#{card_id}</b>"
+        msg = (
+            "🃏 <b>Клубный вклад: доступна нужная карта!</b>\n\n"
+            f"Клуб сейчас запрашивает {card_str}.\n"
+            "Эта карта есть в вашей коллекции — вы можете пожертвовать её для клуба.\n\n"
+            f"👉 <a href=\"{url}\">Перейти на страницу вклада в клуб</a>"
+        )
+        if photo_bytes:
+            self.send_photo(photo_bytes, msg)
+        else:
+            self.send_message(msg, disable_preview=False)
+
 
     def notify_trade_offer(
         self,
