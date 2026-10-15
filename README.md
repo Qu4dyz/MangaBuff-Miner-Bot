@@ -2,108 +2,158 @@
 
 # 🤖 MangaBuff Miner Bot
 
-**MangaBuff Miner** is a Python automation tool for the MangaBuff mining game and battle system. It uses pure HTTP requests (no browser automation) to log in, claim daily rewards, complete daily quests, farm battles for essence, and mine ore.
+**MangaBuff Miner** is a high-performance, fully autonomous automation daemon and desktop client for the MangaBuff mining game, card collection, and battle systems. Powered by direct HTTP API interaction (no browser overhead), it features advanced combat heuristics, automatic card progression, resilient network sessions, and rich Telegram notifications.
 
-![Status](https://img.shields.io/badge/Status-Active%20Development-yellow)
+![Status](https://img.shields.io/badge/Status-Active%20Production-brightgreen)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Mode](https://img.shields.io/badge/Mode-CLI%20%26%20GUI-orange)
+![Mode](https://img.shields.io/badge/Mode-CLI%20%7C%20GUI%20%7C%2024%2F7%20Daemon-orange)
 
-## ✨ Actual Features
+---
 
-* **🔐 API-based Authentication:** Logs in via Laravel backend using email/password, extracts CSRF token from login page, maintains session via cookies (cached to `session_cache.json`).
-* **🎁 Daily Reward Claiming:** Parses `/balance` page for the active "Claim" button and posts to the dynamic claim endpoint.
-* **📺 Daily Rewarded Ads (3x7 💎):** Automatically watches up to 3 rewarded ads per day via `POST /balance/ads` (+21 diamonds daily) respecting server video duration cooldowns (~18–22s).
-* **📖 Manga Chapter Reading (`/addHistory`):** Sequentially reads manga chapters with humanized delays (10–18s) to farm up to 10 bonus cards/day, sharpening scrolls, and progress the 75-chapter daily quest. Saves read history in `reading_state.json`.
-* **🏰 Abyss Tower Expeditions (`/tower`):** Automatically checks active expeditions. Claims completed rewards (diamonds + dark crystals + card levels), delivers Telegram report, and restarts a fresh 12h Nightmare expedition with your saved squad.
-* **⚔️ Daily Quest Claiming:** Scans `/battle` page for completed-but-unclaimed daily quests; claims essence, diamonds, and scrolls safely via API.
-* **⚔️ Battle Farming Loop:** Starts battles via `/battle/fight/start`, follows redirect to result page, extracts earned essence. Stops cleanly at daily essence cap (1000/day detected via 3 consecutive 0-essence battles).
-* **⛏️ Ore Mining & Auto-Upgrade:** Hits `/mine/hit` API endpoint, auto-checks and buys pickaxe upgrades and Strong Hit from the shop.
-* **💾 Session Persistence:** Saves cookies, CSRF token, and User-Agent to `session_cache.json`; reuses until HTTP 419 triggers automatic re-login.
-* **🔐 Credential Storage:** Saves email/password locally in `user_data.json` (plaintext — local use only).
-* **🛡️ Anti-Ban Humanization:** Randomized delays between actions (4.5–12.2s), between battles (10–20s), micro-breaks (35–75s every 10–15 battles).
-* **🃏 High-Value Card Preservation:** Detects legendary/mythic card drops in battle results and saves them to `jackpot_cards.json` (protected from consumption).
-* **🌍 Multi-language Support:** Full translations for English, Russian, and Ukrainian.
-* **🖥️ GUI & CLI Modes:** CustomTkinter GUI or streamlined CLI mode with `--status` and `--gui` flags.
-* **📲 Telegram Notifications:** Asynchronous non-blocking worker delivering structured HTML event summaries and alerts.
+## ✨ Features
 
-## 🚀 How to Run (From Source)
+### ⚔️ Arena & Combat Intelligence
+* **Autonomous Arena Battles:** Automated matchmaking, target evaluation, and battle execution (`arena_automation.py`, `arena_api.py`).
+* **Combat Effectiveness Engine (`battle_effectiveness.py`):** Calculates true combat value of cards taking into account stats, buffs, card synergies, and win probabilities.
+* **Opponent Scouting & Optimization (`arena_optimizer.py`, `arena_observations.py`):** Analyzes defense logs and opponent compositions to select highest-yield, high-confidence targets.
+* **Card Progression & Protection Policy (`card_progression_policy.py`, `arena_management.py`):**
+  * Automated card awakening and resonance matching.
+  * Intelligent lock system that prevents sacrificing or consuming valuable/legendary cards.
+* **Manual Arena Console (`manual_arena.py`):** Interactive testing and manual replay capabilities for fine-tuning battle formations.
 
-1. Install Python 3.10+.
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Set up your `.env` file with Telegram credentials (optional but recommended):
-   ```
-   TG_TOKEN=your_telegram_bot_token
-   TG_CHAT_ID=your_chat_id
-   ```
-4. Execution Options:
-   - **Default Execution (CLI):**
-     ```bash
-     python main.py
-     ```
-   - **Quick Status Check (no actions performed):**
-     ```bash
-     python main.py --status
-     ```
-   - **Graphical Interface (GUI):**
-     ```bash
-     python main.py --gui
-     ```
+### 🏰 Abyss Tower (Башня Разлома)
+* **Continuous Expedition Cycle:** Automatically claims expedition rewards (diamonds, dark crystals, card levels).
+* **Zero-Downtime Redeployment:** Instantly re-dispatches the squad on the optimal expedition immediately upon completion.
+* **HQ Upgrades:** Automatically invests earned resources into Tower Headquarters upgrades.
 
-## 🛠 Tech Stack
+### 📖 Manga Chapter Reading (`/addHistory`)
+* **Daily Bonus Card Farming:** Sequentially processes manga chapters with natural randomized delays (10–18s) to collect up to 10 daily bonus cards and sharpening scrolls.
+* **Daily Quest Integration:** Automatically completes the 75-chapter daily quest milestone.
+* **State Tracking:** Tracks read history in `reading_state.json` and avoids wasteful requests once daily card drops are exhausted.
 
-* **HTTP:** `requests` + `requests.Session` (persistent cookie jar + headers)
-* **HTML Parsing:** `BeautifulSoup4` + `regex` (for embedded JSON in battle result pages)
-* **GUI:** `CustomTkinter` — optional graphical interface
-* **Notifications:** `python-telegram-bot` style HTTP API calls via `tg_notifier.py`
-* **Config:** `user_data.json` (credentials), `session_cache.json` (session), `jackpot_cards.json` (preserved cards)
+### ⛏️ Mining, Quests & Daily Routine
+* **Ore Mining & Auto-Upgrades:** Sends mining hits (`/mine/hit`), purchases pickaxe upgrades and Strong Hit as soon as sufficient ore is collected.
+* **Daily Rewarded Ads (3x7 💎):** Watches all 3 daily ads via `POST /balance/ads` (+21 diamonds daily) with humanized watch durations.
+* **Daily Rewards & Quests:** Scans and claims daily login gifts, chest rewards, and completed battle quests.
 
-## 📁 Key Files
+### 🛡️ Network Robustness & Session Persistence
+* **Resilient HTTP Layer (`http_session.py`):** Hybrid session engine supporting `curl_cffi` browser TLS impersonation with fallback to standard `requests`.
+* **DDoS-Guard / Cloudflare Handling:** Auto-recovers cookies, deduplicates DDoS-Guard session tokens, and keeps valid session credentials in `session_cache.json`.
+* **Anti-Ban Humanization:** Randomized timing jitters, micro-breaks between battles, and realistic user simulation.
 
-| File | Purpose |
-|------|---------|
-| `main.py` | Entry point with CLI/GUI switch (`USE_CLI_MODE`) |
-| `engine.py` | `MangaMinerBot` class — full farm logic (login, mining, battles) |
-| `gui_app.py` | `App` class — CustomTkinter GUI; also contains `run_cli_bot()` |
-| `config.py` | `CONFIG` dict (URLs, CSS selectors), `TARGET_RARITIES` |
-| `path.py` | `BASE_DIR`, `DATA_FILE`, `SESSION_FILE` path constants |
-| `tg_notifier.py` | `send_message()` — Telegram bot notification function |
-| `data_management.py` | `DataManager` — credentials/session persistence |
-| `requirements.txt` | Python dependencies |
-| `user_data.json` | Stores email, password, language (created on first run) |
-| `session_cache.json` | Cached session cookies, CSRF token, User-Agent |
-| `jackpot_cards.json` | Preserved legendary/mythic card drops |
+### 📲 Smart Telegram Notifier (`tg_notifier.py`)
+* **Visual Card Art Drops:** Sends card drop notifications with actual image attachments (WebP, PNG, GIF detection via magic bytes).
+* **Trade Alerts:** Instant trade notifications with direct action links.
+* **Quiet Hours & Alert Escalation:** Configurable night mode with forced loud alerts if manual captcha intervention is needed.
+* **Cycle Heartbeats:** Compact periodic status summaries reporting energy, diamonds, card counts, and upcoming actions.
 
-## ⚙️ Configuration
+---
 
-Edit the `CONFIG` dict in `config.py` to adjust:
-- URLs (`login`, `game`, `mine`)
-- CSS selectors for parsing mine page (balance, energy, upgrade cost)
-- `TARGET_RARITIES` in `config.py` — card tiers to preserve (default: `["legendary", "mythic"]`)
+## 🕹️ Modes of Operation
 
-## ⚠️ Status & Solved Limitations
+| Mode | Command | Description |
+|------|---------|-------------|
+| **Smart Daemon (24/7)** | `python main.py --daemon` | Headless, continuous 24/7 daemon designed for VPS/servers. Automatically calculates sleep intervals until the earliest pending event (tower return, chest unlock, energy refill, midnight reset). |
+| **Standard CLI** | `python main.py` | Runs a complete farm and maintenance cycle once, outputs status, and exits cleanly. |
+| **Status Check** | `python main.py --status` | Fast, read-only health check of current energy, balance, and account state without performing actions. |
+| **Desktop GUI** | `python main.py --gui` | Modern CustomTkinter graphical desktop interface with live logs, stats, and settings. |
 
-| Area | Status | Resolution |
-|------|--------|------------|
-| **Quest Claim Payload** | ✅ **Resolved** | Exact form-encoded payload `user_daily_quest_id` reverse-engineered from `manga.js`. Verified working with `HTTP 200`. |
-| **Pickaxe Auto-Upgrade** | ✅ **Implemented** | Connected `/mine/upgrade` and `/mine/buy-strong-hit` endpoints with automatic purchase logic when enough ore is mined. |
-| **Telegram Notifier** | ✅ **Revamped** | Asynchronous worker queue, rate-limit protection, zero spam, beautiful HTML summaries for milestones, instant Jackpot alerts. |
-| **Jackpot Card Preservation** | ✅ **Activated** | High-value card drops (`legendary`, `mythic`) detected during battles, preserved into `jackpot_cards.json`, and alerted via TG. |
-| **Daily Cap Detection** | ✅ **Fixed** | Exits only after 3 consecutive 0-essence battles. Single losses no longer prematurely stop the farm. |
-| **Cloudflare Turnstile** | 🛡️ **Guarded** | Captcha challenge detector with immediate Telegram alert and safe bot pause. |
+---
 
-## 📋 Requirements
+## 🚀 Quick Start
+
+### 1. Requirements
+* Python 3.10 or higher
+* Git
+
+### 2. Installation
+```bash
+git clone https://github.com/Qu4dyz/MangaBuff-Miner-Bot.git
+cd MangaBuff-Miner-Bot
+python -m venv venv
+# Linux / macOS:
+source venv/bin/activate
+# Windows:
+venv\Scripts\activate
+
+pip install -r requirements.txt
+```
+
+### 3. Configuration
+Create a `.env` file in the project root:
+```env
+# MangaBuff Credentials (optional if entered via GUI/CLI prompt)
+MB_EMAIL=your_email@example.com
+MB_PASSWORD=your_password
+
+# Telegram Notifications (optional but recommended)
+TG_TOKEN=your_bot_token
+TG_CHAT_ID=your_telegram_chat_id
+```
+
+### 4. Running as a Linux Systemd Service (VPS 24/7)
+To run the bot continuously in the background on a Linux VPS:
+```ini
+# /etc/systemd/system/mangabuff.service
+[Unit]
+Description=MangaBuff Miner Bot Smart Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/mangabuff-bot
+ExecStart=/root/mangabuff-bot/venv/bin/python /root/mangabuff-bot/main.py --daemon
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
+```
+Enable and start the service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable mangabuff
+sudo systemctl start mangabuff
+```
+
+---
+
+## 📁 Project Structure
 
 ```
-customtkinter==5.2.2
-requests==2.32.5
-beautifulsoup4==4.12.3
-packaging
-urllib3
+├── main.py                     # Entry point (CLI, GUI, Daemon flags)
+├── engine.py                   # MangaMinerBot core farm loop & lifecycle orchestration
+├── http_session.py             # Robust curl_cffi/requests HTTP session layer
+├── tg_notifier.py              # Asynchronous Telegram notification engine
+├── gui_app.py                  # CustomTkinter desktop interface
+├── config.py                   # Selectors, endpoints, and constants
+├── data_management.py          # Session and credential persistence
+├── utils.py                    # Safe cookie handling, parsing, and utilities
+├── languages.py                # Multi-language translations (EN / RU / UA)
+│
+├── arena_automation.py         # Arena loop mixin (routine battles & scheduling)
+├── arena_api.py                # Arena web API client
+├── arena_management.py         # Deck inventory, protection locks & upgrades
+├── arena_optimizer.py          # Opponent scouting & selection heuristics
+├── arena_observations.py       # Opponent match history and win tracking
+├── battle_effectiveness.py     # Card stats, synergies, and combat effectiveness model
+├── card_progression_policy.py  # Awakening, resonance, and card lock policies
+└── manual_arena.py             # Manual testing & battle verification utilities
 ```
+
+---
+
+## ⚙️ Dependencies
+
+* `requests` & `curl_cffi` — Resilient HTTP networking with TLS fingerprint impersonation
+* `beautifulsoup4` — HTML parsing and data extraction
+* `customtkinter` — Modern desktop GUI
+* `python-dotenv` — Environment configuration
+* `packaging` & `urllib3` — Protocol support
+
+---
 
 ## 📄 Disclaimer
 
-*This software is for educational purposes only. Use at your own risk. Automation may violate MangaBuff's Terms of Service.*
+*This project is developed for educational and personal use only. Use responsibly and in accordance with MangaBuff's Terms of Service.*
