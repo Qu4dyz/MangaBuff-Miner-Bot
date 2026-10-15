@@ -12,14 +12,18 @@
 
 ## ✨ Features
 
-### ⚔️ Arena & Combat Intelligence
-* **Autonomous Arena Battles:** Automated matchmaking, target evaluation, and battle execution (`arena_automation.py`, `arena_api.py`).
-* **Combat Effectiveness Engine (`battle_effectiveness.py`):** Calculates true combat value of cards taking into account stats, buffs, card synergies, and win probabilities.
-* **Opponent Scouting & Optimization (`arena_optimizer.py`, `arena_observations.py`):** Analyzes defense logs and opponent compositions to select highest-yield, high-confidence targets.
-* **Card Progression & Protection Policy (`card_progression_policy.py`, `arena_management.py`):**
+### ⚔️ Arena & Combat Intelligence (`arena.py`)
+* **Autonomous Arena Battles:** Automated matchmaking, target evaluation, and battle execution.
+* **Combat Effectiveness Engine:** Calculates true combat value of cards taking into account stats, buffs, card synergies, and win probabilities.
+* **Opponent Scouting & Optimization:** Analyzes defense logs and opponent compositions to select highest-yield, high-confidence targets.
+* **Card Progression & Protection Policy:**
   * Automated card awakening and resonance matching.
   * Intelligent lock system that prevents sacrificing or consuming valuable/legendary cards.
-* **Manual Arena Console (`manual_arena.py`):** Interactive testing and manual replay capabilities for fine-tuning battle formations.
+* **Evening Cup Automation:** Automated participation in the Evening Cup (19:00–22:00 MSK) with dynamic turn strategy and tactic activation.
+
+### 🏛️ Club System (`club.py`)
+* **Personal Crystal Contributions:** Automatically contributes crystals to the club (up to 10/10) to earn club exp and contribution points.
+* **Card Request Alerts:** Monitors club card donation requests and alerts you via Telegram with direct links and card art when requested cards are in your collection.
 
 ### 🏰 Abyss Tower (Башня Разлома)
 * **Continuous Expedition Cycle:** Automatically claims expedition rewards (diamonds, dark crystals, card levels).
@@ -124,6 +128,8 @@ sudo systemctl start mangabuff
 ```
 ├── main.py                     # Entry point (CLI, GUI, Daemon flags)
 ├── engine.py                   # MangaMinerBot core farm loop & lifecycle orchestration
+├── arena.py                    # Consolidated Arena subsystem (combat simulation, optimization, locks, Evening Cup)
+├── club.py                     # Club automation (crystal contributions, card donation alerts)
 ├── http_session.py             # Robust curl_cffi/requests HTTP session layer
 ├── tg_notifier.py              # Asynchronous Telegram notification engine
 ├── gui_app.py                  # CustomTkinter desktop interface
@@ -131,15 +137,8 @@ sudo systemctl start mangabuff
 ├── data_management.py          # Session and credential persistence
 ├── utils.py                    # Safe cookie handling, parsing, and utilities
 ├── languages.py                # Multi-language translations (EN / RU / UA)
-│
-├── arena_automation.py         # Arena loop mixin (routine battles & scheduling)
-├── arena_api.py                # Arena web API client
-├── arena_management.py         # Deck inventory, protection locks & upgrades
-├── arena_optimizer.py          # Opponent scouting & selection heuristics
-├── arena_observations.py       # Opponent match history and win tracking
-├── battle_effectiveness.py     # Card stats, synergies, and combat effectiveness model
-├── card_progression_policy.py  # Awakening, resonance, and card lock policies
-└── manual_arena.py             # Manual testing & battle verification utilities
+├── path.py                     # Base path resolution (script vs compiled exe)
+└── refresh_panel.py            # Headless panel stats refresher
 ```
 
 ---

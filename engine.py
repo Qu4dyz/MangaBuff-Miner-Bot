@@ -27,8 +27,8 @@ import random
 import threading
 import time
 from tg_notifier import get_notifier
-from arena_automation import ArenaAutomationMixin
-from club_automation import ClubAutomationMixin
+from arena import ArenaAutomationMixin, replay_from_html, save_observation
+from club import ClubAutomationMixin
 
 
 # ==========================================
@@ -2471,7 +2471,6 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
             # Retain structured server replays for future comparative deck choices.
             # No page HTML, auth cookies, credentials or CSRF are stored.
             try:
-                from arena_observations import replay_from_html, save_observation
                 observation = replay_from_html(res.text)
                 save_observation(os.path.join(BASE_DIR, 'arena_observations.json'), observation)
             except Exception as exc:
