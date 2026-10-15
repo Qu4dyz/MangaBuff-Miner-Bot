@@ -383,6 +383,43 @@ class TelegramNotifier:
             msg += f"🏅 Текущий ранг: <b>{rank_name}</b>\n"
         self.send_message(msg, silent=True)
 
+    def notify_rank_tier_promotion(
+        self,
+        old_tier: str,
+        new_tier: str,
+        new_division: str = "",
+        duration_sec: float = 0,
+        battles: int = 0,
+        wins: int = 0,
+        losses: int = 0,
+    ):
+        """Send celebratory milestone notification when advancing to a new rank tier."""
+        seconds = max(0, int(duration_sec))
+        days, rem = divmod(seconds, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, _ = divmod(rem, 60)
+        dur_parts = []
+        if days > 0:
+            dur_parts.append(f"{days} д")
+        if hours > 0:
+            dur_parts.append(f"{hours} ч")
+        if minutes > 0 or not dur_parts:
+            dur_parts.append(f"{minutes} мин")
+        duration_str = " ".join(dur_parts)
+
+        winrate_str = f"{(wins / battles * 100):.1f}%" if battles > 0 else "0%"
+        div_str = f" ({new_division})" if new_division and new_division != new_tier else ""
+
+        msg = (
+            "🎉 <b>Повышение ранга на Арене!</b>\n\n"
+            f"⚔️ Новый этап: <b>{old_tier} ➔ {new_tier}</b>{div_str}\n"
+            f"⏱ <b>Заняло времени:</b> {duration_str}\n"
+            f"📊 <b>Всего боёв на этапе:</b> {battles}\n"
+            f"🏆 <b>Побед:</b> {wins} | 💀 <b>Поражений:</b> {losses}\n"
+            f"📈 <b>Винрейт:</b> {winrate_str}"
+        )
+        self.send_message(msg, silent=False)
+
     def notify_club_card_available(self, card_id, card_name=None, boost_url=None, photo_bytes=None):
         """Notify user that a card requested by their club is currently in their collection."""
         url = boost_url or "https://mangabuff.ru/clubs/klub-garemshchikov/boost"

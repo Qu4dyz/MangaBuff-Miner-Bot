@@ -31,6 +31,27 @@ from arena import ArenaAutomationMixin, replay_from_html, save_observation
 from club import ClubAutomationMixin
 
 
+ARENA_TIERS = [
+    "Бронза",
+    "Серебро",
+    "Золото",
+    "Платина",
+    "Алмаз",
+    "Мастер",
+    "Легенда",
+]
+
+TIER_ICONS = {
+    "Бронза": "🛡️",
+    "Серебро": "⚔️",
+    "Золото": "🏅",
+    "Платина": "💎",
+    "Алмаз": "🔷",
+    "Мастер": "👑",
+    "Легенда": "🔥",
+}
+
+
 # ==========================================
 # BOT ENGINE
 # ==========================================
@@ -2433,23 +2454,149 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
 
         except Exception as e:
             self.log(f"⚠️ Tower error: {e}")
-    def get_current_arena_rank(self) -> str | None:
-        """Fetch current arena rank title (e.g. '💎 Платина')."""
+    def get_current_arena_rank_info(self) -> dict | None:
+        """Fetch current arena rank information from /battle."""
         try:
             res = self.session.get("https://mangabuff.ru/battle", timeout=10)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
-                card = soup.select_one(".battle-home__rank-card--current")
-                if card:
-                    icon = card.select_one(".battle-home__rank-icon")
-                    icon_text = icon.get_text(strip=True) if icon else ""
-                    content = card.select_one(".battle-home__rank-content")
-                    text = content.get_text(separator=" ", strip=True) if content else ""
-                    first_word = text.split()[0] if text else ""
-                    return f"{icon_text} {first_word}".strip()
+            if res.status_code != 200:
+                return None
+            soup = BeautifulSoup(res.text, "html.parser")
+            tier_name = None
+            icon_text = ""
+            card = soup.select_one(".battle-home__rank-card--current")
+            if card:
+                icon = card.select_one(".battle-home__rank-icon")
+                icon_text = icon.get_text(strip=True) if icon else ""
+                strong = card.select_one(".battle-home__rank-content strong")
+                if strong:
+                    tier_name = strong.get_text(strip=True)
+
+            division = ""
+            top_el = soup.select_one(".battle-home__rank-top strong")
+            if top_el:
+                division = top_el.get_text(strip=True)
+                if not tier_name:
+                    for t in ARENA_TIERS:
+                        if t.lower() in division.lower():
+                            tier_name = t
+                            break
+
+            if not tier_name:
+                return None
+
+            tier_index = -1
+            for idx, t in enumerate(ARENA_TIERS):
+                if t.lower() == tier_name.lower():
+                    tier_index = idx
+                    tier_name = t
+                    break
+
+            if not icon_text:
+                icon_text = TIER_ICONS.get(tier_name, "🏅")
+
+            return {
+                "tier": tier_name,
+                "tier_index": tier_index,
+                "icon": icon_text,
+                "division": division or tier_name,
+                "full_name": f"{icon_text} {tier_name}".strip(),
+            }
         except Exception:
-            pass
-        return None
+            return None
+
+    def get_current_arena_rank(self) -> str | None:
+        """Fetch current arena rank title (e.g. '💎 Платина')."""
+        info = self.get_current_arena_rank_info()
+        return info["full_name"] if info else None
+
+    def check_arena_rank_promotion(self, battles_done: int = 0, wins: int = 0, losses: int = 0):
+        """
+        Check if the user reached a new arena rank tier (e.g. Platinum -> Diamond).
+        Only sends Telegram notification upon tier promotion with duration and battle stats summary.
+        """
+        rank_info = self.get_current_arena_rank_info()
+        if not rank_info or rank_info["tier_index"] < 0:
+            return
+
+        tracker = DataManager.get_setting("arena_rank_tracker") or {}
+        now = time.time()
+
+        current_tier = rank_info["tier"]
+        current_index = rank_info["tier_index"]
+        current_icon = rank_info["icon"]
+        current_division = rank_info["division"]
+
+        if not tracker or "current_tier" not in tracker:
+            tracker = {
+                "current_tier": current_tier,
+                "tier_index": current_index,
+                "icon": current_icon,
+                "division": current_division,
+                "tier_started_at": now,
+                "battles_in_tier": battles_done,
+                "wins_in_tier": wins,
+                "losses_in_tier": losses,
+            }
+            DataManager.set_setting("arena_rank_tracker", tracker)
+            return
+
+        saved_tier = tracker.get("current_tier")
+        saved_index = tracker.get("tier_index", -1)
+        saved_icon = tracker.get("icon", "")
+
+        if current_index > saved_index:
+            total_battles = tracker.get("battles_in_tier", 0) + battles_done
+            total_wins = tracker.get("wins_in_tier", 0) + wins
+            total_losses = tracker.get("losses_in_tier", 0) + losses
+            started_at = tracker.get("tier_started_at", now)
+            elapsed_sec = max(0.0, now - started_at)
+
+            old_full = f"{saved_icon} {saved_tier}".strip()
+            new_full = f"{current_icon} {current_tier}".strip()
+
+            self.notifier.notify_rank_tier_promotion(
+                old_tier=old_full,
+                new_tier=new_full,
+                new_division=current_division,
+                duration_sec=elapsed_sec,
+                battles=total_battles,
+                wins=total_wins,
+                losses=total_losses,
+            )
+
+            tracker = {
+                "current_tier": current_tier,
+                "tier_index": current_index,
+                "icon": current_icon,
+                "division": current_division,
+                "tier_started_at": now,
+                "battles_in_tier": 0,
+                "wins_in_tier": 0,
+                "losses_in_tier": 0,
+            }
+            DataManager.set_setting("arena_rank_tracker", tracker)
+
+        elif current_index < saved_index:
+            # Rank dropped or season reset
+            tracker = {
+                "current_tier": current_tier,
+                "tier_index": current_index,
+                "icon": current_icon,
+                "division": current_division,
+                "tier_started_at": now,
+                "battles_in_tier": 0,
+                "wins_in_tier": 0,
+                "losses_in_tier": 0,
+            }
+            DataManager.set_setting("arena_rank_tracker", tracker)
+
+        else:
+            tracker["battles_in_tier"] = tracker.get("battles_in_tier", 0) + battles_done
+            tracker["wins_in_tier"] = tracker.get("wins_in_tier", 0) + wins
+            tracker["losses_in_tier"] = tracker.get("losses_in_tier", 0) + losses
+            tracker["division"] = current_division
+            DataManager.set_setting("arena_rank_tracker", tracker)
+
 
     def start_battle(self):
         """POST to the matchmaking endpoint; return redirect_url or error code."""
@@ -2750,8 +2897,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
         if battles_done > 0:
             summary = tr("log_battle_summary", done=battles_done, wins=wins, losses=losses, essence=total_essence_)
             self.log(summary)
-            rank_name = self.get_current_arena_rank()
-            self.notifier.notify_battle_summary(battles_done, wins, losses, total_essence_, cap_reached, rank_name=rank_name)
+            self.check_arena_rank_promotion(battles_done, wins, losses)
         else:
 
             self.log("No battles completed during this session.")
