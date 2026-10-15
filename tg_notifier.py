@@ -369,16 +369,18 @@ class TelegramNotifier:
             msg += f"Потрачено: <b>{cost:,} руды</b>"
         self.send_message(msg, silent=True)
 
-    def notify_battle_summary(self, battles, wins, losses, essence_earned, daily_cap_reached=False):
-        if essence_earned <= 0 and not daily_cap_reached:
-            return  # Suppress rank climbing spam when 0 essence was earned
+    def notify_battle_summary(self, battles, wins, losses, essence_earned, daily_cap_reached=False, rank_name=None):
         cap_str = " (достигнут лимит 1000/день)" if daily_cap_reached else ""
+        mode_str = " (Поднятие ранга)" if essence_earned <= 0 else ""
         msg = (
-            "⚔️ <b>Итоги карточных боёв</b>\n"
-            f"📊 Всего боёв: <b>{battles}</b>\n"
+            f"⚔️ <b>Итоги серии боёв на Арене{mode_str}</b>\n"
+            f"📊 Проведено боёв: <b>{battles}</b>\n"
             f"🏆 Побед: <b>{wins}</b> | 💀 Поражений: <b>{losses}</b>\n"
-            f"🔮 Заработано эссенции: <b>+{essence_earned:,}</b>{cap_str}"
         )
+        if essence_earned > 0:
+            msg += f"🔮 Заработано эссенции: <b>+{essence_earned:,}</b>{cap_str}\n"
+        if rank_name:
+            msg += f"🏅 Текущий ранг: <b>{rank_name}</b>\n"
         self.send_message(msg, silent=True)
 
     def notify_club_card_available(self, card_id, card_name=None, boost_url=None, photo_bytes=None):

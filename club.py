@@ -163,13 +163,21 @@ class ClubAutomationMixin:
         if not card_id:
             return
 
-        box_text = boost_box.get_text()
-        has_negative_text = "у вас нет этой карты" in box_text.lower()
-        has_boost_btn = bool(boost_box.select_one(".club__boost-btn, button[class*='boost-btn']"))
+        box_text = boost_box.get_text().lower()
+        if "у вас нет этой карты" in box_text or "карты ни у кого" in box_text:
+            return
 
-        user_has_card = has_boost_btn or (not has_negative_text and "пожертвовать" in box_text.lower())
+        has_donate_btn = False
+        for btn in boost_box.find_all("button"):
+            b_class = " ".join(btn.get("class", []))
+            b_text = btn.get_text(strip=True).lower()
+            if "replace" in b_class or "buy" in b_class:
+                continue
+            if "пожертвовать" in b_text or "внести" in b_text or "donate" in b_class:
+                has_donate_btn = True
+                break
 
-        if not user_has_card:
+        if not has_donate_btn and "пожертвовать" not in box_text:
             return
 
         # Do not spam for the same card ID

@@ -2433,7 +2433,23 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
 
         except Exception as e:
             self.log(f"⚠️ Tower error: {e}")
-            return None
+    def get_current_arena_rank(self) -> str | None:
+        """Fetch current arena rank title (e.g. '💎 Платина')."""
+        try:
+            res = self.session.get("https://mangabuff.ru/battle", timeout=10)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, "html.parser")
+                card = soup.select_one(".battle-home__rank-card--current")
+                if card:
+                    icon = card.select_one(".battle-home__rank-icon")
+                    icon_text = icon.get_text(strip=True) if icon else ""
+                    content = card.select_one(".battle-home__rank-content")
+                    text = content.get_text(separator=" ", strip=True) if content else ""
+                    first_word = text.split()[0] if text else ""
+                    return f"{icon_text} {first_word}".strip()
+        except Exception:
+            pass
+        return None
 
     def start_battle(self):
         """POST to the matchmaking endpoint; return redirect_url or error code."""
@@ -2734,8 +2750,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
         if battles_done > 0:
             summary = tr("log_battle_summary", done=battles_done, wins=wins, losses=losses, essence=total_essence_)
             self.log(summary)
-            if total_essence_ > 0 or cap_reached:
-                self.notifier.notify_battle_summary(battles_done, wins, losses, total_essence_, cap_reached)
+            rank_name = self.get_current_arena_rank()
+            self.notifier.notify_battle_summary(battles_done, wins, losses, total_essence_, cap_reached, rank_name=rank_name)
         else:
 
             self.log("No battles completed during this session.")
