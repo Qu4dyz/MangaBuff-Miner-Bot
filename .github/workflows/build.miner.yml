@@ -32,7 +32,7 @@ jobs:
 
     - name: Build with Nuitka
       run: |
-        python -m nuitka --onefile --standalone --assume-yes-for-downloads --enable-plugin=tk-inter --include-package=customtkinter --include-package=requests --include-package=selenium --include-package=webdriver_manager --windows-disable-console --output-filename=MangaBuffMiner.exe main.pyw
+        python -m nuitka --onefile --standalone --assume-yes-for-downloads --enable-plugin=tk-inter --include-package=customtkinter --include-package=requests --include-package=selenium --include-package=webdriver_manager --windows-disable-console --output-filename=MangaBuffMiner.exe main.py
 
     - name: Create Release
       uses: ncipollo/release-action@v1

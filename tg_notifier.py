@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from html import escape
 import json
 import os
 import queue
@@ -445,6 +446,7 @@ class TelegramNotifier:
         photo_bytes=None,
         receive_photos=None,
         give_photos=None,
+        wait=False,
     ):
         """
         Notify about a trade offer with clear visual separation:
@@ -459,31 +461,30 @@ class TelegramNotifier:
 
         header = "🤝 <b>Новое предложение обмена на MangaBuff!</b>\n"
         if user_name:
-            header += f"👤 <b>Пользователь:</b> <code>{user_name}</code>\n"
+            header += f"👤 <b>Пользователь:</b> <code>{escape(str(user_name))}</code>\n"
         if receive_cards:
-            cards_str = "\n• " + "\n• ".join(receive_cards)
+            cards_str = "\n• " + "\n• ".join(escape(str(card)) for card in receive_cards)
             header += f"📥 <b>Вы получите ({len(receive_cards)}):</b>{cards_str}\n"
         if give_cards:
-            cards_str = "\n• " + "\n• ".join(give_cards)
+            cards_str = "\n• " + "\n• ".join(escape(str(card)) for card in give_cards)
             header += f"📤 <b>Вы отдадите ({len(give_cards)}):</b>{cards_str}\n"
         header += f'🔗 <a href="https://mangabuff.ru/trades/{trade_id}">Открыть обмен на сайте</a>'
 
         # Always send text first so sides stay readable even without photos
-        self.send_message(header, disable_preview=True)
+        success, detail = self.send_message(header, disable_preview=True, wait=wait)
+        if not success:
+            return False, detail
 
-        if recv_photos:
-            recv_cap = f"📥 <b>ВЫ ПОЛУЧИТЕ</b> ({len(recv_photos)})"
-            if len(recv_photos) == 1:
-                self.send_photo(recv_photos[0], caption=recv_cap, parse_mode="HTML")
-            else:
-                self.send_media_group(recv_photos[:10], caption=recv_cap, parse_mode="HTML")
-
-        if give_photos_list:
-            give_cap = f"📤 <b>ВЫ ОТДАДИТЕ</b> ({len(give_photos_list)})"
-            if len(give_photos_list) == 1:
-                self.send_photo(give_photos_list[0], caption=give_cap, parse_mode="HTML")
-            else:
-                self.send_media_group(give_photos_list[:10], caption=give_cap, parse_mode="HTML")
+        for photos, label in ((recv_photos, "📥 <b>ВЫ ПОЛУЧИТЕ</b>"),
+                              (give_photos_list, "📤 <b>ВЫ ОТДАДИТЕ</b>")):
+            for offset in range(0, len(photos), 10):
+                success, detail = self.send_media_group(
+                    photos[offset:offset + 10], caption=f"{label} ({len(photos)})",
+                    parse_mode="HTML", wait=wait,
+                )
+                if not success:
+                    return False, detail
+        return True, "OK" if wait else "Queued"
 
     def notify_trade_status(self, trade_id, user_name="Пользователь", status="canceled"):
         if status == "canceled":

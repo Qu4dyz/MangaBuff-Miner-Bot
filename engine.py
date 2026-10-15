@@ -799,6 +799,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
         ore = None
         ads_cnt = None
         tower_str = None
+        diamonds = None
+        reading_stats = None
 
         # Mine: ore + energy
         try:
@@ -828,9 +830,17 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                         ads_cnt = int(ads_btn.get("data-count", 0))
                     except Exception:
                         ads_cnt = 0
-                self.get_reading_stats(soup=soup_bal)
+                reading_stats = self.get_reading_stats(soup=soup_bal)
+                dia_el = soup_bal.select_one('.menu__balance')
+                if dia_el:
+                    match = re.search(r'([\d\s]+)', dia_el.get_text())
+                    if match:
+                        diamonds = parse_smart_number(match.group(1))
         except Exception:
             pass
+
+        if all(value is None for value in (energy, ore, ads_cnt, diamonds, reading_stats)):
+            return False
 
         tower_str = self._peek_tower_timer_str()
 
@@ -845,8 +855,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                 panel["energy"] = energy
             if ore is not None:
                 panel["ore"] = int(ore)
-            if self.diamonds_balance is not None:
-                panel["diamonds"] = int(self.diamonds_balance)
+            if diamonds is not None:
+                panel["diamonds"] = int(diamonds)
             if ads_cnt is not None:
                 panel["ads_count"] = ads_cnt
             if tower_str:
@@ -990,18 +1000,25 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                                 f"(recv {len(recv_photos)}/{len(recv_list)}, give {len(give_photos)}/{len(give_list)})"
                             )
 
-                        self.notifier.notify_trade_offer(
+                        delivered, detail = self.notifier.notify_trade_offer(
                             tid,
                             user_name,
                             recv_cards,
                             give_cards,
                             receive_photos=recv_photos,
                             give_photos=give_photos,
+                            wait=True,
                         )
+                        if not delivered:
+                            self.log(f"⚠️ Обмен #{tid}: Telegram не доставлен: {detail}")
+                            continue
                         self.log(f"🤝 Обнаружено предложение обмена #{tid} от {user_name}! Отправлено в Telegram.")
                         tracked_active_trades[str(tid)] = {"user_name": user_name, "last_status": pdata.get("status", "pending")}
                     else:
-                        self.notifier.notify_trade_offer(tid, "Пользователь")
+                        delivered, detail = self.notifier.notify_trade_offer(tid, "Пользователь", wait=True)
+                        if not delivered:
+                            self.log(f"⚠️ Обмен #{tid}: Telegram не доставлен: {detail}")
+                            continue
                         self.log(f"🤝 Обнаружено предложение обмена #{tid}! Отправлено в Telegram.")
                         tracked_active_trades[str(tid)] = {"user_name": "Пользователь", "last_status": "pending"}
                     notified_set.add(tid)
@@ -1046,6 +1063,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
 
         try:
             unwanted_notif_ids = set()
+            delivered_trade_ids = {str(tid) for tid in DataManager.get_setting("notified_trade_ids", [])}
             urls_to_check = [
                 "https://mangabuff.ru/notifications",
                 "https://mangabuff.ru/notifications?type=other",
@@ -1093,6 +1111,16 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                         "обмен" in item_text or
                         "trade" in item_text
                     )
+                    if is_trade:
+                        trade_button = item.select_one("[data-trade-id]")
+                        trade_id = trade_button.get("data-trade-id") if trade_button else None
+                        if not trade_id:
+                            link = item.find("a", href=re.compile(r"/trades/\d+"))
+                            match = re.search(r"/trades/(\d+)", link.get("href", "")) if link else None
+                            trade_id = match.group(1) if match else None
+                        if trade_id and str(trade_id) in delivered_trade_ids:
+                            unwanted_notif_ids.add(notif_id)
+                        continue
 
                     # Clutter: card drops, scrolls, animated promo, club card rewards, finished tower expeditions.
                     is_card_or_scroll = any(k in item_text for k in [
@@ -1134,7 +1162,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                         or ("экспедиция в башне" in item_text and "наград" in item_text)
                     )
 
-                    if is_trade or is_clutter or is_tower_done:
+                    if is_clutter or is_tower_done:
                         unwanted_notif_ids.add(notif_id)
 
             read_count = 0
@@ -2514,11 +2542,15 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
         Check if the user reached a new arena rank tier (e.g. Platinum -> Diamond).
         Only sends Telegram notification upon tier promotion with duration and battle stats summary.
         """
+        tracker = DataManager.get_setting("arena_rank_tracker") or {}
+        tracker["battles_in_tier"] = tracker.get("battles_in_tier", 0) + battles_done
+        tracker["wins_in_tier"] = tracker.get("wins_in_tier", 0) + wins
+        tracker["losses_in_tier"] = tracker.get("losses_in_tier", 0) + losses
         rank_info = self.get_current_arena_rank_info()
         if not rank_info or rank_info["tier_index"] < 0:
+            DataManager.set_setting("arena_rank_tracker", tracker)
             return
 
-        tracker = DataManager.get_setting("arena_rank_tracker") or {}
         now = time.time()
 
         current_tier = rank_info["tier"]
@@ -2533,9 +2565,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                 "icon": current_icon,
                 "division": current_division,
                 "tier_started_at": now,
-                "battles_in_tier": battles_done,
-                "wins_in_tier": wins,
-                "losses_in_tier": losses,
+                "battles_in_tier": tracker["battles_in_tier"],
+                "wins_in_tier": tracker["wins_in_tier"],
+                "losses_in_tier": tracker["losses_in_tier"],
             }
             DataManager.set_setting("arena_rank_tracker", tracker)
             return
@@ -2545,9 +2577,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
         saved_icon = tracker.get("icon", "")
 
         if current_index > saved_index:
-            total_battles = tracker.get("battles_in_tier", 0) + battles_done
-            total_wins = tracker.get("wins_in_tier", 0) + wins
-            total_losses = tracker.get("losses_in_tier", 0) + losses
+            total_battles = tracker["battles_in_tier"]
+            total_wins = tracker["wins_in_tier"]
+            total_losses = tracker["losses_in_tier"]
             started_at = tracker.get("tier_started_at", now)
             elapsed_sec = max(0.0, now - started_at)
 
@@ -2591,9 +2623,6 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
             DataManager.set_setting("arena_rank_tracker", tracker)
 
         else:
-            tracker["battles_in_tier"] = tracker.get("battles_in_tier", 0) + battles_done
-            tracker["wins_in_tier"] = tracker.get("wins_in_tier", 0) + wins
-            tracker["losses_in_tier"] = tracker.get("losses_in_tier", 0) + losses
             tracker["division"] = current_division
             DataManager.set_setting("arena_rank_tracker", tracker)
 
@@ -2800,6 +2829,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
         if not prepared and not self.prepare_arena_deck():
             return
 
+        # Establish the starting tier before the first batch can promote it.
+        self.check_arena_rank_promotion()
+
         # Claim daily quests before battling
         self.check_and_claim_quests()
 
@@ -2849,6 +2881,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
             consecutive_unknown = 0
             earned_essence, is_win = result
 
+            battles_done += 1
+            total_essence_ += earned_essence
+            if is_win:
+                wins += 1
+            else:
+                losses += 1
+
             # A single loss/zero is not proof of a daily cap.
             if earned_essence == 0:
                 consecutive_zero_essence += 1
@@ -2859,13 +2898,6 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin):
                     break
             else:
                 consecutive_zero_essence = 0
-
-            battles_done += 1
-            total_essence_ += earned_essence
-            if is_win:
-                wins += 1
-            else:
-                losses += 1
 
             if getattr(self,'_arena_buff_remaining',None) is not None:
                 self._arena_buff_remaining=max(0,self._arena_buff_remaining-1)
