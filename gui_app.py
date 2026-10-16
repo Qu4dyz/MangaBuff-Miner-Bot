@@ -274,11 +274,6 @@ class App(ctk.CTk):
         )
         self.lbl_settings.grid(row=5, column=0, padx=20, pady=(10, 0), sticky="w")
 
-        # Headless mode toggle
-        self.headless_var = ctk.BooleanVar(value=True)
-        self.chk_headless = ctk.CTkSwitch(self.sidebar, text=tr("headless"), variable=self.headless_var)
-        self.chk_headless.grid(row=6, column=0, padx=20, pady=(5, 5), sticky="w")
-
         # Auto-upgrade pickaxe toggle
         is_auto_upg = DataManager.get_setting("auto_upgrade", True)
         self.auto_upgrade_var = ctk.BooleanVar(value=is_auto_upg)
@@ -424,7 +419,6 @@ class App(ctk.CTk):
     def refresh_ui_text(self):
         self.title(tr("app_title"))
         self.lbl_settings.configure(text=tr("settings"))
-        self.chk_headless.configure(text=tr("headless"))
         self.chk_auto_upgrade.configure(text=tr("auto_upgrade"))
         self.chk_tower.configure(text=tr("tower_enabled"))
         self.chk_ads.configure(text=tr("ads_enabled"))
@@ -508,7 +502,6 @@ class App(ctk.CTk):
             log_callback=self.log,
             progress_callback=self.update_progress,
             stats_callback=self.update_stats_ui,
-            headless=self.headless_var.get()
         )
 
     def _lock_ui(self, is_running):

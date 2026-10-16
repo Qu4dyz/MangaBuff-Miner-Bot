@@ -58,12 +58,11 @@ TIER_ICONS = {
 # ==========================================
 class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixin):
 
-    def __init__(self, log_callback, progress_callback, stats_callback, headless=True, proxy=None):
+    def __init__(self, log_callback, progress_callback, stats_callback, proxy=None):
         self.log = log_callback       
         self.auth_log_buffer = []
         self.update_progress = progress_callback
         self.update_stats = stats_callback
-        self.headless = headless
         self.running = False
         self.API_URL = "https://mangabuff.ru/mine/hit"
         self.notifier = get_notifier()

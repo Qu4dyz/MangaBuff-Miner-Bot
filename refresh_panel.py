@@ -10,7 +10,6 @@ def main():
         log_callback=lambda *a, **k: None,
         progress_callback=lambda p: None,
         stats_callback=lambda **kw: None,
-        headless=True,
     )
     if not bot.refresh_live_panel():
         print("FAIL")

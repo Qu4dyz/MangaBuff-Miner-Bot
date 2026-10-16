@@ -7,7 +7,6 @@ LANGUAGES = {
     "English": {
         "app_title": "MangaBuff Miner",
         "settings": "SETTINGS",
-        "headless": "Headless Login",
         "controls": "CONTROLS",
         "btn_start": "🚀 START TURBO MINING",
         "btn_status": "📊 CHECK STATUS",
@@ -86,7 +85,6 @@ LANGUAGES = {
     "Русский": {
         "app_title": "MangaBuff Miner",
         "settings": "НАСТРОЙКИ",
-        "headless": "Скрытый вход",
         "controls": "УПРАВЛЕНИЕ",
         "btn_start": "🚀 ТУРБО МАЙНИНГ",
         "btn_status": "📊 ПРОВЕРИТЬ СТАТУС",
@@ -162,7 +160,6 @@ LANGUAGES = {
     "Українська": {
         "app_title": "MangaBuff Miner",
         "settings": "НАЛАШТУВАННЯ",
-        "headless": "Прихований вхід",
         "controls": "КЕРУВАННЯ",
         "btn_start": "🚀 ТУРБО МАЙНІНГ",
         "btn_status": "📊 ПЕРЕВІРИТИ СТАТУС",

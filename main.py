@@ -75,7 +75,6 @@ def main():
             log_callback=_cli_log,
             progress_callback=lambda p: None,
             stats_callback=lambda **kw: None,
-            headless=True,
             proxy=args.proxy
         )
         if args.status:
