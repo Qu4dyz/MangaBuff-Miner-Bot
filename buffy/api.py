@@ -51,6 +51,7 @@ SETTINGS = {
     # desktop app
     "app_start_bot_on_launch": True,
     "app_minimize_to_tray": True,
+    "app_close_action": "ask",  # ask | tray | quit
     "app_onboarded": False,
     "app_auto_update": True,
 }
@@ -85,6 +86,8 @@ class BuffyApi:
         self._window = None
         self._on_status_change = None  # set by the app (tray menu refresh)
         self._updater = None  # set by the app
+        self._quit = None  # set by the app: full exit
+        self._on_hidden = None  # set by the app: tray hint after hiding
         self._manual_bot = None  # bot used for one-off runs while the daemon is stopped
         self._manual = {}  # module -> {"state", "summary", "at"}
 
@@ -142,6 +145,8 @@ class BuffyApi:
         if key not in SETTINGS:
             return False
         default = SETTINGS[key]
+        if key == "app_close_action" and value not in ("ask", "tray", "quit"):
+            return False
         if isinstance(default, bool):
             value = bool(value)
         elif value is None:
@@ -482,6 +487,14 @@ class BuffyApi:
     def hide_window(self):
         if self._window:
             self._window.hide()
+        if self._on_hidden:
+            self._on_hidden()
+        return True
+
+    def quit_app(self):
+        """Exit completely: stop the bot, remove the tray icon, close the window."""
+        if self._quit:
+            threading.Thread(target=self._quit, daemon=True).start()
         return True
 
 

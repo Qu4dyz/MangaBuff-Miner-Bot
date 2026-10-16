@@ -193,11 +193,11 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 
 /* ---------- log ---------- */
 .log {
-  font: 12.8px/1.6 var(--mono); background: #0a0812; border: 1px solid var(--border);
+  font: 13.5px/1.65 var(--font); background: #0a0812; border: 1px solid var(--border);
   border-radius: 14px; padding: 12px 14px; overflow: auto; user-select: text;
 }
 .log .ln { display: flex; gap: 12px; padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
-.log .ts { color: var(--faint); flex: none; }
+.log .ts { color: var(--faint); flex: none; font: 12px/1.95 var(--mono); }
 .log .ln.warn .tx { color: #ffd59a; }
 .log .ln.error .tx { color: #ff9cb0; }
 .log .ln.success .tx { color: #9ff0cb; }
@@ -211,22 +211,33 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 .chip.active { background: rgba(180, 92, 255, 0.18); color: var(--text); border-color: rgba(180, 92, 255, 0.5); }
 
 /* ---------- modules ---------- */
-#modules-grid { align-items: start; }
+#modules-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { #modules-grid { grid-template-columns: minmax(0, 1fr); } }
+#modules-grid .mod.soon { grid-column: 1 / -1; }
 .mod { display: flex; flex-direction: column; gap: 12px; }
 .mod-head { display: flex; gap: 14px; align-items: flex-start; }
-.mod .always { flex: none; align-self: center; font-size: 12px; color: var(--faint); border: 1px solid var(--border); border-radius: 99px; padding: 4px 10px; }
+.mod-head > .switch, .mod-head > .always, .mod-head > .soon-badge { margin-top: 9px; align-self: flex-start; }
+.mod .always { flex: none; height: 26px; box-sizing: border-box; display: inline-flex; align-items: center; font-size: 12px; color: var(--faint); border: 1px solid var(--border); border-radius: 99px; padding: 0 10px; }
 .mod .more summary { cursor: pointer; color: #c9a4ff; font-size: 13px; font-weight: 600; list-style: none; user-select: none; }
 .mod .more summary::-webkit-details-marker { display: none; }
 .mod .more summary::before { content: "▸ "; }
 .mod .more[open] summary::before { content: "▾ "; }
 .mod .more p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.mod-run { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--border); }
+.mod-run { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: auto; min-height: 34px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mod-note { font-size: 13px; color: var(--faint); }
 .run-result { font-size: 13px; color: var(--muted); }
 .run-result.done { color: #9ff0cb; }
 .run-result.error { color: #ffd59a; }
 .card.locked { border-style: dashed; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .card.locked .lock-ic { font-size: 30px; margin-bottom: 6px; opacity: .8; }
 .ok-line { color: #9ff0cb; font-size: 13px; }
+.wizard.narrow { width: min(460px, calc(100vw - 48px)); }
+.check { display: flex; align-items: center; gap: 9px; font-size: 13.5px; margin-top: 14px; cursor: pointer; user-select: none; }
+.check input { width: 16px; height: 16px; accent-color: #b45cff; margin: 0; }
+.seg { display: inline-flex; flex: none; padding: 3px; border-radius: 11px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); }
+.seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+.seg button:hover { color: var(--text); }
+.seg button.on { background: rgba(180, 92, 255, 0.22); color: var(--text); }
 .mod .emoji { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; background: rgba(255,255,255,0.05); flex: none; }
 .mod .body { flex: 1; min-width: 0; }
 .mod .body h3 { margin: 2px 0 3px; }
@@ -252,6 +263,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
     var(--bg);
 }
 .overlay.show { display: grid; }
+.overlay.dim { z-index: 60; background: rgba(8, 6, 14, 0.62); backdrop-filter: blur(6px); }
 .wizard { width: min(560px, calc(100vw - 48px)); }
 .wizard .card { padding: 34px 36px; border-radius: 24px; box-shadow: var(--shadow); border-color: var(--border-strong); }
 .wiz-step { display: none; animation: fade .3s ease; }
@@ -524,8 +536,12 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
               <label class="switch"><input type="checkbox" data-setting="app_start_bot_on_launch"><span></span></label>
             </div>
             <div class="setting">
-              <div class="txt"><b>Сворачивать в трей</b><span>Крестик прячет окно, бот продолжает работать</span></div>
-              <label class="switch"><input type="checkbox" data-setting="app_minimize_to_tray"><span></span></label>
+              <div class="txt"><b>Крестик окна</b><span>Что делать, когда закрываешь окно</span></div>
+              <div class="seg" data-choice="app_close_action">
+                <button data-value="ask">Спрашивать</button>
+                <button data-value="tray">В трей</button>
+                <button data-value="quit">Выход</button>
+              </div>
             </div>
             <div class="setting">
               <div class="txt"><b>Обновляться автоматически</b><span>Новая версия ставится сама, бот перезапускается за пару секунд</span></div>
@@ -556,8 +572,23 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
   </main>
 </div>
 
+<!-- ================= CLOSE WINDOW ================= -->
+<div class="overlay dim" id="close-ask">
+  <div class="wizard narrow">
+    <div class="card">
+      <h2>Закрыть Buffy?</h2>
+      <p class="lead">Если свернуть в трей, бот продолжит работать — иконка Buffy будет возле часов. Если выйти полностью, бот остановится.</p>
+      <label class="check"><input type="checkbox" id="close-remember"> Запомнить выбор <span class="muted">(можно поменять в Настройках)</span></label>
+      <div class="wiz-nav">
+        <button class="btn ghost" id="close-quit">Выйти полностью</button>
+        <button class="btn primary" id="close-tray">Свернуть в трей</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= PROBLEM REPORT ================= -->
-<div class="overlay" id="report">
+<div class="overlay dim" id="report">
   <div class="wizard">
     <div class="card">
       <h2>Сообщить о проблеме</h2>
@@ -667,16 +698,16 @@ const MODULES = [
   { key: null, run: "mining", emoji: "⛏️", title: "Шахта",
     text: "Тратит дневную энергию шахты на добычу руды.",
     more: "Энергия шахты появляется раз в день — после полуночи по Москве. Buffy тратит её целиком на добычу руды. Руда нужна для улучшения кирки и считается в капитал: 100 руды ≈ 1 💎. Если энергия уже потрачена, ручной запуск просто покажет, что копать нечего." },
-  { key: "auto_upgrade", emoji: "⬆️", title: "Улучшение кирки",
+  { key: "auto_upgrade", note: "Срабатывает сам после добычи руды", emoji: "⬆️", title: "Улучшение кирки",
     text: "Покупает новый уровень кирки и «Сильный удар», когда хватает руды.",
     more: "Чем выше уровень кирки, тем больше руды за каждый удар. Как только руды хватает на следующий уровень, Buffy покупает его, а заодно «Сильный удар». Тратит руду — выключи, если копишь её на что-то другое." },
   { key: "battles_enabled", run: "arena", emoji: "⚔️", title: "Арена",
     text: "Собирает самую сильную колоду, проводит бои и открывает сундуки.",
     more: "Примерно раз в полчаса Buffy заходит на арену. Колоду он подбирает сам: смотрит на атаку, здоровье, печати и энергию карт. Карта, у которой меньше 10 энергии, не может биться, а энергия восстанавливается со временем — поэтому уставшие карты он временно меняет на отдохнувшие. Бьётся, пока за бои дают эссенцию, открывает боевые сундуки, а слабые карты может пробуждать и перековывать за эссенцию." },
-  { key: "arena_auto_awaken", emoji: "✨", title: "Пробуждение карт",
+  { key: "arena_auto_awaken", note: "Если включено — сам, не чаще раза в 6 часов", emoji: "✨", title: "Пробуждение карт",
     text: "Тратит бесплатные пробуждения на новые карты. По умолчанию выключено.",
     more: "Пробуждение превращает карту из коллекции в боевую — у неё появляются атака, здоровье и шанс крита. Buffy тратит на это бесплатные попытки и энергию пробуждения (до 3 карт раз в 6 часов) и выбирает карты, которых ещё нет в боевой коллекции. Отменить пробуждение нельзя, поэтому включай, только если хочешь, чтобы он делал это сам." },
-  { key: "arena_cup_enabled", emoji: "🏆", title: "Вечерний кубок",
+  { key: "arena_cup_enabled", note: "Работает сам с 19:00 до 22:00 МСК", emoji: "🏆", title: "Вечерний кубок",
     text: "С 19:00 до 22:00 МСК играет кубок пошагово.",
     more: "Кубок идёт каждый день с 19:00 до 22:00 по Москве. Buffy играет его ход за ходом: выбирает, кого атаковать и какую тактику применить. Пока идёт кубок, остальные задачи ждут. Вручную не запускается — работает только в это время." },
   { key: "reading_enabled", run: "reading", emoji: "📖", title: "Чтение глав",
@@ -693,7 +724,7 @@ const MODULES = [
     textTg: "Вносит кристаллы в клуб и пишет в Telegram, если клубу нужна твоя карта.",
     more: "Примерно раз в полчаса Buffy вносит твои личные кристаллы в клуб — это опыт и очки для клуба. Если клуб просит карту, которая есть в твоей коллекции, он напишет об этом в журнале.",
     moreNoTg: TG_HINT },
-  { key: "seasonal_watch_enabled", run: "seasonal", emoji: "🎃", title: "Хэллоуин", soon: true,
+  { key: "seasonal_watch_enabled", note: "Появится в одном из обновлений", emoji: "🎃", title: "Хэллоуин", soon: true,
     text: "Ивент скоро! Buffy заметит его старт и покажет в журнале.",
     textTg: "Ивент скоро! Buffy заметит его старт и сразу напишет в Telegram.",
     more: "Пока ивента нет, Buffy время от времени проверяет его страницы. Как только он начнётся — сообщит, а в одном из обновлений здесь появится автоматизация заданий и мини-игр.",
@@ -748,7 +779,7 @@ function mockApi() {
     battles_enabled: true, arena_cup_enabled: true, tower_enabled: true, reading_enabled: true,
     ads_enabled: true, club_enabled: true, auto_upgrade: true, seasonal_watch_enabled: true,
     tg_enabled: false, tg_token: "", tg_chat_id: "", tg_night_mode: true, tg_silent_all: false,
-    proxy: "", app_start_bot_on_launch: true, app_minimize_to_tray: true, autostart_windows: false,
+    proxy: "", app_start_bot_on_launch: true, app_close_action: "ask", app_auto_update: true, autostart_windows: false,
   };
   const sample = ["🚀 Buffy начал работу", "🔑 Вошёл в аккаунт", "🎁 Забрал ежедневную награду",
     "📖 Читаю 15 глав (за сегодня прочитано 40/75)", "🃏 Выпала карта «Рем» (6/10 за сегодня)",
@@ -783,6 +814,7 @@ function mockApi() {
     find_chat_id: async () => { await wait(600); return { ok: true, chat_id: "713822262" }; },
     test_proxy: async () => { await wait(800); return { ok: true, detail: "MangaBuff доступен · 184 мс" }; },
     open_url: async () => true, open_data_dir: async () => true, report_problem: async () => ({ ok: true }),
+    hide_window: async () => true, quit_app: async () => true,
     run_module: async (n) => { manual[n] = { state: "running", summary: "" };
       setTimeout(() => manual[n] = { state: "done", at: "21:40", summary: "главы 55/75, бонусные карты 6/10. Следующая карта примерно через 28 мин" }, 2500);
       return { ok: true }; },
@@ -878,6 +910,7 @@ function renderState(st) {
   $("#rank-s").textContent = r.tier ? `${r.wins || 0} побед · ${r.losses || 0} поражений в ранге` : "Победы и поражения в текущем ранге";
 
   renderManual(st.manual);
+  if (st.status === "stopped") $("#status-text").textContent = st.manual_busy ? "Выполняю модуль…" : STATUS.stopped;
   const running = ["running", "starting", "restarting"].includes(st.status);
   const fresh = p.updated_at && (Date.now() - new Date(p.updated_at)) < 10 * 60 * 1000;
   const hero = $(".hero");
@@ -1000,10 +1033,11 @@ function renderModules() {
           : `<span class="always">Всегда</span>`}
       </div>
       <details class="more"><summary>Как это работает</summary><p>${m.more}${!tg && m.moreNoTg ? m.moreNoTg : ""}</p></details>
-      ${m.run ? `<div class="mod-run">
-        <button class="btn small" data-run="${m.run}">▶ Запустить сейчас</button>
-        <span class="run-result" id="run-${m.run}"></span>
-      </div>` : ""}
+      <div class="mod-run">
+        ${m.run ? `<button class="btn small" data-run="${m.run}">▶ Запустить сейчас</button>
+        <span class="run-result" id="run-${m.run}"></span>`
+          : `<span class="mod-note">${m.note || ""}</span>`}
+      </div>
     </div>`).join("");
   $("#w-mods").innerHTML = MODULES.filter((m) => m.key && !m.soon).map((m) => `
     <label><span>${m.emoji} ${m.title}</span><span class="switch"><input type="checkbox" data-setting="${m.key}"><span></span></span></label>`).join("");
@@ -1111,6 +1145,39 @@ $("#rep-send").addEventListener("click", async () => {
   toast("Открыл GitHub — проверь текст и нажми «Create»", "ok");
 });
 
+/* Segmented choices (string settings) */
+function bindChoices() {
+  $$(".seg[data-choice]").forEach((seg) => {
+    const key = seg.dataset.choice;
+    $$("button", seg).forEach((b) => {
+      b.classList.toggle("on", b.dataset.value === (settings[key] || "ask"));
+      if (b.dataset.bound) return;
+      b.dataset.bound = "1";
+      b.addEventListener("click", async () => {
+        if (await api.set_setting(key, b.dataset.value) === false) { toast("Не удалось сохранить", "err"); return; }
+        settings[key] = b.dataset.value; bindChoices();
+      });
+    });
+  });
+}
+
+/* Window close: ask tray-or-quit (called from Python) */
+window.askClose = () => {
+  $("#close-remember").checked = false;
+  $("#close-ask").classList.add("show");
+};
+async function closeAs(action) {
+  if ($("#close-remember").checked) { await api.set_setting("app_close_action", action); settings.app_close_action = action; bindChoices(); }
+  $("#close-ask").classList.remove("show");
+  if (action === "tray") await api.hide_window(); else await api.quit_app();
+}
+$("#close-tray").addEventListener("click", () => closeAs("tray"));
+$("#close-quit").addEventListener("click", () => closeAs("quit"));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  ["#close-ask", "#report"].forEach((id) => $(id).classList.remove("show"));
+});
+
 /* ------------------------------------------------------------ updates */
 let upd = {};
 function renderUpdate(u) {
@@ -1207,6 +1274,7 @@ async function refreshBoot() {
   $("#proxy").value = settings.proxy || "";
   renderModules();
   renderTg();
+  bindChoices();
 }
 
 (async function init() {

@@ -134,15 +134,22 @@ def run(start_minimized=False):
         on_install=quit_app,
     )
 
+    api._quit = quit_app
+    api._on_hidden = tray.hint_once
+
     def on_closing():
-        minimize = DataManager.get_setting("app_minimize_to_tray", True)
-        if state["quitting"] or not minimize:
+        action = DataManager.get_setting("app_close_action", "ask")
+        if state["quitting"] or action == "quit":
             api.stop()
             tray.stop()
             return True
-        window.hide()
-        tray.hint_once()
-        return False  # keep the app alive in the tray
+        if action == "tray":
+            window.hide()
+            tray.hint_once()
+            return False  # keep the app alive in the tray
+        # Ask in the UI; evaluate_js from this handler would block the GUI thread
+        threading.Thread(target=lambda: window.evaluate_js("askClose()"), daemon=True).start()
+        return False
 
     window.events.closing += on_closing
 
