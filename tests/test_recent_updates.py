@@ -255,6 +255,10 @@ class TelegramTopicTests(unittest.TestCase):
         getter = patch('tg_notifier.DataManager.get_setting', side_effect=lambda key, default=None: self.settings.get(key, default))
         getter.start()
         self.addCleanup(getter.stop)
+        # Ignore TG_THREAD_ID from a real .env on the server
+        env = patch.dict('os.environ', {'TG_THREAD_ID': ''})
+        env.start()
+        self.addCleanup(env.stop)
 
     @patch('tg_notifier.requests.post')
     def test_messages_go_to_configured_topic(self, post):
