@@ -1,0 +1,184 @@
+# -*- coding: utf-8 -*-
+"""Buffy desktop shell: web UI window, tray icon, single-instance guard."""
+from __future__ import annotations
+
+import os
+import sys
+import threading
+
+from buffy import APP_NAME, __version__
+from buffy.api import BuffyApi
+from buffy.updater import Updater
+from data_management import DataManager
+
+
+def resource_path(*parts):
+    """Bundled file path (PyInstaller unpacks data to sys._MEIPASS)."""
+    root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(root, *parts)
+
+
+def _single_instance():
+    """Two copies would run two daemons on one account — allow only one."""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW(None, False, "Global\\BuffyMangaBuffApp")
+    already = kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+    if already:
+        ctypes.windll.user32.MessageBoxW(
+            None, "Buffy уже запущен — ищи его иконку возле часов.", APP_NAME, 0x40
+        )
+    return not already
+
+
+class Tray:
+    def __init__(self, api: BuffyApi, show, quit_app):
+        import pystray
+        from PIL import Image
+
+        self._api = api
+        self._show = show
+        self._quit = quit_app
+        self._hint_shown = False
+        image = Image.open(resource_path("buffy", "assets", "tray.png"))
+        menu = pystray.Menu(
+            pystray.MenuItem("Открыть Buffy", lambda *_: show(), default=True),
+            pystray.MenuItem(
+                lambda _: "Остановить бота" if api.is_running() else "Запустить бота",
+                lambda *_: self._toggle(),
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Выход", lambda *_: quit_app()),
+        )
+        self.icon = pystray.Icon(APP_NAME, image, f"{APP_NAME} {__version__}", menu)
+
+    def _toggle(self):
+        if self._api.is_running():
+            self._api.stop()
+        else:
+            self._api.start()
+
+    def refresh(self, status=None):
+        labels = {
+            "running": "работает",
+            "starting": "запускается",
+            "restarting": "перезапускается",
+            "stopping": "останавливается",
+            "stopped": "остановлен",
+        }
+        try:
+            self.icon.title = f"{APP_NAME} — бот {labels.get(status, status or '')}".strip()
+            self.icon.update_menu()
+        except Exception:
+            pass
+
+    def hint_once(self):
+        if self._hint_shown:
+            return
+        self._hint_shown = True
+        try:
+            self.icon.notify("Buffy работает в фоне. Открыть — двойной клик по иконке.", APP_NAME)
+        except Exception:
+            pass
+
+    def run(self):
+        self.icon.run_detached()
+
+    def stop(self):
+        try:
+            self.icon.stop()
+        except Exception:
+            pass
+
+
+def run(start_minimized=False):
+    if not _single_instance():
+        return
+
+    import webview
+
+    api = BuffyApi()
+    state = {"quitting": False}
+
+    width, height = _window_size(webview)
+    window = webview.create_window(
+        APP_NAME,
+        url=resource_path("buffy", "ui", "index.html"),
+        js_api=api,
+        width=width,
+        height=height,
+        min_size=(980, 660),
+        background_color="#0c0a14",
+        hidden=start_minimized,
+    )
+    api._window = window
+
+    def show():
+        window.show()
+        window.restore()
+
+    def quit_app():
+        state["quitting"] = True
+        api.stop()
+        tray.stop()
+        window.destroy()
+
+    tray = Tray(api, show, quit_app)
+    api._on_status_change = tray.refresh
+    # The installer replaces our files, so quit as soon as it is running
+    api._updater = Updater(
+        auto_enabled=lambda: DataManager.get_setting("app_auto_update", True),
+        on_install=quit_app,
+    )
+
+    def on_closing():
+        minimize = DataManager.get_setting("app_minimize_to_tray", True)
+        if state["quitting"] or not minimize:
+            api.stop()
+            tray.stop()
+            return True
+        window.hide()
+        tray.hint_once()
+        return False  # keep the app alive in the tray
+
+    window.events.closing += on_closing
+
+    def on_started():
+        tray.run()
+        api._updater.start_background()
+        email, password = DataManager.get_credentials()
+        onboarded = DataManager.get_setting("app_onboarded", False)
+        if email and password and onboarded and DataManager.get_setting("app_start_bot_on_launch", True):
+            api.start()
+
+    webview.start(on_started, private_mode=False, storage_path=_storage_dir())
+    # Window closed for good
+    api.stop()
+    tray.stop()
+
+
+def _window_size(webview):
+    """1320x860, shrunk to fit smaller or high-DPI screens (sizes are in logical px)."""
+    width, height = 1320, 860
+    try:
+        screen = webview.screens[0]
+        width = min(width, int(screen.width * 0.9))
+        height = min(height, int(screen.height * 0.88))
+    except Exception:
+        pass
+    return max(width, 980), max(height, 660)
+
+
+def _storage_dir():
+    from config import BASE_DIR
+
+    path = os.path.join(BASE_DIR, "webview")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+if __name__ == "__main__":
+    run(start_minimized="--minimized" in sys.argv)

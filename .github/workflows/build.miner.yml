@@ -1,9 +1,10 @@
-name: Build Miner
+name: Build Buffy
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,20 +25,61 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # Force install critical libs to be safe
-        pip install customtkinter requests packaging urllib3
-        # Install from your file
-        pip install -r requirements.txt
-        pip install nuitka zstandard
+        pip install -r requirements-desktop.txt nuitka zstandard pytest
 
-    - name: Build with Nuitka
+    - name: Run Tests
+      run: python -m pytest -q tests
+
+    - name: Read Version
+      id: ver
+      shell: bash
+      run: echo "version=$(python -c 'import buffy; print(buffy.__version__)')" >> "$GITHUB_OUTPUT"
+
+    # Nuitka compiles to C instead of bundling the interpreter, which antivirus
+    # heuristics flag far less often than PyInstaller-style packers.
+    - name: Build Buffy (Nuitka)
       run: |
-        python -m nuitka --onefile --standalone --assume-yes-for-downloads --enable-plugin=tk-inter --include-package=customtkinter --include-package=requests --windows-disable-console --output-filename=MangaBuffMiner.exe main.py
+        python -m nuitka --standalone --assume-yes-for-downloads `
+          --windows-console-mode=disable `
+          --windows-icon-from-ico=buffy/assets/buffy.ico `
+          --include-data-dir=buffy/ui=buffy/ui `
+          --include-data-dir=buffy/assets=buffy/assets `
+          --include-package=buffy --include-package=pystray `
+          --include-package=curl_cffi --include-package-data=curl_cffi `
+          --include-package=clr_loader --include-package-data=clr_loader `
+          --include-package=pythonnet --include-package-data=pythonnet `
+          --nofollow-import-to=tkinter `
+          --company-name=Buffy --product-name=Buffy `
+          --file-version=${{ steps.ver.outputs.version }} --product-version=${{ steps.ver.outputs.version }} `
+          --file-description="Buffy - MangaBuff autopilot" `
+          --output-filename=Buffy.exe --output-dir=build main.py
+
+    - name: Build Installer and Portable Zip
+      run: |
+        if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+          choco install innosetup -y --no-progress
+        }
+        $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+        if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+        $dist = (Resolve-Path build\main.dist).Path
+        & $iscc /Q "/DDistDir=$dist" "/DAppVersion=${{ steps.ver.outputs.version }}" installer\buffy.iss
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        Rename-Item build\main.dist Buffy
+        Compress-Archive -Path build\Buffy -DestinationPath "dist\Buffy-${{ steps.ver.outputs.version }}-portable.zip"
+        Get-ChildItem dist
+
+    - name: Upload Build
+      uses: actions/upload-artifact@v4
+      with:
+        name: Buffy-${{ steps.ver.outputs.version }}
+        path: dist/*
 
     - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
       uses: ncipollo/release-action@v1
       with:
-        artifacts: "MangaBuffMiner.exe"
+        artifacts: "dist/Buffy-Setup-*.exe,dist/Buffy-*-portable.zip"
+        name: "Buffy ${{ github.ref_name }}"
         token: ${{ secrets.GITHUB_TOKEN }}
         allowUpdates: true
         generateReleaseNotes: true

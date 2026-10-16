@@ -6,7 +6,15 @@
 
 ![Status](https://img.shields.io/badge/Status-Active%20Production-brightgreen)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Mode](https://img.shields.io/badge/Mode-CLI%20%7C%20GUI%20%7C%2024%2F7%20Daemon-orange)
+![Mode](https://img.shields.io/badge/Mode-CLI%20%7C%20Desktop%20App%20%7C%2024%2F7%20Daemon-orange)
+
+---
+
+## 💜 Buffy — desktop app for Windows
+
+Don't want to touch Python? Grab **Buffy-Setup.exe** (or the portable zip) from [Releases](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest), run it, and the first-launch wizard walks you through login, modules and Telegram. Buffy runs the same 24/7 daemon as the server version, shows live stats (cards, chapters, diamonds, tower, arena rank), keeps a full activity log, and hides to the system tray when closed. Settings live in `%APPDATA%\Buffy`.
+
+> Windows may show "Windows protected your PC" for a new unsigned app — click **More info → Run anyway**.
 
 ---
 
@@ -60,7 +68,7 @@
 | **Smart Daemon (24/7)** | `python main.py --daemon` | Headless, continuous 24/7 daemon designed for VPS/servers. Automatically calculates sleep intervals until the earliest pending event (tower return, chest unlock, energy refill, midnight reset). |
 | **Standard CLI** | `python main.py` | Runs a complete farm and maintenance cycle once, outputs status, and exits cleanly. |
 | **Status Check** | `python main.py --status` | Fast, read-only health check of current energy, balance, and account state without performing actions. |
-| **Desktop GUI** | `python main.py --gui` | Modern CustomTkinter graphical desktop interface with live logs, stats, and settings. |
+| **Buffy desktop app** | `python main.py --app` | Windows app with onboarding wizard, live dashboard, module toggles, Telegram setup, tray icon and autostart. Requires `requirements-desktop.txt`. |
 
 ---
 
@@ -126,13 +134,13 @@ sudo systemctl start mangabuff
 ## 📁 Project Structure
 
 ```
-├── main.py                     # Entry point (CLI, GUI, Daemon flags)
+├── main.py                     # Entry point (CLI, Daemon, desktop app flags)
 ├── engine.py                   # MangaMinerBot core farm loop & lifecycle orchestration
 ├── arena.py                    # Consolidated Arena subsystem (combat simulation, optimization, locks, Evening Cup)
 ├── club.py                     # Club automation (crystal contributions, card donation alerts)
 ├── http_session.py             # Robust curl_cffi/requests HTTP session layer
 ├── tg_notifier.py              # Asynchronous Telegram notification engine
-├── gui_app.py                  # CustomTkinter desktop interface
+├── buffy/                      # Buffy desktop app: pywebview window, web UI, tray, autostart
 ├── config.py                   # Selectors, endpoints, and constants
 ├── data_management.py          # Session and credential persistence
 ├── utils.py                    # Safe cookie handling, parsing, and utilities
@@ -147,7 +155,7 @@ sudo systemctl start mangabuff
 
 * `requests` & `curl_cffi` — Resilient HTTP networking with TLS fingerprint impersonation
 * `beautifulsoup4` — HTML parsing and data extraction
-* `customtkinter` — Modern desktop GUI
+* `pywebview`, `pystray`, `pillow` — Buffy desktop app (`requirements-desktop.txt`, Windows only)
 * `python-dotenv` — Environment configuration
 * `packaging` & `urllib3` — Protocol support
 

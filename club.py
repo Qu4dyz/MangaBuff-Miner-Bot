@@ -40,9 +40,8 @@ class ClubAutomationMixin:
         except Exception as e:
             self.log(f"⚠️ Ошибка определения клуба: {e}")
 
-        fallback = "klub-garemshchikov"
-        self._club_slug = fallback
-        return fallback
+        # Not in a club (or the page changed): skip, retry detection next cycle
+        return None
 
     def run_club_cycle(self):
         """Execute regular club checks: personal crystal contributions & card alerts."""
@@ -50,6 +49,9 @@ class ClubAutomationMixin:
             return
 
         slug = self.get_club_slug()
+        if not slug:
+            self.log("ℹ️ Клуб не найден на /balance — вклады пропущены.")
+            return
         boost_url = f"https://mangabuff.ru/clubs/{slug}/boost"
 
         try:

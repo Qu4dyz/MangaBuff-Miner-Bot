@@ -1,8 +1,14 @@
 import os
 import json
 import tempfile
+import threading
 import time
 from path import DATA_FILE, SESSION_FILE, READING_STATE_FILE
+
+
+# Settings are read-modify-written; the desktop app touches them from the UI and
+# the bot thread at once, so serialise writes to avoid losing one of them.
+_WRITE_LOCK = threading.RLock()
 
 
 # ==========================================
@@ -22,6 +28,11 @@ class DataManager:
     @staticmethod
     def save_json(filename, data):
         """Atomically saves JSON data to prevent file corruption on crash."""
+        with _WRITE_LOCK:
+            DataManager._save_json_locked(filename, data)
+
+    @staticmethod
+    def _save_json_locked(filename, data):
         try:
             current = DataManager.load_json(filename)
             current.update(data)

@@ -1,0 +1,1227 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buffy</title>
+<style>
+:root {
+  --bg: #0c0a14;
+  --surface: #14111e;
+  --surface-2: #1b1727;
+  --surface-3: #241f33;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --text: #eeebf7;
+  --muted: #9c95b6;
+  --faint: #6c6585;
+  --pink: #ff6aaa;
+  --violet: #7c4dff;
+  --accent: linear-gradient(135deg, #ff6aaa 0%, #b45cff 55%, #7c4dff 100%);
+  --success: #3ddc97;
+  --warn: #ffb84d;
+  --error: #ff5c7a;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  --font: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 var(--font);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+input, button, select { font: inherit; color: inherit; }
+::selection { background: rgba(180, 92, 255, 0.4); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.16); }
+
+/* ---------- layout ---------- */
+.app { display: grid; grid-template-columns: 236px 1fr; grid-template-rows: 100vh; height: 100vh; overflow: hidden; }
+.sidebar {
+  background: linear-gradient(180deg, #120f1c 0%, #0e0b17 100%);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 20px 14px 16px;
+  min-height: 0; overflow-y: auto;
+}
+.brand { display: flex; align-items: center; gap: 12px; padding: 4px 8px 22px; }
+.brand img { width: 40px; height: 40px; border-radius: 11px; box-shadow: 0 6px 20px rgba(180, 92, 255, 0.35); }
+.brand-name { font-size: 20px; font-weight: 700; letter-spacing: 0.2px; }
+.brand-sub { font-size: 12px; color: var(--faint); margin-top: -2px; white-space: nowrap; }
+.nav { display: flex; flex-direction: column; gap: 3px; }
+.nav button {
+  display: flex; align-items: center; gap: 12px;
+  border: 0; background: transparent; color: var(--muted);
+  padding: 10px 12px; border-radius: var(--radius-sm); cursor: pointer; text-align: left;
+  transition: background .15s, color .15s;
+}
+.nav button svg { width: 19px; height: 19px; flex: none; opacity: .9; }
+.nav button:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+.nav button.active { background: rgba(180, 92, 255, 0.14); color: var(--text); box-shadow: inset 3px 0 0 #b45cff; }
+.nav .badge { margin-left: auto; font-size: 11px; background: var(--error); color: #fff; border-radius: 99px; padding: 0 7px; display: none; }
+.side-foot { margin-top: auto; padding: 12px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+.side-foot .who { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-foot .ver { font-size: 11px; color: var(--faint); margin-top: 2px; }
+
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 18px 28px; border-bottom: 1px solid var(--border);
+  background: rgba(12, 10, 20, 0.7); backdrop-filter: blur(10px);
+}
+.topbar h1 { font-size: 22px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+.topbar .sub { color: var(--muted); font-size: 13px; }
+.topbar .spacer { flex: 1; }
+.content { flex: 1; min-height: 0; overflow: auto; padding: 26px 28px 40px; }
+.page { display: none; animation: fade .25s ease; }
+.page.active { display: block; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---------- controls ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--border-strong); background: var(--surface-2);
+  padding: 9px 16px; border-radius: 11px; cursor: pointer; font-weight: 600;
+  transition: transform .08s, background .15s, border-color .15s, opacity .15s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--surface-3); }
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: .5; cursor: default; transform: none; }
+.btn svg { width: 17px; height: 17px; }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; box-shadow: 0 6px 22px rgba(180, 92, 255, 0.35); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { background: rgba(255, 92, 122, 0.12); border-color: rgba(255, 92, 122, 0.35); color: #ffc1cd; }
+.btn.danger:hover { background: rgba(255, 92, 122, 0.2); }
+.btn.ghost { background: transparent; }
+.btn.big { padding: 12px 22px; font-size: 15px; border-radius: 13px; }
+.btn.small { padding: 6px 11px; font-size: 13px; border-radius: 9px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.field label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.input {
+  width: 100%; padding: 11px 13px; border-radius: 11px;
+  background: #0f0c18; border: 1px solid var(--border-strong); outline: none;
+  user-select: text; transition: border-color .15s, box-shadow .15s;
+}
+.input:focus { border-color: #b45cff; box-shadow: 0 0 0 3px rgba(180, 92, 255, 0.22); }
+.input::placeholder { color: var(--faint); }
+textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inherit; line-height: 1.5; }
+.row { display: flex; gap: 10px; align-items: center; }
+.row .input { flex: 1; }
+.hint { font-size: 12.5px; color: var(--faint); }
+.msg { font-size: 13px; margin-top: 8px; min-height: 18px; }
+.msg.ok { color: var(--success); }
+.msg.err { color: var(--error); }
+
+.switch { position: relative; width: 44px; height: 26px; flex: none; cursor: pointer; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch span {
+  position: absolute; inset: 0; border-radius: 99px; background: #2a2438;
+  border: 1px solid var(--border-strong); transition: background .2s;
+}
+.switch span::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: #d9d4ea; transition: transform .2s cubic-bezier(.3,1.4,.6,1), background .2s;
+}
+.switch input:checked + span { background: var(--accent); border-color: transparent; }
+.switch input:checked + span::after { transform: translateX(18px); background: #fff; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border); font-size: 13px; font-weight: 600;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+.pill.running .dot { background: var(--success); box-shadow: 0 0 0 0 rgba(61,220,151,.6); animation: pulse 1.8s infinite; }
+.pill.starting .dot, .pill.restarting .dot, .pill.stopping .dot { background: var(--warn); animation: pulse-warn 1.2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(61,220,151,.55); } 70% { box-shadow: 0 0 0 9px rgba(61,220,151,0); } 100% { box-shadow: 0 0 0 0 rgba(61,220,151,0); } }
+@keyframes pulse-warn { 50% { opacity: .35; } }
+
+/* ---------- cards ---------- */
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 18px 20px; position: relative;
+}
+.card h3 { margin: 0 0 4px; font-size: 15px; font-weight: 650; }
+.card .lead { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+.section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1.1px; color: var(--faint); font-weight: 700; margin: 26px 0 12px; }
+.grid { display: grid; gap: 16px; }
+.grid.stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1080px) { .grid.stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.grid.two { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+@media (max-width: 1000px) {
+  .app { grid-template-columns: 208px 1fr; }
+  .content { padding: 22px 22px 34px; }
+  .topbar { padding: 16px 22px; }
+}
+
+.hero {
+  display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center;
+  padding: 24px 26px; border-radius: 20px; position: relative;
+  background: linear-gradient(120deg, #2a1830 0%, #1d1631 55%, #1a1538 100%);
+  border: 1px solid rgba(180, 92, 255, 0.28);
+  box-shadow: 0 12px 36px rgba(124, 77, 255, 0.12);
+}
+.hero.idle { background: var(--surface); border-color: var(--border-strong); box-shadow: none; }
+.hero.idle .countdown { display: none; }
+.live { display: inline-flex; align-items: center; gap: 10px; font: 700 26px/1 var(--font); color: #ffd1e6; }
+.live .dot { width: 12px; height: 12px; background: var(--pink); animation: pulse-warn 1.2s infinite; }
+.hero .label { color: var(--muted); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+.hero .what { font-size: 28px; font-weight: 700; margin: 6px 0 4px; }
+.hero .when { color: var(--muted); }
+.countdown { font: 700 44px/1 var(--mono); letter-spacing: 1px; background: var(--accent); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.stat { display: flex; flex-direction: column; gap: 10px; min-height: 128px; }
+.stat .k { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.stat .k .ic { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 16px; background: rgba(255,255,255,0.05); }
+.stat .v { font-size: 26px; font-weight: 700; letter-spacing: .3px; }
+.stat .v small { font-size: 15px; color: var(--muted); font-weight: 600; }
+.stat .s { color: var(--faint); font-size: 12.5px; margin-top: auto; }
+.bar { height: 7px; border-radius: 99px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; border-radius: 99px; background: var(--accent); transition: width .6s ease; }
+.ads { display: flex; gap: 6px; }
+.ads b { width: 100%; height: 7px; border-radius: 99px; background: rgba(255,255,255,0.07); }
+.ads b.on { background: var(--accent); }
+
+/* ---------- log ---------- */
+.log {
+  font: 12.8px/1.6 var(--mono); background: #0a0812; border: 1px solid var(--border);
+  border-radius: 14px; padding: 12px 14px; overflow: auto; user-select: text;
+}
+.log .ln { display: flex; gap: 12px; padding: 1px 0; white-space: pre-wrap; word-break: break-word; }
+.log .ts { color: var(--faint); flex: none; }
+.log .ln.warn .tx { color: #ffd59a; }
+.log .ln.error .tx { color: #ff9cb0; }
+.log .ln.success .tx { color: #9ff0cb; }
+.log .empty { color: var(--faint); padding: 18px 4px; text-align: center; font-family: var(--font); }
+#page-log .log { height: calc(100vh - 210px); }
+#dash-log { min-height: 64px; overflow: hidden; }
+.btn.upd { background: rgba(180, 92, 255, 0.16); border-color: rgba(180, 92, 255, 0.45); color: var(--text); }
+.btn.upd[disabled] { opacity: .85; cursor: default; }
+.chips { display: flex; gap: 6px; }
+.chip { border: 1px solid var(--border-strong); background: transparent; border-radius: 99px; padding: 5px 12px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 600; }
+.chip.active { background: rgba(180, 92, 255, 0.18); color: var(--text); border-color: rgba(180, 92, 255, 0.5); }
+
+/* ---------- modules ---------- */
+#modules-grid { align-items: start; }
+.mod { display: flex; flex-direction: column; gap: 12px; }
+.mod-head { display: flex; gap: 14px; align-items: flex-start; }
+.mod .always { flex: none; align-self: center; font-size: 12px; color: var(--faint); border: 1px solid var(--border); border-radius: 99px; padding: 4px 10px; }
+.mod .more summary { cursor: pointer; color: #c9a4ff; font-size: 13px; font-weight: 600; list-style: none; user-select: none; }
+.mod .more summary::-webkit-details-marker { display: none; }
+.mod .more summary::before { content: "▸ "; }
+.mod .more[open] summary::before { content: "▾ "; }
+.mod .more p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.mod-run { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--border); }
+.run-result { font-size: 13px; color: var(--muted); }
+.run-result.done { color: #9ff0cb; }
+.run-result.error { color: #ffd59a; }
+.card.locked { border-style: dashed; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.card.locked .lock-ic { font-size: 30px; margin-bottom: 6px; opacity: .8; }
+.ok-line { color: #9ff0cb; font-size: 13px; }
+.mod .emoji { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; background: rgba(255,255,255,0.05); flex: none; }
+.mod .body { flex: 1; min-width: 0; }
+.mod .body h3 { margin: 2px 0 3px; }
+.mod .body p { margin: 0; color: var(--muted); font-size: 13px; }
+.mod.soon { border-style: dashed; border-color: rgba(255, 106, 170, 0.35); background: linear-gradient(120deg, rgba(255,106,170,0.07), rgba(124,77,255,0.06)), var(--surface); }
+.soon-badge { flex: none; align-self: center; font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 99px; color: #ffd1e6; background: rgba(255, 106, 170, 0.16); border: 1px solid rgba(255, 106, 170, 0.4); }
+.setting { display: flex; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--border); }
+.setting:first-of-type { border-top: 0; }
+.setting .txt { flex: 1; }
+.setting .txt b { display: block; font-weight: 600; }
+.setting .txt span { color: var(--muted); font-size: 13px; }
+.steps { margin: 0 0 16px; padding: 0; list-style: none; counter-reset: s; }
+.steps li { counter-increment: s; display: flex; gap: 12px; margin-bottom: 10px; color: var(--muted); }
+.steps li::before { content: counter(s); flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); }
+.steps a, a.link { color: #d3b5ff; cursor: pointer; text-decoration: none; border-bottom: 1px dashed rgba(211, 181, 255, 0.5); }
+
+/* ---------- onboarding ---------- */
+.overlay {
+  position: fixed; inset: 0; z-index: 50; display: none; place-items: center;
+  background:
+    radial-gradient(900px 500px at 15% 10%, rgba(255, 106, 170, 0.18), transparent 60%),
+    radial-gradient(900px 600px at 90% 90%, rgba(124, 77, 255, 0.22), transparent 60%),
+    var(--bg);
+}
+.overlay.show { display: grid; }
+.wizard { width: min(560px, calc(100vw - 48px)); }
+.wizard .card { padding: 34px 36px; border-radius: 24px; box-shadow: var(--shadow); border-color: var(--border-strong); }
+.wiz-step { display: none; animation: fade .3s ease; }
+.wiz-step.active { display: block; }
+.wiz-step h2 { font-size: 26px; margin: 0 0 8px; }
+.wiz-step p.lead { color: var(--muted); margin: 0 0 22px; font-size: 14.5px; }
+.wiz-logo { width: 84px; height: 84px; border-radius: 24px; box-shadow: 0 16px 50px rgba(180, 92, 255, 0.45); margin-bottom: 20px; animation: float 4s ease-in-out infinite; }
+@keyframes float { 50% { transform: translateY(-6px); } }
+.wiz-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 26px; }
+.progress-dots { display: flex; gap: 6px; justify-content: center; margin-top: 18px; }
+.progress-dots i { width: 7px; height: 7px; border-radius: 99px; background: rgba(255,255,255,0.15); transition: width .25s, background .25s; }
+.progress-dots i.on { width: 22px; background: #b45cff; }
+.features { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 4px; }
+.features div { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.04); font-size: 13.5px; }
+.mini-mods { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+.mini-mods label { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; cursor: pointer; }
+
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toasts { position: fixed; right: 22px; bottom: 22px; display: flex; flex-direction: column; gap: 10px; z-index: 80; }
+.toast {
+  min-width: 260px; max-width: 380px; padding: 12px 16px; border-radius: 13px; background: var(--surface-3);
+  border: 1px solid var(--border-strong); box-shadow: var(--shadow); animation: toast-in .25s ease;
+  display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px;
+}
+.toast.ok { border-color: rgba(61, 220, 151, 0.45); }
+.toast.err { border-color: rgba(255, 92, 122, 0.5); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="logo.png" alt="">
+      <div>
+        <div class="brand-name">Buffy</div>
+        <div class="brand-sub">автопилот MangaBuff</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-page="dash" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
+        Главная
+      </button>
+      <button data-page="modules">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
+        Модули
+      </button>
+      <button data-page="notify">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7Z"/></svg>
+        Telegram
+      </button>
+      <button data-page="network">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18Z"/></svg>
+        Сеть
+      </button>
+      <button data-page="log">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+        Журнал <span class="badge" id="err-badge">0</span>
+      </button>
+      <button data-page="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        Настройки
+      </button>
+    </nav>
+    <div class="side-foot">
+      <div class="who" id="side-email">—</div>
+      <div class="ver" id="side-ver">Buffy</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="page-title">Главная</h1>
+        <div class="sub" id="page-sub">Всё, что Buffy делает прямо сейчас</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn small upd" id="upd-btn" hidden></button>
+      <span class="pill" id="status-pill"><span class="dot"></span><span id="status-text">Остановлен</span></span>
+      <button class="btn primary" id="run-btn">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.8L9.5 4.6A1 1 0 0 0 8 5.5Z"/></svg>
+        <span>Запустить</span>
+      </button>
+    </header>
+
+    <div class="content">
+      <!-- ================= DASHBOARD ================= -->
+      <section class="page active" id="page-dash">
+        <div class="hero">
+          <div>
+            <div class="label" id="next-label">Следующее действие</div>
+            <div class="what" id="next-action">—</div>
+            <div class="when" id="next-when">Запусти бота, и Buffy сам решит, чем заняться</div>
+          </div>
+          <div class="countdown" id="countdown">--:--</div>
+        </div>
+
+        <div class="section-title">Сегодня</div>
+        <div class="grid stats">
+          <div class="card stat">
+            <div class="k"><span class="ic">🃏</span>Бонусные карты</div>
+            <div class="v" id="cards-v">—</div>
+            <div class="bar"><i id="cards-bar"></i></div>
+            <div class="s" id="cards-s">Карты за чтение глав</div>
+          </div>
+          <div class="card stat">
+            <div class="k"><span class="ic">📖</span>Главы</div>
+            <div class="v" id="ch-v">—</div>
+            <div class="bar"><i id="ch-bar"></i></div>
+            <div class="s" id="ch-s">Дневной квест — 75 глав</div>
+          </div>
+          <div class="card stat">
+            <div class="k"><span class="ic">📺</span>Реклама</div>
+            <div class="v" id="ads-v">—</div>
+            <div class="ads"><b></b><b></b><b></b></div>
+            <div class="s">3 просмотра × 7 💎 в день</div>
+          </div>
+          <div class="card stat">
+            <div class="k"><span class="ic">⚡</span>Энергия шахты</div>
+            <div class="v" id="energy-v">—</div>
+            <div class="s">Восстанавливается в полночь МСК</div>
+          </div>
+        </div>
+
+        <div class="section-title">Баланс и прогресс</div>
+        <div class="grid stats">
+          <div class="card stat">
+            <div class="k"><span class="ic">💎</span>Алмазы</div>
+            <div class="v" id="dia-v">—</div>
+            <div class="s" id="dia-s">&nbsp;</div>
+          </div>
+          <div class="card stat">
+            <div class="k"><span class="ic">⛏️</span>Руда</div>
+            <div class="v" id="ore-v">—</div>
+            <div class="s" id="ore-s">&nbsp;</div>
+          </div>
+          <div class="card stat">
+            <div class="k"><span class="ic">🏰</span>Башня Разлома</div>
+            <div class="v" id="tower-v" style="font-size:20px">—</div>
+            <div class="s">Экспедиция до возвращения</div>
+          </div>
+          <div class="card stat">
+            <div class="k"><span class="ic" id="rank-ic">⚔️</span>Арена</div>
+            <div class="v" id="rank-v" style="font-size:20px">—</div>
+            <div class="s" id="rank-s">Победы и поражения в текущем ранге</div>
+          </div>
+        </div>
+
+        <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Последние события</span>
+          <a class="link" data-goto="log" style="text-transform:none;letter-spacing:0;font-weight:600">Весь журнал →</a>
+        </div>
+        <div class="log" id="dash-log"><div class="empty">Здесь появятся действия бота</div></div>
+      </section>
+
+      <!-- ================= MODULES ================= -->
+      <section class="page" id="page-modules">
+        <div class="grid two" id="modules-grid"></div>
+        <p class="hint" style="margin-top:16px">Изменения подхватываются со следующего цикла бота — перезапуск не нужен.</p>
+      </section>
+
+      <!-- ================= TELEGRAM ================= -->
+      <section class="page" id="page-notify">
+        <div class="grid two">
+          <div class="card">
+            <h3>Подключение</h3>
+            <p class="lead">Buffy пришлёт дропы карт, обмены, повышение ранга и предупредит, если что-то сломалось.</p>
+            <ol class="steps">
+              <li><span>Открой <a data-url="https://t.me/BotFather">@BotFather</a>, отправь <span class="mono">/newbot</span> и скопируй токен.</span></li>
+              <li><span>Напиши своему новому боту любое сообщение.</span></li>
+              <li><span>Вставь токен ниже и нажми «Найти Chat ID».</span></li>
+            </ol>
+            <div class="field">
+              <label for="tg-token">Токен бота</label>
+              <input class="input mono" id="tg-token" placeholder="123456789:AA..." spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="tg-chat">Chat ID</label>
+              <div class="row">
+                <input class="input mono" id="tg-chat" placeholder="например 713822262" spellcheck="false">
+                <button class="btn" id="tg-find">Найти Chat ID</button>
+              </div>
+            </div>
+            <div class="row">
+              <button class="btn primary" id="tg-save">Сохранить и проверить</button>
+              <button class="btn ghost" id="tg-off" hidden>Отключить</button>
+            </div>
+            <div class="msg" id="tg-msg"></div>
+            <div id="tg-state" style="margin-top:10px"></div>
+          </div>
+          <div class="card locked" id="tg-locked">
+            <div class="lock-ic">🔒</div>
+            <h3>Уведомления</h3>
+            <p class="lead">Сначала подключи бота — слева три коротких шага. Как только проверка пройдёт, здесь появятся настройки: ночной режим, звук и прочее.</p>
+            <p class="muted" style="font-size:13px;margin:0">Без Telegram Buffy всё равно работает — всё, что он делает, видно в журнале.</p>
+          </div>
+          <div class="card" id="tg-settings" hidden>
+            <h3>Уведомления</h3>
+            <p class="lead">Когда и как присылать сообщения.</p>
+            <div class="setting">
+              <div class="txt"><b>Уведомления включены</b><span>Отправлять сообщения в Telegram</span></div>
+              <label class="switch"><input type="checkbox" data-setting="tg_enabled"><span></span></label>
+            </div>
+            <div class="setting">
+              <div class="txt"><b>🌙 Ночной режим</b><span>С 23:00 до 08:00 МСК — без звука и без отчётов</span></div>
+              <label class="switch"><input type="checkbox" data-setting="tg_night_mode"><span></span></label>
+            </div>
+            <div class="setting">
+              <div class="txt"><b>🔕 Всегда без звука</b><span>Все сообщения приходят беззвучно</span></div>
+              <label class="switch"><input type="checkbox" data-setting="tg_silent_all"><span></span></label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= NETWORK ================= -->
+      <section class="page" id="page-network">
+        <div class="card" style="max-width:720px">
+          <h3>Прокси</h3>
+          <p class="lead">Обычно не нужен. Пригодится, если сайт не открывается или защита DDoS-Guard часто ставит паузы.</p>
+          <div class="field">
+            <label for="proxy">Адрес прокси</label>
+            <div class="row">
+              <input class="input mono" id="proxy" placeholder="ip:port:user:pass или http://user:pass@ip:port" spellcheck="false">
+              <button class="btn" id="proxy-test">Проверить</button>
+            </div>
+            <span class="hint">Форматы: <span class="mono">ip:port:user:pass</span> · <span class="mono">http://user:pass@ip:port</span> · <span class="mono">socks5://127.0.0.1:1080</span></span>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="proxy-save">Сохранить</button>
+            <button class="btn ghost" id="proxy-clear">Без прокси</button>
+          </div>
+          <div class="msg" id="proxy-msg"></div>
+          <p class="hint" style="margin-top:14px">Новый прокси начнёт работать после перезапуска бота.</p>
+        </div>
+      </section>
+
+      <!-- ================= LOG ================= -->
+      <section class="page" id="page-log">
+        <div class="row" style="margin-bottom:12px">
+          <div class="chips" id="log-chips">
+            <button class="chip active" data-filter="all">Все</button>
+            <button class="chip" data-filter="important">Важное</button>
+            <button class="chip" data-filter="error">Ошибки</button>
+          </div>
+          <div class="spacer" style="flex:1"></div>
+          <button class="btn small ghost" id="log-clear">Очистить</button>
+          <button class="btn small" data-report>Сообщить о проблеме</button>
+        </div>
+        <div class="log" id="full-log"><div class="empty">Журнал пуст</div></div>
+      </section>
+
+      <!-- ================= SETTINGS ================= -->
+      <section class="page" id="page-settings">
+        <div class="grid two">
+          <div class="card">
+            <h3>Приложение</h3>
+            <p class="lead">Как Buffy живёт на компьютере.</p>
+            <div class="setting">
+              <div class="txt"><b>Запуск вместе с Windows</b><span>Тихо стартует в трее после включения ПК</span></div>
+              <label class="switch"><input type="checkbox" data-setting="autostart_windows"><span></span></label>
+            </div>
+            <div class="setting">
+              <div class="txt"><b>Сразу запускать бота</b><span>Не нужно нажимать «Запустить» после открытия</span></div>
+              <label class="switch"><input type="checkbox" data-setting="app_start_bot_on_launch"><span></span></label>
+            </div>
+            <div class="setting">
+              <div class="txt"><b>Сворачивать в трей</b><span>Крестик прячет окно, бот продолжает работать</span></div>
+              <label class="switch"><input type="checkbox" data-setting="app_minimize_to_tray"><span></span></label>
+            </div>
+            <div class="setting">
+              <div class="txt"><b>Обновляться автоматически</b><span>Новая версия ставится сама, бот перезапускается за пару секунд</span></div>
+              <label class="switch"><input type="checkbox" data-setting="app_auto_update"><span></span></label>
+            </div>
+            <div class="row" style="margin-top:14px;flex-wrap:wrap;align-items:center">
+              <button class="btn small" id="upd-check">Проверить обновления</button>
+              <span class="muted" id="upd-status" style="font-size:13px"></span>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Аккаунт MangaBuff</h3>
+            <p class="lead" id="acc-lead">—</p>
+            <div class="row" style="flex-wrap:wrap">
+              <button class="btn" id="acc-change">Сменить аккаунт</button>
+              <button class="btn ghost" id="open-data">Папка с данными</button>
+            </div>
+            <div class="section-title" style="margin-top:22px">О программе</div>
+            <p class="muted" style="margin:0 0 12px"><b style="color:var(--text)">Buffy</b> <span id="about-ver"></span> — автопилот для MangaBuff: шахта, чтение глав, арена, башня, клуб и реклама.</p>
+            <div class="row">
+              <button class="btn small" data-url-repo>GitHub</button>
+              <button class="btn small ghost" data-report>Сообщить о проблеме</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- ================= PROBLEM REPORT ================= -->
+<div class="overlay" id="report">
+  <div class="wizard">
+    <div class="card">
+      <h2>Сообщить о проблеме</h2>
+      <p class="lead">Опиши своими словами, что пошло не так. Технический журнал Buffy приложится сам — почта, пароль, токены и прокси в нём скрыты.</p>
+      <textarea class="input" id="rep-text" rows="5" placeholder="Например: арена перестала проводить бои после обновления"></textarea>
+      <p class="hint" style="margin:10px 0 0">Откроется GitHub с готовым сообщением — останется нажать «Create». Нужен аккаунт GitHub.</p>
+      <div class="wiz-nav">
+        <button class="btn ghost" id="rep-cancel">Отмена</button>
+        <button class="btn primary" id="rep-send">Открыть GitHub</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ONBOARDING ================= -->
+<div class="overlay" id="wizard">
+  <div class="wizard">
+    <div class="card">
+      <div class="wiz-step active" data-step="0" style="text-align:center">
+        <img class="wiz-logo" src="logo.png" alt="">
+        <h2>Привет, я Buffy 💜</h2>
+        <p class="lead">Буду играть в MangaBuff за тебя: копать руду, читать главы ради карт, сражаться на арене и забирать награды. Настроим всё за минуту.</p>
+        <div class="features" style="text-align:left">
+          <div>⛏️ Шахта и кирка</div>
+          <div>📖 Главы и бонусные карты</div>
+          <div>⚔️ Арена и вечерний кубок</div>
+          <div>🏰 Башня Разлома</div>
+          <div>📺 Реклама за алмазы</div>
+          <div>📲 Уведомления в Telegram</div>
+        </div>
+        <div class="wiz-nav" style="justify-content:center"><button class="btn primary big" data-next>Начать</button></div>
+      </div>
+
+      <div class="wiz-step" data-step="1">
+        <h2>Вход в MangaBuff</h2>
+        <p class="lead">Почта и пароль от сайта. Они хранятся только на этом компьютере.</p>
+        <div class="field">
+          <label for="w-email">Почта</label>
+          <input class="input" id="w-email" type="email" placeholder="you@example.com" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="w-pass">Пароль</label>
+          <input class="input" id="w-pass" type="password" placeholder="••••••••" autocomplete="off">
+        </div>
+        <div class="msg" id="w-login-msg"></div>
+        <div class="wiz-nav">
+          <button class="btn ghost" data-back>Назад</button>
+          <button class="btn primary" id="w-login">Войти</button>
+        </div>
+      </div>
+
+      <div class="wiz-step" data-step="2">
+        <h2>Что делать?</h2>
+        <p class="lead">Включи нужное. Поменять можно в любой момент в разделе «Модули».</p>
+        <div class="mini-mods" id="w-mods"></div>
+        <div class="wiz-nav">
+          <button class="btn ghost" data-back>Назад</button>
+          <button class="btn primary" data-next>Дальше</button>
+        </div>
+      </div>
+
+      <div class="wiz-step" data-step="3">
+        <h2>Уведомления в Telegram</h2>
+        <p class="lead">По желанию. Buffy напишет о дропах карт, обменах и если понадобится твоя помощь.</p>
+        <ol class="steps">
+          <li><span>В <a data-url="https://t.me/BotFather">@BotFather</a> отправь <span class="mono">/newbot</span> и скопируй токен.</span></li>
+          <li><span>Напиши своему боту любое сообщение.</span></li>
+        </ol>
+        <div class="field">
+          <label for="w-token">Токен бота</label>
+          <input class="input mono" id="w-token" placeholder="123456789:AA..." spellcheck="false">
+        </div>
+        <div class="msg" id="w-tg-msg"></div>
+        <div class="wiz-nav">
+          <button class="btn ghost" data-skip>Пропустить</button>
+          <button class="btn primary" id="w-tg">Подключить</button>
+        </div>
+      </div>
+
+      <div class="wiz-step" data-step="4" style="text-align:center">
+        <img class="wiz-logo" src="logo.png" alt="">
+        <h2>Всё готово ✨</h2>
+        <p class="lead">Buffy будет работать, пока открыт или свёрнут в трей. Можно закрыть окно — бот продолжит в фоне.</p>
+        <div class="setting" style="text-align:left;border:0">
+          <div class="txt"><b>Запускаться вместе с Windows</b><span>Чтобы ничего не пропускать</span></div>
+          <label class="switch"><input type="checkbox" id="w-autostart"><span></span></label>
+        </div>
+        <div class="wiz-nav" style="justify-content:center"><button class="btn primary big" id="w-finish">Запустить Buffy</button></div>
+      </div>
+      <div class="progress-dots" id="w-dots"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------- data */
+// key: on/off setting (null = always on); run: module Buffy can run once on demand
+const TG_HINT = " Подключи Telegram — и такие сообщения будут приходить на телефон.";
+const MODULES = [
+  { key: null, run: "daily", emoji: "📅", title: "Ежедневные награды",
+    text: "Отмечает визит, забирает награду дня и награды за выполненные задания.",
+    more: "Каждый день Buffy заходит на сайт, чтобы не прерывалась серия «Дней подряд», забирает награду из календаря и награды за выполненные задания. Календарь наград открыт не на всех аккаунтах — если его нет, Buffy просто пропускает этот шаг. Ничего не тратит, поэтому модуль всегда включён." },
+  { key: null, run: "mining", emoji: "⛏️", title: "Шахта",
+    text: "Тратит дневную энергию шахты на добычу руды.",
+    more: "Энергия шахты появляется раз в день — после полуночи по Москве. Buffy тратит её целиком на добычу руды. Руда нужна для улучшения кирки и считается в капитал: 100 руды ≈ 1 💎. Если энергия уже потрачена, ручной запуск просто покажет, что копать нечего." },
+  { key: "auto_upgrade", emoji: "⬆️", title: "Улучшение кирки",
+    text: "Покупает новый уровень кирки и «Сильный удар», когда хватает руды.",
+    more: "Чем выше уровень кирки, тем больше руды за каждый удар. Как только руды хватает на следующий уровень, Buffy покупает его, а заодно «Сильный удар». Тратит руду — выключи, если копишь её на что-то другое." },
+  { key: "battles_enabled", run: "arena", emoji: "⚔️", title: "Арена",
+    text: "Собирает самую сильную колоду, проводит бои и открывает сундуки.",
+    more: "Примерно раз в полчаса Buffy заходит на арену. Колоду он подбирает сам: смотрит на атаку, здоровье, печати и энергию карт. Карта, у которой меньше 10 энергии, не может биться, а энергия восстанавливается со временем — поэтому уставшие карты он временно меняет на отдохнувшие. Бьётся, пока за бои дают эссенцию, открывает боевые сундуки, а слабые карты может пробуждать и перековывать за эссенцию." },
+  { key: "arena_auto_awaken", emoji: "✨", title: "Пробуждение карт",
+    text: "Тратит бесплатные пробуждения на новые карты. По умолчанию выключено.",
+    more: "Пробуждение превращает карту из коллекции в боевую — у неё появляются атака, здоровье и шанс крита. Buffy тратит на это бесплатные попытки и энергию пробуждения (до 3 карт раз в 6 часов) и выбирает карты, которых ещё нет в боевой коллекции. Отменить пробуждение нельзя, поэтому включай, только если хочешь, чтобы он делал это сам." },
+  { key: "arena_cup_enabled", emoji: "🏆", title: "Вечерний кубок",
+    text: "С 19:00 до 22:00 МСК играет кубок пошагово.",
+    more: "Кубок идёт каждый день с 19:00 до 22:00 по Москве. Buffy играет его ход за ходом: выбирает, кого атаковать и какую тактику применить. Пока идёт кубок, остальные задачи ждут. Вручную не запускается — работает только в это время." },
+  { key: "reading_enabled", run: "reading", emoji: "📖", title: "Чтение глав",
+    text: "Читает главы ради бонусных карт (до 10 в день) и квеста на 75 глав.",
+    more: "За чтение сайт выдаёт до 10 бонусных карт в день: новая карта становится доступна примерно раз в 45–60 минут. Buffy читает главы, пока карта не выпадет, а заодно закрывает дневной квест на 75 глав. Между главами он делает паузы, как живой читатель, чтобы главы засчитывались. Ручной запуск — один проход: прочитает, что можно сейчас, и скажет, когда будет следующая карта." },
+  { key: "tower_enabled", run: "tower", emoji: "🏰", title: "Башня Разлома",
+    text: "Забирает награды экспедиций, снова отправляет отряд и качает штаб.",
+    more: "Когда отряд возвращается из экспедиции, Buffy забирает награду (алмазы и кристаллы) и сразу отправляет его снова — в самую выгодную безопасную экспедицию с шансом успеха от 70%. Лишние кристаллы вкладывает в Штаб Башни. Один раз нужно выбрать отряд на сайте, дальше всё сам." },
+  { key: "ads_enabled", run: "ads", emoji: "📺", title: "Реклама",
+    text: "3 просмотра в день — это +21 💎.",
+    more: "На странице баланса можно трижды в день посмотреть рекламу и получить по 7 алмазов. Buffy делает это сам — тебе ничего смотреть не нужно. Если на твоём аккаунте рекламы нет, модуль просто ничего не делает." },
+  { key: "club_enabled", run: "club", emoji: "🏛️", title: "Клуб",
+    text: "Вносит кристаллы в клуб и следит, не нужна ли клубу твоя карта.",
+    textTg: "Вносит кристаллы в клуб и пишет в Telegram, если клубу нужна твоя карта.",
+    more: "Примерно раз в полчаса Buffy вносит твои личные кристаллы в клуб — это опыт и очки для клуба. Если клуб просит карту, которая есть в твоей коллекции, он напишет об этом в журнале.",
+    moreNoTg: TG_HINT },
+  { key: "seasonal_watch_enabled", run: "seasonal", emoji: "🎃", title: "Хэллоуин", soon: true,
+    text: "Ивент скоро! Buffy заметит его старт и покажет в журнале.",
+    textTg: "Ивент скоро! Buffy заметит его старт и сразу напишет в Telegram.",
+    more: "Пока ивента нет, Buffy время от времени проверяет его страницы. Как только он начнётся — сообщит, а в одном из обновлений здесь появится автоматизация заданий и мини-игр.",
+    moreNoTg: TG_HINT },
+];
+const PAGES = {
+  dash: ["Главная", "Всё, что Buffy делает прямо сейчас"],
+  modules: ["Модули", "Что бот делает за тебя"],
+  notify: ["Telegram", "Уведомления на телефон"],
+  network: ["Сеть", "Подключение к MangaBuff"],
+  log: ["Журнал", "Что Buffy сделал — простыми словами"],
+  settings: ["Настройки", "Приложение и аккаунт"],
+};
+const STATUS = {
+  running: "Работает", starting: "Запускается…", stopping: "Останавливается…",
+  restarting: "Перезапуск…", stopped: "Остановлен",
+};
+
+/* ------------------------------------------------------------- helpers */
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const fmt = (n) => (n === null || n === undefined || n === "") ? "—" : Number(n).toLocaleString("ru-RU");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function toast(text, kind = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.innerHTML = `<span>${kind === "err" ? "⚠️" : kind === "ok" ? "✅" : "💜"}</span><span>${esc(text)}</span>`;
+  $("#toasts").appendChild(el);
+  setTimeout(() => { el.style.transition = "opacity .3s"; el.style.opacity = "0"; }, 3600);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function setMsg(el, text, ok) {
+  el.textContent = text || "";
+  el.className = "msg " + (text ? (ok ? "ok" : "err") : "");
+}
+
+async function busy(btn, fn) {
+  const html = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>`;
+  try { return await fn(); } finally { btn.disabled = false; btn.innerHTML = html; }
+}
+
+/* ---------------------------------------------------------------- api */
+let api = null;
+
+function mockApi() {
+  // Browser preview without the Python backend
+  let status = "stopped", seq = 0, logs = [], onboarded = false, manual = {}, settings = {
+    battles_enabled: true, arena_cup_enabled: true, tower_enabled: true, reading_enabled: true,
+    ads_enabled: true, club_enabled: true, auto_upgrade: true, seasonal_watch_enabled: true,
+    tg_enabled: false, tg_token: "", tg_chat_id: "", tg_night_mode: true, tg_silent_all: false,
+    proxy: "", app_start_bot_on_launch: true, app_minimize_to_tray: true, autostart_windows: false,
+  };
+  const sample = ["🚀 Buffy начал работу", "🔑 Вошёл в аккаунт", "🎁 Забрал ежедневную награду",
+    "📖 Читаю 15 глав (за сегодня прочитано 40/75)", "🃏 Выпала карта «Рем» (6/10 за сегодня)",
+    "⏳ Сайт просит притормозить — жду ~3 мин и продолжу сам", "🏰 Отряд в Башне, вернётся через 2 ч 14 мин",
+    "😴 Всё сделано. Дальше — арена через 8 мин 12 сек"];
+  const push = (t) => logs.push({ seq: ++seq, ts: new Date().toTimeString().slice(0, 8), text: t,
+    level: /❌/.test(t) ? "error" : /⚠️/.test(t) ? "warn" : /✅|🎁|🃏/.test(t) ? "success" : "info" });
+  setInterval(() => { if (status === "running") push(sample[seq % sample.length]); }, 1500);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  return {
+    get_bootstrap: async () => ({ app: "Buffy", version: "11.0.0", repo: "https://github.com/Qu4dyz/MangaBuff-Miner-Bot",
+      email: onboarded ? "demo@buffy.app" : "", has_credentials: onboarded, onboarded, settings, data_dir: "C:\\Users\\you\\AppData\\Roaming\\Buffy" }),
+    get_settings: async () => settings,
+    set_setting: async (k, v) => { settings[k] = v; return true; },
+    check_login: async (e, p) => { await wait(900); return p.length > 3 ? { ok: true } : { ok: false, error: "Сайт не принял почту или пароль" }; },
+    finish_onboarding: async () => { onboarded = true; return true; },
+    start: async () => { status = "starting"; setTimeout(() => status = "running", 800); return { ok: true }; },
+    stop: async () => { status = "stopping"; setTimeout(() => status = "stopped", 700); return { ok: true }; },
+    logout: async () => { onboarded = false; return true; },
+    get_logs: async (after) => logs.filter((l) => l.seq > after),
+    clear_logs: async () => { logs = []; return true; },
+    get_state: async () => ({
+      status, uptime_sec: 3720,
+      cards: { found: 6, max: 10, ready: false, cooldown: "28 мин" },
+      chapters: { read: 55, max: 75, manga: "solo-leveling" },
+      panel: { next_action: "Арена", next_wake_at: new Date(Date.now() + 492000).toISOString(), energy: 0,
+        ads_count: 2, tower: "2ч 14м", ore: 184250, diamonds: 1325, diamonds_total: 3167 },
+      rank: { tier: "Платина", division: "Платина 3", icon: "💎", wins: 41, losses: 12 },
+      manual: { ...manual }, manual_busy: false,
+    }),
+    test_telegram: async () => { await wait(700); return { ok: true }; },
+    find_chat_id: async () => { await wait(600); return { ok: true, chat_id: "713822262" }; },
+    test_proxy: async () => { await wait(800); return { ok: true, detail: "MangaBuff доступен · 184 мс" }; },
+    open_url: async () => true, open_data_dir: async () => true, report_problem: async () => ({ ok: true }),
+    run_module: async (n) => { manual[n] = { state: "running", summary: "" };
+      setTimeout(() => manual[n] = { state: "done", at: "21:40", summary: "главы 55/75, бонусные карты 6/10. Следующая карта примерно через 28 мин" }, 2500);
+      return { ok: true }; },
+    get_update: async () => ({ state: "available", version: "11.1.0", current: "11.0.0", progress: 0, can_install: true }),
+    check_update: async () => true, install_update: async () => true,
+  };
+}
+
+function waitForApi() {
+  return new Promise((resolve) => {
+    if (window.pywebview && window.pywebview.api) return resolve(window.pywebview.api);
+    let done = false;
+    window.addEventListener("pywebviewready", () => { if (!done) { done = true; resolve(window.pywebview.api); } });
+    setTimeout(() => { if (!done) { done = true; resolve(mockApi()); } }, 1200);
+  });
+}
+
+/* ---------------------------------------------------------- navigation */
+function go(page) {
+  $$("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+  $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
+  $("#page-title").textContent = PAGES[page][0];
+  $("#page-sub").textContent = PAGES[page][1];
+  if (page === "log") { errorsSeen = errorCount; updateBadge(); scrollLog($("#full-log"), true); }
+}
+$$("#nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
+$$("[data-goto]").forEach((a) => a.addEventListener("click", () => go(a.dataset.goto)));
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-url]");
+  if (a) { e.preventDefault(); api.open_url(a.dataset.url); }
+});
+
+/* ------------------------------------------------------------- status */
+let status = "stopped";
+
+function renderStatus(s) {
+  status = s;
+  const pill = $("#status-pill");
+  pill.className = "pill " + s;
+  $("#status-text").textContent = STATUS[s] || s;
+  const btn = $("#run-btn");
+  const on = ["running", "starting", "restarting"].includes(s);
+  btn.className = "btn " + (on ? "danger" : "primary");
+  btn.disabled = s === "stopping";
+  btn.innerHTML = on
+    ? `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg><span>Остановить</span>`
+    : `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.8L9.5 4.6A1 1 0 0 0 8 5.5Z"/></svg><span>Запустить</span>`;
+}
+
+$("#run-btn").addEventListener("click", async () => {
+  if (["running", "starting", "restarting"].includes(status)) {
+    renderStatus("stopping");
+    await api.stop();
+  } else {
+    const r = await api.start();
+    if (!r.ok) { toast(r.error || "Не получилось запустить", "err"); return; }
+    renderStatus("starting");
+    toast("Buffy вышел на смену", "ok");
+  }
+});
+
+/* ---------------------------------------------------------- dashboard */
+let wakeAt = null, liveMode = false;
+
+function pct(a, b) { return a == null || !b ? 0 : Math.max(0, Math.min(100, (a / b) * 100)); }
+
+function renderState(st) {
+  if (st.status !== status) renderStatus(st.status);
+  const c = st.cards, ch = st.chapters, p = st.panel, r = st.rank;
+
+  $("#cards-v").innerHTML = c.found == null ? "—" : `${c.found}<small> / ${c.max}</small>`;
+  $("#cards-bar").style.width = pct(c.found, c.max) + "%";
+  $("#cards-s").textContent = c.found >= c.max ? "Все карты на сегодня собраны 🎉"
+    : c.ready ? "Карта готова к дропу" : c.cooldown ? `Следующая через ${c.cooldown}` : "Карты за чтение глав";
+
+  $("#ch-v").innerHTML = ch.read == null ? "—" : `${ch.read}<small> / ${ch.max}</small>`;
+  $("#ch-bar").style.width = pct(ch.read, ch.max) + "%";
+  $("#ch-s").textContent = ch.manga ? `Читает: ${ch.manga}` : "Дневной квест — 75 глав";
+
+  const ads = p.ads_count;
+  $("#ads-v").innerHTML = ads == null ? "—" : `${ads}<small> / 3</small>`;
+  $$("#page-dash .ads b").forEach((b, i) => b.classList.toggle("on", ads != null && i < ads));
+  $("#energy-v").textContent = p.energy == null ? "—" : p.energy;
+
+  $("#dia-v").textContent = fmt(p.diamonds);
+  $("#dia-s").textContent = p.diamonds_total != null ? `Капитал ≈ ${fmt(p.diamonds_total)} 💎 с учётом руды` : " ";
+  $("#ore-v").textContent = fmt(p.ore);
+  $("#ore-s").textContent = p.ore != null ? `≈ ${fmt(Math.floor(p.ore / 100))} 💎` : " ";
+  $("#tower-v").textContent = p.tower && p.tower !== "Отключена / Не настроена" ? p.tower : "—";
+
+  $("#rank-ic").textContent = r.icon || "⚔️";
+  $("#rank-v").textContent = r.division || r.tier || "—";
+  $("#rank-s").textContent = r.tier ? `${r.wins || 0} побед · ${r.losses || 0} поражений в ранге` : "Победы и поражения в текущем ранге";
+
+  renderManual(st.manual);
+  const running = ["running", "starting", "restarting"].includes(st.status);
+  const fresh = p.updated_at && (Date.now() - new Date(p.updated_at)) < 10 * 60 * 1000;
+  const hero = $(".hero");
+  hero.classList.toggle("idle", !running);
+  liveMode = false;
+  if (running && fresh && p.next_action === "Вечерний кубок") {
+    liveMode = true; wakeAt = null;
+    $("#next-label").textContent = "Сейчас";
+    $("#next-action").textContent = "⚔️ Вечерний кубок";
+    $("#next-when").textContent = "Buffy сражается до 22:00 МСК, остальные задачи — после";
+  } else if (running && p.next_action && p.next_action !== "—" && p.next_wake_at && new Date(p.next_wake_at) > Date.now()) {
+    $("#next-label").textContent = "Следующее действие";
+    $("#next-action").textContent = p.next_action;
+    wakeAt = new Date(p.next_wake_at);
+    $("#next-when").textContent = `в ${wakeAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} · пока Buffy отдыхает`;
+  } else if (running) {
+    wakeAt = null;
+    $("#next-label").textContent = "Сейчас";
+    $("#next-action").textContent = st.status === "starting" ? "Вхожу в аккаунт…" : "Работаю…";
+    $("#next-when").textContent = "Прохожу по задачам — что именно делаю, видно в журнале ниже";
+  } else {
+    wakeAt = null;
+    $("#next-label").textContent = st.status === "stopping" ? "Останавливаюсь" : "Бот на паузе";
+    $("#next-action").textContent = st.status === "stopping" ? "Заканчиваю текущий шаг…" : "Отдыхаю";
+    $("#next-when").textContent = "Нажми «Запустить», и Buffy сам решит, чем заняться";
+  }
+}
+
+function tickCountdown() {
+  const el = $("#countdown");
+  if (liveMode) { el.innerHTML = `<span class="live"><span class="dot"></span>LIVE</span>`; return; }
+  if (!wakeAt) { el.textContent = "--:--"; return; }
+  let s = Math.max(0, Math.round((wakeAt - Date.now()) / 1000));
+  const h = Math.floor(s / 3600); s %= 3600;
+  const m = Math.floor(s / 60), sec = s % 60;
+  el.textContent = (h ? h + ":" + String(m).padStart(2, "0") : String(m).padStart(2, "0")) + ":" + String(sec).padStart(2, "0");
+}
+
+/* ---------------------------------------------------------------- log */
+let lastSeq = 0, allLogs = [], logFilter = "all", errorCount = 0, errorsSeen = 0;
+
+function lineHtml(l) {
+  return `<div class="ln ${l.level}"><span class="ts">${l.ts}</span><span class="tx">${esc(l.text)}</span></div>`;
+}
+function passes(l) {
+  if (logFilter === "error") return l.level === "error" || l.level === "warn";
+  if (logFilter === "important") return l.level !== "info" || /🎁|🃏|🏆|⚔️|📖|💎/.test(l.text);
+  return true;
+}
+function atBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 40; }
+function scrollLog(el, force) { if (force || el.dataset.stick !== "0") el.scrollTop = el.scrollHeight; }
+function renderFullLog() {
+  const el = $("#full-log");
+  const items = allLogs.filter(passes);
+  el.innerHTML = items.length ? items.map(lineHtml).join("") : `<div class="empty">Журнал пуст</div>`;
+  scrollLog(el, true);
+}
+function updateBadge() {
+  const n = errorCount - errorsSeen;
+  const b = $("#err-badge");
+  b.textContent = n; b.style.display = n > 0 ? "inline-block" : "none";
+}
+["#full-log"].forEach((s) => $(s).addEventListener("scroll", (e) => { e.target.dataset.stick = atBottom(e.target) ? "1" : "0"; }));
+
+async function pollLogs() {
+  const fresh = await api.get_logs(lastSeq);
+  if (!fresh || !fresh.length) return;
+  lastSeq = fresh[fresh.length - 1].seq;
+  allLogs.push(...fresh);
+  if (allLogs.length > 2000) allLogs = allLogs.slice(-2000);
+  errorCount += fresh.filter((l) => l.level === "error").length;
+  if ($("#page-log").classList.contains("active")) errorsSeen = errorCount;
+  updateBadge();
+
+  const full = $("#full-log");
+  if (full.querySelector(".empty")) full.innerHTML = "";
+  full.insertAdjacentHTML("beforeend", fresh.filter(passes).map(lineHtml).join(""));
+  scrollLog(full);
+
+  $("#dash-log").innerHTML = allLogs.slice(-8).map(lineHtml).join("");
+}
+
+$$("#log-chips .chip").forEach((c) => c.addEventListener("click", () => {
+  $$("#log-chips .chip").forEach((x) => x.classList.toggle("active", x === c));
+  logFilter = c.dataset.filter; renderFullLog();
+}));
+$("#log-clear").addEventListener("click", async () => {
+  await api.clear_logs(); allLogs = []; errorCount = errorsSeen = 0; updateBadge();
+  renderFullLog(); $("#dash-log").innerHTML = `<div class="empty">Здесь появятся действия бота</div>`;
+});
+/* ------------------------------------------------------------- settings */
+let settings = {};
+
+function bindSwitches(root = document) {
+  $$("input[data-setting]", root).forEach((inp) => {
+    inp.checked = !!settings[inp.dataset.setting];
+    if (inp.dataset.bound) return;
+    inp.dataset.bound = "1";
+    inp.addEventListener("change", async () => {
+      const key = inp.dataset.setting;
+      const ok = await api.set_setting(key, inp.checked);
+      if (ok === false) { inp.checked = !inp.checked; toast("Не удалось сохранить", "err"); return; }
+      settings[key] = inp.checked;
+      $$(`input[data-setting="${key}"]`).forEach((o) => { if (o !== inp) o.checked = inp.checked; });
+    });
+  });
+}
+
+function tgConnected() { return !!(settings.tg_token && settings.tg_chat_id); }
+
+function renderModules() {
+  const tg = tgConnected();
+  $("#modules-grid").innerHTML = MODULES.map((m) => `
+    <div class="card mod${m.soon ? " soon" : ""}" data-mod="${m.run || ""}">
+      <div class="mod-head">
+        <div class="emoji">${m.emoji}</div>
+        <div class="body"><h3>${m.title}</h3><p>${tg && m.textTg ? m.textTg : m.text}</p></div>
+        ${m.soon ? `<span class="soon-badge">Скоро</span>`
+          : m.key ? `<label class="switch" title="Включить или выключить"><input type="checkbox" data-setting="${m.key}"><span></span></label>`
+          : `<span class="always">Всегда</span>`}
+      </div>
+      <details class="more"><summary>Как это работает</summary><p>${m.more}${!tg && m.moreNoTg ? m.moreNoTg : ""}</p></details>
+      ${m.run ? `<div class="mod-run">
+        <button class="btn small" data-run="${m.run}">▶ Запустить сейчас</button>
+        <span class="run-result" id="run-${m.run}"></span>
+      </div>` : ""}
+    </div>`).join("");
+  $("#w-mods").innerHTML = MODULES.filter((m) => m.key && !m.soon).map((m) => `
+    <label><span>${m.emoji} ${m.title}</span><span class="switch"><input type="checkbox" data-setting="${m.key}"><span></span></span></label>`).join("");
+  $$("[data-run]").forEach((b) => b.addEventListener("click", () => runModule(b.dataset.run)));
+  renderManual(lastManual);
+  bindSwitches();
+}
+
+let lastManual = {};
+const RUN_TEXT = {
+  queued: (s) => status === "running" ? "⏳ В очереди — Buffy запустит сразу после текущего шага" : "⏳ Вхожу в аккаунт…",
+  running: () => "⚙️ Работаю…",
+  done: (s) => `✅ ${s.at}: ${s.summary}`,
+  error: (s) => `⚠️ ${s.summary}`,
+  idle: () => "",
+};
+function renderManual(manual) {
+  lastManual = manual || {};
+  MODULES.filter((m) => m.run).forEach((m) => {
+    const el = $("#run-" + m.run), btn = $(`[data-run="${m.run}"]`);
+    if (!el) return;
+    const s = lastManual[m.run];
+    el.textContent = s ? (RUN_TEXT[s.state] || (() => ""))(s) : "";
+    el.className = "run-result " + (s ? s.state : "");
+    btn.disabled = !!s && ["queued", "running"].includes(s.state);
+  });
+}
+async function runModule(name) {
+  const r = await api.run_module(name);
+  if (!r.ok) { toast(r.error || "Не получилось запустить", "err"); return; }
+  renderManual({ ...lastManual, [name]: { state: "queued", summary: "" } });
+}
+
+/* Telegram page: notification settings appear once a bot is connected */
+function renderTg() {
+  const on = tgConnected();
+  $("#tg-settings").hidden = !on;
+  $("#tg-locked").hidden = on;
+  $("#tg-state").innerHTML = on
+    ? `<span class="ok-line">✅ Бот подключён — уведомления приходят в чат <b class="mono">${esc(settings.tg_chat_id)}</b></span>`
+    : "";
+  $("#tg-off").hidden = !on;
+}
+
+/* Telegram page */
+$("#tg-find").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  const r = await api.find_chat_id($("#tg-token").value);
+  if (r.ok) { $("#tg-chat").value = r.chat_id; setMsg($("#tg-msg"), "Chat ID найден", true); }
+  else setMsg($("#tg-msg"), r.error, false);
+}));
+$("#tg-save").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  const token = $("#tg-token").value.trim(), chat = $("#tg-chat").value.trim();
+  const r = await api.test_telegram(token, chat);
+  if (!r.ok) { setMsg($("#tg-msg"), r.error, false); return; }
+  await api.set_setting("tg_token", token);
+  await api.set_setting("tg_chat_id", chat);
+  await api.set_setting("tg_enabled", true);
+  settings.tg_enabled = true; settings.tg_token = token; settings.tg_chat_id = chat;
+  bindSwitches(); renderTg(); renderModules();
+  setMsg($("#tg-msg"), "Готово! Проверь Telegram — там тестовое сообщение", true);
+}));
+$("#tg-off").addEventListener("click", async () => {
+  await api.set_setting("tg_enabled", false);
+  await api.set_setting("tg_token", "");
+  await api.set_setting("tg_chat_id", "");
+  Object.assign(settings, { tg_enabled: false, tg_token: "", tg_chat_id: "" });
+  $("#tg-token").value = ""; $("#tg-chat").value = "";
+  bindSwitches(); renderTg(); renderModules();
+  setMsg($("#tg-msg"), "Telegram отключён", true);
+});
+
+/* Network page */
+$("#proxy-test").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  const r = await api.test_proxy($("#proxy").value);
+  setMsg($("#proxy-msg"), r.ok ? r.detail : r.error, r.ok);
+}));
+$("#proxy-save").addEventListener("click", async () => {
+  await api.set_setting("proxy", $("#proxy").value.trim());
+  setMsg($("#proxy-msg"), "Сохранено", true);
+});
+$("#proxy-clear").addEventListener("click", async () => {
+  $("#proxy").value = ""; await api.set_setting("proxy", "");
+  setMsg($("#proxy-msg"), "Прямое подключение", true);
+});
+
+/* Settings page */
+let boot = {};
+$("#acc-change").addEventListener("click", async () => {
+  await api.logout();
+  wizard.open(1);
+});
+$("#open-data").addEventListener("click", () => api.open_data_dir());
+$("[data-url-repo]").addEventListener("click", () => api.open_url(boot.repo));
+$$("[data-report]").forEach((b) => b.addEventListener("click", () => {
+  $("#report").classList.add("show");
+  setTimeout(() => $("#rep-text").focus(), 50);
+}));
+$("#rep-cancel").addEventListener("click", () => $("#report").classList.remove("show"));
+$("#rep-send").addEventListener("click", async () => {
+  const text = $("#rep-text").value.trim();
+  if (!text) { toast("Напиши пару слов о проблеме", "err"); $("#rep-text").focus(); return; }
+  await api.report_problem(text);
+  $("#report").classList.remove("show");
+  $("#rep-text").value = "";
+  toast("Открыл GitHub — проверь текст и нажми «Create»", "ok");
+});
+
+/* ------------------------------------------------------------ updates */
+let upd = {};
+function renderUpdate(u) {
+  upd = u || {};
+  const btn = $("#upd-btn"), st = $("#upd-status");
+  const v = upd.version ? ` ${upd.version}` : "";
+  btn.hidden = !["available", "downloading", "installing"].includes(upd.state);
+  btn.disabled = upd.state !== "available";
+  btn.textContent = upd.state === "downloading" ? `Скачиваю обновление… ${upd.progress || 0}%`
+    : upd.state === "installing" ? "Устанавливаю…" : upd.can_install ? `⬆ Обновить до${v}` : `⬆ Скачать${v}`;
+  st.textContent = {
+    checking: "Проверяю…",
+    latest: `Установлена последняя версия (${upd.current})`,
+    available: `Доступна версия${v}`,
+    downloading: `Скачиваю${v}: ${upd.progress || 0}%`,
+    installing: "Устанавливаю, Buffy сейчас перезапустится",
+    error: upd.error || "Ошибка",
+  }[upd.state] || "";
+}
+$("#upd-btn").addEventListener("click", async () => {
+  if (!upd.can_install) { api.open_url(upd.page || boot.repo + "/releases/latest"); return; }
+  await api.install_update();
+  renderUpdate({ ...upd, state: "downloading", progress: 0 });
+});
+$("#upd-check").addEventListener("click", async () => {
+  await api.check_update();
+  renderUpdate({ ...upd, state: "checking" });
+});
+
+/* ------------------------------------------------------------ wizard */
+const wizard = {
+  step: 0,
+  open(step = 0) { $("#wizard").classList.add("show"); this.show(step); },
+  close() { $("#wizard").classList.remove("show"); },
+  show(i) {
+    this.step = i;
+    $$(".wiz-step").forEach((s) => s.classList.toggle("active", +s.dataset.step === i));
+    $$("#w-dots i").forEach((d, j) => d.classList.toggle("on", j === i));
+    const focus = $(`.wiz-step[data-step="${i}"] input`);
+    if (focus) setTimeout(() => focus.focus(), 50);
+  },
+};
+$$("[data-next]").forEach((b) => b.addEventListener("click", () => wizard.show(wizard.step + 1)));
+$$("[data-back]").forEach((b) => b.addEventListener("click", () => wizard.show(wizard.step - 1)));
+$$("[data-skip]").forEach((b) => b.addEventListener("click", () => wizard.show(wizard.step + 1)));
+
+async function doLogin() {
+  const btn = $("#w-login");
+  await busy(btn, async () => {
+    setMsg($("#w-login-msg"), "Проверяю на сайте…", true);
+    const r = await api.check_login($("#w-email").value, $("#w-pass").value);
+    if (r.ok) { setMsg($("#w-login-msg"), "", true); wizard.show(2); }
+    else setMsg($("#w-login-msg"), r.error, false);
+  });
+}
+$("#w-login").addEventListener("click", doLogin);
+$("#w-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+
+$("#w-tg").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  const token = $("#w-token").value.trim();
+  if (!token) { wizard.show(4); return; }
+  const found = await api.find_chat_id(token);
+  if (!found.ok) { setMsg($("#w-tg-msg"), found.error, false); return; }
+  const r = await api.test_telegram(token, found.chat_id);
+  if (!r.ok) { setMsg($("#w-tg-msg"), r.error, false); return; }
+  await api.set_setting("tg_token", token);
+  await api.set_setting("tg_chat_id", found.chat_id);
+  await api.set_setting("tg_enabled", true);
+  Object.assign(settings, { tg_enabled: true, tg_token: token, tg_chat_id: found.chat_id });
+  $("#tg-token").value = token; $("#tg-chat").value = found.chat_id;
+  bindSwitches(); renderTg(); renderModules();
+  wizard.show(4);
+}));
+
+$("#w-finish").addEventListener("click", async () => {
+  if ($("#w-autostart").checked) { await api.set_setting("autostart_windows", true); settings.autostart_windows = true; bindSwitches(); }
+  await api.finish_onboarding();
+  await refreshBoot();
+  wizard.close();
+  const r = await api.start();
+  if (r.ok) { renderStatus("starting"); toast("Buffy вышел на смену", "ok"); }
+});
+
+/* ------------------------------------------------------------- boot */
+async function refreshBoot() {
+  boot = await api.get_bootstrap();
+  settings = boot.settings || {};
+  $("#side-email").textContent = boot.email || "Не выполнен вход";
+  $("#side-ver").textContent = `Buffy ${boot.version}`;
+  $("#about-ver").textContent = boot.version;
+  $("#acc-lead").innerHTML = boot.email ? `Вход выполнен как <b style="color:var(--text)">${esc(boot.email)}</b>` : "Вход не выполнен";
+  $("#tg-token").value = settings.tg_token || "";
+  $("#tg-chat").value = settings.tg_chat_id || "";
+  $("#proxy").value = settings.proxy || "";
+  renderModules();
+  renderTg();
+}
+
+(async function init() {
+  api = await waitForApi();
+  renderModules();
+  await refreshBoot();
+  if (!boot.onboarded) wizard.open(boot.has_credentials ? 2 : 0);
+  if (boot.email) $("#w-email").value = boot.email;
+
+  const loop = async (fn, ms) => { try { await fn(); } catch (e) { /* backend busy */ } setTimeout(() => loop(fn, ms), ms); };
+  loop(async () => renderState(await api.get_state()), 2000);
+  loop(pollLogs, 1000);
+  loop(async () => renderUpdate(await api.get_update()), 2000);
+  setInterval(tickCountdown, 1000);
+})();
+</script>
+</body>
+</html>

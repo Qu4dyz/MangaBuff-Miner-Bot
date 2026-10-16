@@ -23,6 +23,7 @@ from http_session import (
     try_refresh_ddos_guard,
 )
 import os
+import collections
 import random
 import threading
 import time
@@ -76,6 +77,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self._heartbeat_at = time.monotonic()
         self._heartbeat_lock = threading.Lock()
         self._watchdog_started = False
+        # Hung-daemon escape hatch. On a server systemd restarts the process;
+        # the desktop app swaps this for an in-app restart of the bot.
+        self.fatal_exit = lambda: os._exit(1)
 
         # Configure proxy if provided or found in settings/environment
         raw_proxy = proxy or os.getenv("MANGABUFF_PROXY") or os.getenv("PROXY") or DataManager.get_setting("proxy")
@@ -112,6 +116,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self._tower_next_check_at = 0.0
         self._tower_ends_at = 0.0
         self._last_notif_poll_at = 0.0
+        # One-off module runs requested from the desktop app
+        self._manual_queue = collections.deque()
+        self.manual_callback = None
 
     def _persist_session_cookies(self):
         """Save current cookies/csrf/ua so DDoS-Guard tokens survive restarts."""
@@ -149,19 +156,24 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         limit = 8 * 60
 
         def _watch():
-            while True:
-                time.sleep(15)
-                with self._heartbeat_lock:
-                    age = time.monotonic() - self._heartbeat_at
-                if age > limit:
-                    try:
-                        self.log(
-                            f"🛑 Watchdog: нет heartbeat {int(age)}с — "
-                            f"принудительный рестарт процесса"
-                        )
-                    except Exception:
-                        pass
-                    os._exit(1)
+            try:
+                # Stops with the daemon so a desktop "Stop" doesn't trip it later
+                while self.running:
+                    time.sleep(15)
+                    with self._heartbeat_lock:
+                        age = time.monotonic() - self._heartbeat_at
+                    if self.running and age > limit:
+                        try:
+                            self.log(
+                                f"🛑 Watchdog: нет heartbeat {int(age)}с — "
+                                f"принудительный рестарт процесса"
+                            )
+                        except Exception:
+                            pass
+                        self.fatal_exit()
+                        return
+            finally:
+                self._watchdog_started = False
 
         threading.Thread(target=_watch, name="mb-watchdog", daemon=True).start()
 
@@ -198,7 +210,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 self.log(f"🛑 Модуль «{name}» не остановился — рестарт процесса")
             except Exception:
                 pass
-            os._exit(1)
+            self.fatal_exit()
 
         killer = threading.Thread(target=_killer, name=f"mb-kill-{name}", daemon=True)
         killer.start()
@@ -742,10 +754,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             wait_sec = max(0, int(next_wait_sec or 0))
             wake_at = now + timedelta(seconds=wait_sec)
             state = DataManager.load_reading_state() or {}
-            state["panel"] = {
-                "next_action": next_action,
-                "next_wait_sec": wait_sec,
-                "next_wake_at": wake_at.isoformat(),
+            prev = state.get("panel") or {}
+            values = {
                 "energy": energy,
                 "ads_count": ads_count,
                 "tower_str": tower_str,
@@ -754,6 +764,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 "diamonds_total": diamonds_total,
                 "chapters_str": chapters_str,
                 "cards_str": cards_str,
+            }
+            state["panel"] = {
+                "next_action": next_action,
+                "next_wait_sec": wait_sec,
+                "next_wake_at": wake_at.isoformat(),
+                # Keep the last known value when this snapshot doesn't carry one
+                **{k: (v if v is not None else prev.get(k)) for k, v in values.items()},
                 "updated_at": now.isoformat(),
             }
             DataManager.save_reading_state(state)
@@ -2939,6 +2956,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
     def stop(self):
         self.running = False
+        # Abort the current module too, so Stop doesn't wait for a whole cup fight
+        self._module_abort.set()
         self.log(tr("log_stopping"))
 
     def check_status_only(self):
@@ -3226,6 +3245,233 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self._sleep_alive(wait_min * 60 + random.randint(10, 60))
         return False
 
+    def _mining_step(self, msk_today, out):
+        """Read mine energy/ore; dig when energy has built up. Sets out["energy"] (0 after digging)."""
+        res_game = self.session.get(CONFIG["urls"]["game"], timeout=10)
+        hits_match = None
+        if res_game.status_code == 200:
+            e_cls = CONFIG["selectors"]["energy_class"]
+            hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', res_game.text)
+            if hits_match:
+                out["energy"] = parse_smart_number(hits_match.group(1))
+
+            b_cls = CONFIG["selectors"]["balance_class"]
+            ore_match = re.search(f'class="[^"]*{b_cls}[^"]*">\\s*([\\d\\.\\s,kKmM]+)\\s*<', res_game.text)
+            if ore_match:
+                self.current_balance = parse_smart_number(ore_match.group(1))
+        elif res_game.status_code in (401, 419):
+            self.login_and_steal_keys()
+
+        if out["energy"] >= 15:
+            self.log(f"⚡ Накопилась энергия ({out['energy']}). Запуск добычи руды...")
+            self._run_mining()
+            if self._alive():
+                self.auto_upgrade_pickaxe()
+                self._energy_exhausted_date = msk_today
+            out["mined"] = True
+            out["energy"] = 0
+        elif res_game.status_code == 200 and hits_match is not None:
+            self._energy_exhausted_date = msk_today
+
+    def _ads_step(self, msk_today, out):
+        """Watch the daily ads, then read the ad counter and diamonds from /balance."""
+        self.watch_daily_ads()
+        try:
+            res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
+            if res_bal_check.status_code == 200:
+                soup_bal = BeautifulSoup(res_bal_check.text, "html.parser")
+                btn = soup_bal.find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
+                out["available"] = btn is not None
+                if btn:
+                    out["ads_count"] = int(btn.get("data-count", 0))
+                    if out["ads_count"] >= 3:
+                        self._ads_completed_date = msk_today
+                else:
+                    # Not every account has ads on /balance — don't re-check all day
+                    self._ads_completed_date = msk_today
+
+                dia_el = soup_bal.find(class_="menu__balance")
+                if dia_el:
+                    m_dia = re.search(r"([\d\s]+)", dia_el.get_text())
+                    if m_dia:
+                        self.diamonds_balance = parse_smart_number(m_dia.group(1))
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------ manual runs
+    # Modules the desktop app can run once on demand: name -> (title, time limit)
+    MANUAL_MODULES = {
+        "daily": ("Ежедневные награды", 3 * 60),
+        "mining": ("Шахта", 25 * 60),
+        "arena": ("Арена", 15 * 60),
+        "ads": ("Реклама", 5 * 60),
+        "tower": ("Башня Разлома", 8 * 60),
+        "reading": ("Чтение глав", 20 * 60),
+        "club": ("Клуб", 4 * 60),
+        "seasonal": ("Ивенты", 2 * 60),
+    }
+
+    def request_manual_module(self, name):
+        """Queue a one-off run; the daemon picks it up at its next pause."""
+        if name not in self.MANUAL_MODULES:
+            return False
+        if name not in self._manual_queue:
+            self._manual_queue.append(name)
+        return True
+
+    def _drain_manual_queue(self):
+        while self._manual_queue and self.running:
+            self.run_manual_module(self._manual_queue.popleft())
+
+    def run_manual_module(self, name):
+        """Run one module once and return a one-line summary (also logged)."""
+        title, limit = self.MANUAL_MODULES[name]
+        if self.manual_callback:
+            self.manual_callback(name, "running", "")
+        result = {}
+        self._run_module(name, lambda: result.update(summary=self._manual_step(name)), limit)
+        summary = result.get("summary") or "не получилось — подробности в журнале"
+        self.log(f"🟣 Ручной запуск «{title}»: {summary}")
+        if self.manual_callback:
+            self.manual_callback(name, "done" if result.get("summary") else "error", summary)
+        try:
+            self.refresh_live_panel()
+        except Exception:
+            pass
+        return summary
+
+    def _manual_step(self, name):
+        from datetime import datetime, timezone, timedelta
+
+        msk_today = datetime.now(timezone(timedelta(hours=3))).date()
+        if name == "daily":
+            self.ping_daily_visit()
+            if not self._find_active_claim_url():
+                return ("визит засчитан. Награды из календаря сейчас нет — она уже забрана "
+                        "или на этом аккаунте календарь не открыт")
+            self.claim_daily_reward()
+            return "визит засчитан, награда дня забрана"
+        if name == "mining":
+            out = {"energy": 0}
+            self._mining_step(msk_today, out)
+            if out.get("mined"):
+                return f"руда добыта, на балансе {int(self.current_balance or 0):,}".replace(",", " ")
+            return (f"энергии шахты {out['energy']} — копать нечего. "
+                    "Энергия появляется раз в день, после полуночи МСК")
+        if name == "arena":
+            self.run_arena_cycle()
+            return "арена проверена, бои проведены, если карты были готовы"
+        if name == "ads":
+            out = {"ads_count": 0}
+            self._ads_step(msk_today, out)
+            if out.get("available") is False:
+                return "на этом аккаунте реклама за алмазы недоступна"
+            return f"просмотрено {out['ads_count']}/3 за сегодня"
+        if name == "tower":
+            left = self.check_tower_expedition()
+            if left:
+                h, m = divmod(max(60, int(left)) // 60, 60)
+                return f"отряд в Башне, вернётся через {f'{h} ч {m} мин' if h else f'{m} мин'}"
+            return "Башня проверена"
+        if name == "reading":
+            out = {"card_wait_sec": 45 * 60, "chapters_wait_sec": 0, "ch_read": 0,
+                   "ch_max": 75, "cards_found": 0, "cards_max": 10}
+            self._reading_step(out)
+            line = (f"главы {out['ch_read']}/{out['ch_max']}, "
+                    f"бонусные карты {out['cards_found']}/{out['cards_max']}")
+            if out["cards_found"] >= out["cards_max"]:
+                return line + " — на сегодня всё собрано"
+            return line + f". Следующая карта примерно через {max(1, int(out['card_wait_sec']) // 60)} мин"
+        if name == "club":
+            self.run_club_cycle()
+            return "клуб проверен"
+        if name == "seasonal":
+            live = self.run_seasonal_watch()
+            return "ивент идёт!" if live else "ивентов пока нет"
+        raise ValueError(name)
+
+    def _reading_step(self, out):
+        """One reading pass: chapters toward the daily quest and bonus-card drops; updates out in place."""
+        card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max = (out["card_wait_sec"], out["chapters_wait_sec"], out["ch_read"], out["ch_max"], out["cards_found"], out["cards_max"])
+        try:
+            reading_stats = self.get_reading_stats()
+            if not reading_stats:
+                self.log('⚠️ /balance недоступен или разметка изменилась — чтение отложено, cache только для панели.')
+
+            if reading_stats:
+                ch_read = int(reading_stats.get("chapters_read") or 0)
+                ch_max = int(reading_stats.get("chapters_max") or 75)
+                cards_found = int(reading_stats.get("cards_found") or 0)
+                cards_max = int(reading_stats.get("cards_max") or 10)
+                card_ready = bool(reading_stats.get("card_ready", False))
+                cd_str = reading_stats.get("card_cooldown") or ""
+
+                midnight_lag = (
+                    ch_read >= ch_max
+                    and cards_found < cards_max
+                    and self._msk_now().hour < 6
+                )
+
+                if midnight_lag and not card_ready:
+                    self.log(
+                        f"⏳ На сайте главы ещё {ch_read}/{ch_max} после полуночи "
+                        f"(карты {cards_found}/{cards_max}) — ждём сброса счётчика глав."
+                    )
+                    chapters_wait_sec = random.randint(15 * 60, 25 * 60)
+                elif ch_read < ch_max:
+                    batch_size = min(15, ch_max - ch_read)
+                    self.log(f"📖 Дневной лимит глав ({ch_read}/{ch_max}): читаем пачку из {batch_size} глав...")
+                    self.read_manga_chapters(target_count=batch_size)
+                    fresh_stats = self.get_reading_stats()
+                    if fresh_stats:
+                        reading_stats = fresh_stats
+                        ch_read = int(fresh_stats.get("chapters_read") or ch_read)
+                        ch_max = int(fresh_stats.get("chapters_max") or ch_max)
+                        cards_found = int(fresh_stats.get("cards_found") or cards_found)
+                        card_ready = bool(fresh_stats.get("card_ready", False))
+                        cd_str = fresh_stats.get("card_cooldown") or ""
+
+                    if ch_read < ch_max:
+                        chapters_wait_sec = random.randint(3 * 60, 5 * 60)
+                    else:
+                        chapters_wait_sec = get_seconds_until_midnight_msk()
+                else:
+                    chapters_wait_sec = get_seconds_until_midnight_msk()
+
+                if cards_found >= cards_max:
+                    card_wait_sec = get_seconds_until_midnight_msk()
+                    self.log(f"🃏 Все бонусные карты за сегодня собраны ({cards_found}/{cards_max}).")
+                elif card_ready:
+                    self.log(
+                        f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! "
+                        f"Читаем до выпадения (сайт: главы {ch_read}/{ch_max})..."
+                    )
+                    self.read_manga_chapters(target_count=10)
+                    fresh_r = self.get_reading_stats()
+                    if fresh_r:
+                        reading_stats = fresh_r
+                        ch_read = int(fresh_r.get("chapters_read") or ch_read)
+                        ch_max = int(fresh_r.get("chapters_max") or ch_max)
+                        cards_found = int(fresh_r.get("cards_found") or cards_found)
+                        if not fresh_r.get("card_ready", True):
+                            card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
+                        else:
+                            card_wait_sec = 3 * 60
+                    if ch_read < ch_max:
+                        chapters_wait_sec = random.randint(3 * 60, 5 * 60)
+                else:
+                    card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
+                    self.log(
+                        f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). "
+                        f"Следующая проверка через ~{card_wait_sec // 60} мин."
+                    )
+            else:
+                chapters_wait_sec = random.randint(10 * 60, 15 * 60)
+                ch_read, ch_max = 0, 75
+                self.log("⚠️ Стата чтения недоступна — повтор через ~10–15 мин.")
+        finally:
+            out.update(card_wait_sec=card_wait_sec, chapters_wait_sec=chapters_wait_sec, ch_read=ch_read, ch_max=ch_max, cards_found=cards_found, cards_max=cards_max)
+
     def run_daemon(self):
         """Smart event-driven scheduler daemon. Runs 24/7, sleeping until the earliest event."""
         self.running = True
@@ -3239,6 +3485,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
         # Warm / refresh DDoS-Guard cookies up front (proxy required on VPS)
         self.ensure_site_access()
+
+        # Fill the stats panel now instead of after the first full cycle
+        try:
+            if self.refresh_live_panel():
+                self.log("📊 Статистика аккаунта обновлена.")
+        except Exception as e:
+            self.log(f"⚠️ Не удалось обновить статистику: {e}")
 
         if self.auth_log_buffer:
             header = tr("log_startup_header")
@@ -3280,8 +3533,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     self._run_module('evening_cup', _mod_cup, 5 * 60)
                     if cup_busy[0]:
                         wait = min(30, max(1, getattr(self, '_cup_next_check_at', 0) - time.time()))
-                        self._touch_heartbeat()
-                        time.sleep(wait)
+                        self._persist_panel_state(next_action="Вечерний кубок", next_wait_sec=wait)
+                        self._sleep_alive(wait)
+                        self._drain_manual_queue()
                         continue
 
 
@@ -3304,33 +3558,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # 1. Mining & Energy check
                 energy = 0
                 if getattr(self, "_energy_exhausted_date", None) != msk_today:
+                    mining_out = {"energy": 0}
+
                     def _mod_mining():
-                        nonlocal energy
-                        res_game = self.session.get(CONFIG["urls"]["game"], timeout=10)
-                        if res_game.status_code == 200:
-                            e_cls = CONFIG["selectors"]["energy_class"]
-                            hits_match = re.search(f'class="[^"]*{e_cls}[^"]*">\\s*([\\d\\s]+)\\s*<', res_game.text)
-                            if hits_match:
-                                energy = parse_smart_number(hits_match.group(1))
-
-                            b_cls = CONFIG["selectors"]["balance_class"]
-                            ore_match = re.search(f'class="[^"]*{b_cls}[^"]*">\\s*([\\d\\.\\s,kKmM]+)\\s*<', res_game.text)
-                            if ore_match:
-                                self.current_balance = parse_smart_number(ore_match.group(1))
-                        elif res_game.status_code in (401, 419):
-                            self.login_and_steal_keys()
-
-                        if energy >= 15:
-                            self.log(f"⚡ Накопилась энергия ({energy}). Запуск добычи руды...")
-                            self._run_mining()
-                            if self._alive():
-                                self.auto_upgrade_pickaxe()
-                                self._energy_exhausted_date = msk_today
-                            energy = 0
-                        elif res_game.status_code == 200 and hits_match is not None:
-                            self._energy_exhausted_date = msk_today
+                        self._mining_step(msk_today, mining_out)
 
                     self._run_module("mining", _mod_mining, 25 * 60)
+                    energy = mining_out["energy"]
 
                 # Arena module (checks battles and weekly seasonal chests)
                 arena_now = time.time()
@@ -3343,28 +3577,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 ads_cnt = 3
                 if self.running and DataManager.get_setting("ads_enabled", True):
                     if getattr(self, "_ads_completed_date", None) != msk_today:
-                        def _mod_ads():
-                            nonlocal ads_cnt
-                            self.watch_daily_ads()
-                            try:
-                                res_bal_check = self.session.get("https://mangabuff.ru/balance", timeout=8)
-                                if res_bal_check.status_code == 200:
-                                    soup_bal = BeautifulSoup(res_bal_check.text, "html.parser")
-                                    btn = soup_bal.find(class_=lambda c: c and "user-quest__watch-ads-btn" in c)
-                                    if btn:
-                                        ads_cnt = int(btn.get("data-count", 0))
-                                        if ads_cnt >= 3:
-                                            self._ads_completed_date = msk_today
+                        ads_out = {"ads_count": ads_cnt}
 
-                                    dia_el = soup_bal.find(class_="menu__balance")
-                                    if dia_el:
-                                        m_dia = re.search(r"([\d\s]+)", dia_el.get_text())
-                                        if m_dia:
-                                            self.diamonds_balance = parse_smart_number(m_dia.group(1))
-                            except Exception:
-                                pass
+                        def _mod_ads():
+                            self._ads_step(msk_today, ads_out)
 
                         self._run_module("ads", _mod_ads, 5 * 60)
+                        ads_cnt = ads_out["ads_count"]
                     else:
                         ads_cnt = 3
 
@@ -3406,85 +3625,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 cards_found = 0
                 cards_max = 10
                 if self.running and DataManager.get_setting("reading_enabled", True):
+                    reading_out = {"card_wait_sec": card_wait_sec, "chapters_wait_sec": chapters_wait_sec, "ch_read": ch_read, "ch_max": ch_max, "cards_found": cards_found, "cards_max": cards_max}
+
                     def _mod_reading():
-                        nonlocal card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max
-                        reading_stats = self.get_reading_stats()
-                        if not reading_stats:
-                            self.log('⚠️ /balance недоступен или разметка изменилась — чтение отложено, cache только для панели.')
-
-                        if reading_stats:
-                            ch_read = int(reading_stats.get("chapters_read") or 0)
-                            ch_max = int(reading_stats.get("chapters_max") or 75)
-                            cards_found = int(reading_stats.get("cards_found") or 0)
-                            cards_max = int(reading_stats.get("cards_max") or 10)
-                            card_ready = bool(reading_stats.get("card_ready", False))
-                            cd_str = reading_stats.get("card_cooldown") or ""
-
-                            midnight_lag = (
-                                ch_read >= ch_max
-                                and cards_found < cards_max
-                                and self._msk_now().hour < 6
-                            )
-
-                            if midnight_lag and not card_ready:
-                                self.log(
-                                    f"⏳ На сайте главы ещё {ch_read}/{ch_max} после полуночи "
-                                    f"(карты {cards_found}/{cards_max}) — ждём сброса счётчика глав."
-                                )
-                                chapters_wait_sec = random.randint(15 * 60, 25 * 60)
-                            elif ch_read < ch_max:
-                                batch_size = min(15, ch_max - ch_read)
-                                self.log(f"📖 Дневной лимит глав ({ch_read}/{ch_max}): читаем пачку из {batch_size} глав...")
-                                self.read_manga_chapters(target_count=batch_size)
-                                fresh_stats = self.get_reading_stats()
-                                if fresh_stats:
-                                    reading_stats = fresh_stats
-                                    ch_read = int(fresh_stats.get("chapters_read") or ch_read)
-                                    ch_max = int(fresh_stats.get("chapters_max") or ch_max)
-                                    cards_found = int(fresh_stats.get("cards_found") or cards_found)
-                                    card_ready = bool(fresh_stats.get("card_ready", False))
-                                    cd_str = fresh_stats.get("card_cooldown") or ""
-
-                                if ch_read < ch_max:
-                                    chapters_wait_sec = random.randint(3 * 60, 5 * 60)
-                                else:
-                                    chapters_wait_sec = get_seconds_until_midnight_msk()
-                            else:
-                                chapters_wait_sec = get_seconds_until_midnight_msk()
-
-                            if cards_found >= cards_max:
-                                card_wait_sec = get_seconds_until_midnight_msk()
-                                self.log(f"🃏 Все бонусные карты за сегодня собраны ({cards_found}/{cards_max}).")
-                            elif card_ready:
-                                self.log(
-                                    f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! "
-                                    f"Читаем до выпадения (сайт: главы {ch_read}/{ch_max})..."
-                                )
-                                self.read_manga_chapters(target_count=10)
-                                fresh_r = self.get_reading_stats()
-                                if fresh_r:
-                                    reading_stats = fresh_r
-                                    ch_read = int(fresh_r.get("chapters_read") or ch_read)
-                                    ch_max = int(fresh_r.get("chapters_max") or ch_max)
-                                    cards_found = int(fresh_r.get("cards_found") or cards_found)
-                                    if not fresh_r.get("card_ready", True):
-                                        card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
-                                    else:
-                                        card_wait_sec = 3 * 60
-                                if ch_read < ch_max:
-                                    chapters_wait_sec = random.randint(3 * 60, 5 * 60)
-                            else:
-                                card_wait_sec = parse_card_cooldown_seconds(cd_str) or (45 * 60)
-                                self.log(
-                                    f"⏳ Бонусные карты на кулдауне ({cd_str or 'ожидание'}). "
-                                    f"Следующая проверка через ~{card_wait_sec // 60} мин."
-                                )
-                        else:
-                            chapters_wait_sec = random.randint(10 * 60, 15 * 60)
-                            ch_read, ch_max = 0, 75
-                            self.log("⚠️ Стата чтения недоступна — повтор через ~10–15 мин.")
+                        self._reading_step(reading_out)
 
                     self._run_module("reading", _mod_reading, 20 * 60)
+                    card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max = (reading_out["card_wait_sec"], reading_out["chapters_wait_sec"], reading_out["ch_read"], reading_out["ch_max"], reading_out["cards_found"], reading_out["cards_max"])
                 # Clean up site notifications after reading (card drops, etc.) — skip if just polled.
                 if time.time() - self._last_notif_poll_at >= 8 * 60:
                     self._run_module(
@@ -3609,6 +3756,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     if not self.running:
                         break
                     self._touch_heartbeat()
+                    if self._manual_queue:
+                        self._drain_manual_queue()
                     if time.time() < self._anti_bot_paused_until:
                         time.sleep(1)
                         continue

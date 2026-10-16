@@ -274,7 +274,8 @@ class LoginBackoffTests(unittest.TestCase):
         self.assertEqual(titles, ['не удаётся войти на MangaBuff', 'вход на MangaBuff восстановлен'])
         self.assertIn('bad password', self.bot.notifier.notify_alert.call_args_list[0].args[1])
 
-    def test_backoff_caps_at_an_hour_and_stops_with_daemon(self):
+    @patch('engine.random.randint', return_value=30)
+    def test_backoff_caps_at_an_hour_and_stops_with_daemon(self, _jitter):
         def login():
             if self.bot.login_and_steal_keys.call_count >= 8:
                 self.bot.running = False
@@ -295,6 +296,84 @@ class LoginBackoffTests(unittest.TestCase):
         self.assertTrue(self.bot._authorize_with_backoff())
         self.bot.login_and_steal_keys.assert_not_called()
         self.bot.notifier.notify_alert.assert_not_called()
+
+
+class ArenaEnergyModelTests(unittest.TestCase):
+    def test_latest_point_wins_and_fight_cost_is_applied(self):
+        import arena
+        battles = [
+            {'observed_at': 1000, 'own_side': 'attacker', 'is_win': True,
+             'cards': {'attacker': [{'card_user_id': 7, 'battle_card_energy': 11}]}},
+            {'observed_at': 2000, 'own_side': 'defender', 'is_win': False,
+             'cards': {'defender': [{'card_user_id': 8, 'battle_card_energy': 50}],
+                       'attacker': [{'card_user_id': 99, 'battle_card_energy': 5}]}},
+        ]
+        points = arena.last_energy_points(battles, {'7': {'value': 40, 'at': 500}})
+        self.assertEqual(points[7], (1000.0, 9))   # newer battle beats older read; win costs 2
+        self.assertEqual(points[8], (2000.0, 49))  # loss costs 1
+        self.assertNotIn(99, points)               # opponent cards are not ours
+
+    def test_tired_card_recovers_with_time_and_caps_at_full(self):
+        import arena
+        points = {1: (0.0, 9), 2: (0.0, 95)}
+        est = arena.projected_energy(points, regen_per_hour=4, now=3 * 3600)
+        self.assertEqual(est[1], 21)
+        self.assertEqual(est[2], 100)
+        self.assertGreaterEqual(est[1], arena.ENERGY_TO_FIGHT)
+
+    def test_regen_is_learned_only_from_meaningful_reads(self):
+        import arena
+        points = {1: (0.0, 9), 2: (0.0, 50), 3: (6800.0, 20), 4: (0.0, 30)}
+        fresh = {1: 29, 2: 100, 3: 40, 4: 25}  # 1: +20 in 2h; 2: capped; 3: too soon; 4: dropped
+        regen = arena.learn_regen(None, points, fresh, now=7200)
+        self.assertEqual(regen, {'per_hour': 10.0, 'samples': 1})
+        again = arena.learn_regen(regen, {1: (7200.0, 29)}, {1: 39}, now=7200 + 3600)
+        self.assertEqual(again['samples'], 2)
+        self.assertAlmostEqual(again['per_hour'], 10.0)
+
+    def test_without_samples_the_prior_is_used(self):
+        import arena
+        regen = arena.learn_regen({}, {}, {1: 50})
+        self.assertEqual(regen, {'per_hour': arena.REGEN_DEFAULT_PER_HOUR, 'samples': 0})
+
+
+class DesktopLifecycleTests(unittest.TestCase):
+    def test_stop_aborts_current_module(self):
+        bot = object.__new__(MangaMinerBot)
+        bot.running = True
+        bot.log = Mock()
+        bot._module_abort = __import__('threading').Event()
+        bot.stop()
+        self.assertFalse(bot.running)
+        self.assertTrue(bot._module_cancelled())
+
+    def test_panel_snapshot_keeps_last_known_values(self):
+        state = {'panel': {'ore': 500, 'diamonds': 12, 'energy': 3}}
+        bot = object.__new__(MangaMinerBot)
+        with patch('engine.DataManager.load_reading_state', return_value=state), \
+                patch('engine.DataManager.save_reading_state') as save:
+            bot._persist_panel_state(next_action='Вечерний кубок', next_wait_sec=30, energy=0)
+        panel = save.call_args.args[0]['panel']
+        self.assertEqual(panel['next_action'], 'Вечерний кубок')
+        self.assertEqual(panel['ore'], 500)
+        self.assertEqual(panel['diamonds'], 12)
+        self.assertEqual(panel['energy'], 0)
+
+    def test_concurrent_setting_writes_are_not_lost(self):
+        import os, tempfile, threading
+        from data_management import DataManager
+        path = os.path.join(tempfile.mkdtemp(), 'settings.json')
+
+        def writer(prefix):
+            for i in range(60):
+                DataManager.save_json(path, {f'{prefix}{i}': i})
+
+        threads = [threading.Thread(target=writer, args=(p,)) for p in ('a', 'b', 'c')]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(len(DataManager.load_json(path)), 180)
 
 
 class TelegramTopicTests(unittest.TestCase):
@@ -332,6 +411,68 @@ class TelegramTopicTests(unittest.TestCase):
         self.assertEqual(self.notifier._send_http('hi'), (True, 'OK'))
         self.assertEqual(post.call_count, 2)
         self.assertNotIn('message_thread_id', post.call_args.kwargs['data'])
+
+
+class UpdaterTests(unittest.TestCase):
+    def test_version_compare(self):
+        from buffy.updater import is_newer
+
+        self.assertTrue(is_newer('v11.1.0', '11.0.0'))
+        self.assertTrue(is_newer('11.0.10', '11.0.9'))
+        self.assertFalse(is_newer('v11.0.0', '11.0.0'))
+        self.assertFalse(is_newer('v10.9.9', '11.0.0'))
+        self.assertFalse(is_newer('', '11.0.0'))
+
+    def test_fetch_latest_picks_the_installer(self):
+        from buffy import updater
+
+        release = {
+            'tag_name': 'v11.1.0',
+            'html_url': 'https://github.com/x/y/releases/tag/v11.1.0',
+            'assets': [
+                {'name': 'Buffy-11.1.0-portable.zip', 'browser_download_url': 'zip', 'size': 5},
+                {'name': 'Buffy-Setup-11.1.0.exe', 'browser_download_url': 'exe', 'size': 7},
+            ],
+        }
+        resp = Mock()
+        resp.json.return_value = release
+        with patch.object(updater.requests, 'get', return_value=resp):
+            info = updater.fetch_latest()
+        self.assertEqual(info['version'], '11.1.0')
+        self.assertEqual(info['url'], 'exe')
+        self.assertEqual(info['size'], 7)
+
+
+class FriendlyJournalTests(unittest.TestCase):
+    def test_technical_lines_become_plain_or_hidden(self):
+        from buffy.humanize import humanize
+
+        ctx = {}
+        self.assertIsNone(humanize('▶️ Модуль «reading» (лимит ~20 мин)', ctx))
+        self.assertEqual(ctx['module'], 'reading')
+        self.assertIsNone(humanize('✅ Session valid!', ctx))
+        self.assertEqual(
+            humanize('🃏 ВЫПАЛА КАРТА: «Рем» (№12 — «Re:Zero»)! (6/10 сегодня)', ctx),
+            '🃏 Выпала карта «Рем» (6/10 за сегодня)',
+        )
+        self.assertEqual(
+            humanize('⚔️ Battles: 5 | W: 4 | L: 1 | +20 essence', ctx),
+            '⚔️ Бои на арене: 5, побед 4, поражений 1, +20 эссенции',
+        )
+        self.assertEqual(humanize('⚠️ что-то непонятное', ctx), '⚠️ Чтение глав: небольшая заминка, Buffy повторит сам')
+
+    def test_problem_report_masks_secrets_and_fits_url(self):
+        from urllib.parse import unquote
+
+        from buffy.api import ISSUE_URL_LIMIT, build_issue_url
+
+        lines = ['[12:00:00] вход me@mail.ru пароль hunter22 прокси http://u:p@1.2.3.4:80'] * 500
+        url = build_issue_url('Арена не бьётся', lines, secrets=['hunter22'])
+        text = unquote(url)
+        self.assertLessEqual(len(url), ISSUE_URL_LIMIT)
+        self.assertIn('Арена не бьётся', text)
+        for secret in ('me@mail.ru', 'hunter22', 'u:p@'):
+            self.assertNotIn(secret, text)
 
 
 if __name__ == '__main__':
