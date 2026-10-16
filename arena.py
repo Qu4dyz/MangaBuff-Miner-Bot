@@ -886,6 +886,76 @@ def normalized_owned(cards, battles, current_energy=None):
 
 
 # ==========================================
+# CARD ENERGY MODEL
+# ==========================================
+# Card energy refills gradually over time. Only the four active fighters show
+# their energy on the site, so bench cards are estimated from the last time we
+# saw them, plus regeneration learned from the account's own observations.
+ENERGY_MAX = 100
+ENERGY_TO_FIGHT = 10
+REGEN_DEFAULT_PER_HOUR = 4.0  # prior until real samples exist
+REGEN_MIN_GAP_HOURS = 0.25
+
+
+def last_energy_points(battles, observations):
+    """{card_id: (timestamp, energy)} — the latest known energy of every card.
+
+    Battles give the energy each own card started with; the fight then costs
+    2 on a win and 1 on a loss. Page observations are exact reads.
+    """
+    points = {}
+
+    def keep(cid, at, value):
+        try:
+            cid, at, value = int(cid), float(at), int(value)
+        except (TypeError, ValueError):
+            return
+        if cid not in points or at >= points[cid][0]:
+            points[cid] = (at, max(0, min(ENERGY_MAX, value)))
+
+    for battle in battles or []:
+        at = battle.get('observed_at')
+        for c in (battle.get('cards') or {}).get(battle.get('own_side'), []):
+            if isinstance(c.get('battle_card_energy'), (int, float)):
+                keep(c.get('card_user_id'), at, c['battle_card_energy'] - (2 if battle.get('is_win') else 1))
+    for cid, obs in (observations or {}).items():
+        keep(cid, obs.get('at'), obs.get('value'))
+    return points
+
+
+def projected_energy(points, regen_per_hour, now=None):
+    """Estimate current energy from the last known points and the regen rate."""
+    now = time.time() if now is None else now
+    rate = max(0.0, float(regen_per_hour or 0))
+    return {cid: int(min(ENERGY_MAX, value + rate * max(0.0, now - at) / 3600))
+            for cid, (at, value) in points.items()}
+
+
+def learn_regen(regen, points, fresh, now=None):
+    """Update the learned regen rate from fresh exact reads of the active fighters.
+
+    A sample needs a known earlier point, enough time in between and a value
+    below the cap (a full card hides how fast it got there). Returns the new
+    {'per_hour', 'samples'} state.
+    """
+    now = time.time() if now is None else now
+    rate = float((regen or {}).get('per_hour') or REGEN_DEFAULT_PER_HOUR)
+    samples = int((regen or {}).get('samples') or 0)
+    for cid, value in (fresh or {}).items():
+        prev = points.get(int(cid))
+        if not prev:
+            continue
+        hours = (now - prev[0]) / 3600
+        if hours < REGEN_MIN_GAP_HOURS or value >= ENERGY_MAX or value <= prev[1]:
+            continue
+        sample = (value - prev[1]) / hours
+        rate = sample if samples == 0 else 0.7 * rate + 0.3 * sample
+        rate = max(0.5, min(60.0, rate))
+        samples += 1
+    return {'per_hour': round(rate, 3), 'samples': samples}
+
+
+# ==========================================
 # DECK OPTIMIZER
 # ==========================================
 def _normalized(cards, energy_map=None):
@@ -1644,7 +1714,7 @@ class ArenaManagementMixin:
         self.management_save({'meta_at': time.time(), 'meta_teams': teams, 'meta_leaders': leaders[:10], 'meta_banned': banned})
         return teams
 
-    def prepare_best_arena_deck(self):
+    def prepare_best_arena_deck(self, _retry=False):
         soup, home = self.management_page('/battle', '.battle-home')
         ban = home.select_one('.battle-home__banned-seal strong')
         banned = seal_id(ban.get_text()) if ban else None
@@ -1667,9 +1737,13 @@ class ArenaManagementMixin:
                 raise ValueError('Unknown fighter energy')
             energy[cid] = int(m[1])
         state = self.management_state()
-        for cid, observation in state.get('energy_observations', {}).items():
-            if int(cid) not in energy and time.time() - float(observation.get('at', 0)) < 1800:
-                energy[int(cid)] = int(observation['value'])
+        # Bench cards: last seen energy plus regeneration since then
+        points = last_energy_points(load_observations(os.path.join(BASE_DIR, 'arena_observations.json')),
+                                    state.get('energy_observations', {}))
+        regen = learn_regen(state.get('energy_regen'), points, energy)
+        for cid, value in projected_energy(points, regen['per_hour']).items():
+            energy.setdefault(cid, value)
+        self.management_save({'energy_regen': regen})
         cards = self.load_arena_inventory(form)
         self.management_save({'inventory': cards, 'inventory_at': time.time()})
         protected = self.protect_arena_cards(cards, current, current)
@@ -1755,12 +1829,17 @@ class ArenaManagementMixin:
             if m is None:
                 return False
             energies.append(int(m[1]))
-        self._arena_low_energy = min(energies) < 10
+        self._arena_low_energy = min(energies) < ENERGY_TO_FIGHT
         self._arena_min_energy = min(energies)
         energy_observations = dict(state.get('energy_observations', {}))
         for cid, value in zip(chosen, energies):
             energy_observations[str(cid)] = {'value': value, 'at': time.time()}
         self.management_save({'energy_observations': energy_observations})
+        if self._arena_low_energy and chosen != current and not _retry:
+            # A bench card's energy was estimated too high: now it's an exact read,
+            # so pick again right away instead of idling for hours.
+            self.log('🔁 Арена: карта в новом составе ещё не восстановилась — пересобираю колоду.')
+            return self.prepare_best_arena_deck(_retry=True)
         self._arena_start_url = same_site_route(home.get('data-battle-start-url'), '/battle/fight/start')
         self._arena_inventory = cards
         self._arena_protected_ids = protected
@@ -1779,7 +1858,7 @@ class ArenaManagementMixin:
             self._arena_inventory = fresh
             self.management_save({'inventory': fresh, 'inventory_at': time.time(), 'awakening_pending': None})
             self.log('✦ Ранее выполненное пробуждение подтверждено по коллекции.')
-        if not DataManager.get_setting('arena_auto_awaken', True):
+        if not DataManager.get_setting('arena_auto_awaken', False):
             return 0
         soup, root = self.management_page('/battle/awakening', '.battle-awakening')
 
