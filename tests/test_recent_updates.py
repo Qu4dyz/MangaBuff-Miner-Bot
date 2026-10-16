@@ -248,6 +248,55 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(self.notifier.notify_trade_offer('10', receive_photos=[b'r'], wait=True), (False, 'bad image'))
 
 
+class LoginBackoffTests(unittest.TestCase):
+    def setUp(self):
+        self.bot = object.__new__(MangaMinerBot)
+        self.bot.running = True
+        self.bot.log = Mock()
+        self.bot.notifier = Mock()
+        self.bot.auth_log_buffer = []
+        self.bot.validate_session = Mock(return_value=False)
+        self.bot._validate_session_with_server = Mock(return_value=False)
+        self.bot._sleep_alive = Mock()
+
+    def test_failed_login_waits_and_retries_instead_of_exiting(self):
+        def login():
+            self.bot.auth_log_buffer.append('❌ bad password')
+            return self.bot.login_and_steal_keys.call_count >= 3
+        self.bot.login_and_steal_keys = Mock(side_effect=login)
+
+        self.assertTrue(self.bot._authorize_with_backoff())
+        waits = [c.args[0] for c in self.bot._sleep_alive.call_args_list]
+        self.assertEqual(len(waits), 2)
+        self.assertGreaterEqual(waits[0], 5 * 60)
+        self.assertGreaterEqual(waits[1], 10 * 60)
+        titles = [c.args[0] for c in self.bot.notifier.notify_alert.call_args_list]
+        self.assertEqual(titles, ['не удаётся войти на MangaBuff', 'вход на MangaBuff восстановлен'])
+        self.assertIn('bad password', self.bot.notifier.notify_alert.call_args_list[0].args[1])
+
+    def test_backoff_caps_at_an_hour_and_stops_with_daemon(self):
+        def login():
+            if self.bot.login_and_steal_keys.call_count >= 8:
+                self.bot.running = False
+            return False
+        self.bot.login_and_steal_keys = Mock(side_effect=login)
+
+        self.assertFalse(self.bot._authorize_with_backoff())
+        waits = [c.args[0] // 60 for c in self.bot._sleep_alive.call_args_list]
+        self.assertEqual(waits[:5], [5, 10, 20, 40, 60])
+        self.assertTrue(all(w <= 61 for w in waits))
+        # Alerts on the first failure and then every sixth, not on every retry
+        self.assertEqual(self.bot.notifier.notify_alert.call_count, 2)
+
+    def test_valid_saved_session_skips_login(self):
+        self.bot.validate_session.return_value = True
+        self.bot._validate_session_with_server.return_value = True
+        self.bot.login_and_steal_keys = Mock()
+        self.assertTrue(self.bot._authorize_with_backoff())
+        self.bot.login_and_steal_keys.assert_not_called()
+        self.bot.notifier.notify_alert.assert_not_called()
+
+
 class TelegramTopicTests(unittest.TestCase):
     def setUp(self):
         self.notifier = object.__new__(TelegramNotifier)

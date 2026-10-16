@@ -3181,6 +3181,51 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self.running = False
         self.log(tr("log_mining_finish"))
 
+    def _sleep_alive(self, seconds):
+        """Sleep in 1 s slices, keeping the watchdog fed and honoring stop()."""
+        end = time.monotonic() + seconds
+        while self.running and time.monotonic() < end:
+            self._touch_heartbeat()
+            time.sleep(1)
+
+    def _authorize_with_backoff(self):
+        """
+        Log in at daemon start. On failure wait 5 → 10 → 20 → 40 → 60 min and retry
+        instead of exiting: an exit made systemd restart us every ~10 s, i.e. a fresh
+        login attempt every few seconds, which is exactly what gets an account flagged.
+        """
+        from html import escape
+
+        attempt = 0
+        while self.running:
+            if (self.validate_session() and self._validate_session_with_server()) or self.login_and_steal_keys():
+                if attempt:
+                    self.log(f"✅ Вход восстановлен с {attempt + 1}-й попытки.")
+                    self.notifier.notify_alert(
+                        "вход на MangaBuff восстановлен",
+                        f"Авторизация прошла с {attempt + 1}-й попытки, продолжаю работу.",
+                    )
+                return True
+
+            attempt += 1
+            reason = self.auth_log_buffer[-1] if self.auth_log_buffer else "нет подробностей"
+            for line in self.auth_log_buffer:
+                self.log(f"🔸 {line}")
+            self.auth_log_buffer.clear()
+
+            wait_min = min(60, 5 * 2 ** (attempt - 1))
+            self.log(f"❌ Авторизация не удалась (попытка {attempt}). Повтор через ~{wait_min} мин.")
+            # First failure, then about every 6 hours while it stays broken
+            if attempt == 1 or attempt % 6 == 0:
+                self.notifier.notify_alert(
+                    "не удаётся войти на MangaBuff",
+                    f"Причина: {escape(str(reason))}\n"
+                    f"Попытка {attempt}, следующая через ~{wait_min} мин.\n"
+                    "Проверь логин/пароль в user_data.json или прокси.",
+                )
+            self._sleep_alive(wait_min * 60 + random.randint(10, 60))
+        return False
+
     def run_daemon(self):
         """Smart event-driven scheduler daemon. Runs 24/7, sleeping until the earliest event."""
         self.running = True
@@ -3188,12 +3233,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self._start_watchdog()
         self.log("🚀 MangaBuff Miner — Запуск автономного Smart Daemon (24/7)")
 
-        # Validate session at start
-        if not self.validate_session() or not self._validate_session_with_server():
-            if not self.login_and_steal_keys():
-                self.log("❌ Первоначальная авторизация не удалась. Остановка демона.")
-                self.running = False
-                return
+        # Validate session at start (waits and retries instead of exiting on failure)
+        if not self._authorize_with_backoff():
+            return
 
         # Warm / refresh DDoS-Guard cookies up front (proxy required on VPS)
         self.ensure_site_access()
