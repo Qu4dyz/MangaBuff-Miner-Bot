@@ -602,6 +602,25 @@ class TelegramNotifier:
         msg = f"⚠️ <b>Внимание: {title}</b>\n{detail}"
         self.send_message(msg)
 
+    def notify_seasonal_event_live(self, paths, labels=None):
+        """Loud alert when Halloween / event pages come online (was 404, now live HTML)."""
+        labels = labels or {}
+        lines = []
+        for path in paths or []:
+            label = labels.get(path) or path
+            url = f"https://mangabuff.ru{path}"
+            lines.append(f"• <b>{escape(str(label))}</b> — <a href=\"{url}\">{escape(path)}</a>")
+        body = "\n".join(lines) if lines else "• страницы ивента"
+        msg = (
+            "🎃 <b>MangaBuff: сезонное обновление онлайн!</b>\n\n"
+            "Появились страницы, которых раньше не было:\n"
+            f"{body}\n\n"
+            "Можно заходить и смотреть механики (квест, мини-игра, паки, freebies), "
+            "чтобы нормально дописать автоматизацию.\n\n"
+            "👉 <a href=\"https://mangabuff.ru/\">mangabuff.ru</a>"
+        )
+        self.send_message(msg, disable_preview=False, force_sound=True)
+
     def notify_ddos_stuck(self, reason, minutes_down):
         """Loud alert: DDoS-Guard is blocking the bot and auto-recovery failed."""
         mins = max(1, int(minutes_down))

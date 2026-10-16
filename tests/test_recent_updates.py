@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 from bs4 import BeautifulSoup
 from engine import MangaMinerBot
+from seasonal import is_live_html
 from tg_notifier import TelegramNotifier
 
 
@@ -169,12 +170,59 @@ class UpdateTests(unittest.TestCase):
         self.bot.notifier.notify_club_card_available.assert_not_called()
 
 
+class SeasonalWatchTests(unittest.TestCase):
+    def setUp(self):
+        self.settings = {}
+        self.get = patch(
+            'seasonal.DataManager.get_setting',
+            side_effect=lambda key, default=None: copy.deepcopy(self.settings.get(key, default)),
+        )
+        self.put = patch(
+            'seasonal.DataManager.set_setting',
+            side_effect=lambda key, value: self.settings.update({key: copy.deepcopy(value)}),
+        )
+        self.get.start()
+        self.put.start()
+        self.addCleanup(self.get.stop)
+        self.addCleanup(self.put.stop)
+        self.bot = object.__new__(MangaMinerBot)
+        self.bot.log = Mock()
+        self.bot.notifier = Mock()
+        self.bot.session = Mock()
+
+    def test_stub_json_404_is_not_live(self):
+        self.assertFalse(is_live_html(404, '{     "message": "" }'))
+        self.assertFalse(is_live_html(200, '{     "message": "" }'))
+        self.assertTrue(is_live_html(200, '<!DOCTYPE html><html><title>Хэллоуин</title>' + ('x' * 500)))
+
+    def test_notifies_once_when_halloween_goes_live(self):
+        html = '<!DOCTYPE html><html><head><title>Halloween</title></head><body>' + ('y' * 600)
+        def fake_get(url, **kwargs):
+            if url.endswith('/halloween'):
+                return response(html, 200)
+            return response('{     "message": "" }', 404)
+
+        self.bot.session.get.side_effect = fake_get
+        first = self.bot.run_seasonal_watch(force=True)
+        self.assertEqual(first, ['/halloween'])
+        self.bot.notifier.notify_seasonal_event_live.assert_called_once()
+        second = self.bot.run_seasonal_watch(force=True)
+        self.assertEqual(second, [])
+        self.assertEqual(self.bot.notifier.notify_seasonal_event_live.call_count, 1)
+
+
 class TelegramTests(unittest.TestCase):
     def setUp(self):
         self.notifier = object.__new__(TelegramNotifier)
         self.notifier.send_message = Mock(return_value=(True, 'OK'))
         self.notifier.send_photo = Mock(return_value=(True, 'OK'))
         self.notifier.send_media_group = Mock(return_value=(True, 'OK'))
+
+    def test_seasonal_alert_uses_force_sound(self):
+        self.notifier.notify_seasonal_event_live(['/halloween'], {'/halloween': 'Хэллоуин'})
+        kwargs = self.notifier.send_message.call_args.kwargs
+        self.assertTrue(kwargs.get('force_sound'))
+        self.assertIn('/halloween', self.notifier.send_message.call_args.args[0])
 
     def test_club_card_name_is_escaped(self):
         self.notifier.notify_club_card_available(123, card_name='A < B & C')
