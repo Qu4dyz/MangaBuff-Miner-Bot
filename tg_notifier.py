@@ -46,6 +46,25 @@ class TelegramNotifier:
             enabled = bool(token and chat_id)
         return token, chat_id, enabled
 
+    def get_thread_id(self):
+        """Private-chat topic for MangaBuff messages (Telegram threaded mode); None = main chat."""
+        raw = DataManager.get_setting("tg_thread_id") or os.getenv("TG_THREAD_ID")
+        try:
+            return int(raw) if raw else None
+        except (TypeError, ValueError):
+            return None
+
+    def _post(self, url, payload, files=None, timeout=7):
+        """POST to Bot API inside the MangaBuff topic; if the topic was deleted, resend to the main chat."""
+        thread_id = self.get_thread_id()
+        if thread_id:
+            payload = dict(payload, message_thread_id=thread_id)
+        response = requests.post(url, data=payload, files=files, timeout=timeout)
+        if thread_id and response.status_code == 400 and "thread not found" in response.text.lower():
+            payload = {k: v for k, v in payload.items() if k != "message_thread_id"}
+            response = requests.post(url, data=payload, files=files, timeout=timeout)
+        return response
+
     def is_silent_all_enabled(self):
         """Retrieve whether all notifications should be delivered silently."""
         val = DataManager.get_setting("tg_silent_all")
@@ -161,7 +180,7 @@ class TelegramNotifier:
             payload["parse_mode"] = parse_mode
 
         try:
-            response = requests.post(url, data=payload, timeout=7)
+            response = self._post(url, payload, timeout=7)
             if response.status_code == 200:
                 return True, "OK"
             elif response.status_code == 429:
@@ -171,7 +190,7 @@ class TelegramNotifier:
                     retry_after = 5
                 time.sleep(retry_after)
                 # Retry once
-                requests.post(url, data=payload, timeout=7)
+                self._post(url, payload, timeout=7)
                 return False, f"Rate limited, waited {retry_after}s"
             else:
                 return False, f"HTTP {response.status_code}: {response.text[:200]}"
@@ -196,7 +215,7 @@ class TelegramNotifier:
         files_name, mime = _image_mime_and_name(photo_bytes, 0)
         files = {"photo": (files_name, bytes(photo_bytes), mime)}
         try:
-            response = requests.post(url, data=payload, files=files, timeout=15)
+            response = self._post(url, payload, files=files, timeout=15)
             if response.status_code == 200:
                 return True, "OK"
             elif response.status_code == 429:
@@ -205,7 +224,7 @@ class TelegramNotifier:
                 except Exception:
                     retry_after = 5
                 time.sleep(retry_after)
-                requests.post(url, data=payload, files=files, timeout=15)
+                self._post(url, payload, files=files, timeout=15)
                 return False, f"Rate limited, waited {retry_after}s"
             else:
                 return False, f"HTTP {response.status_code}: {response.text[:200]}"
@@ -252,7 +271,7 @@ class TelegramNotifier:
             "disable_notification": str(bool(disable_notification)).lower()
         }
         try:
-            response = requests.post(url, data=payload, files=files, timeout=30)
+            response = self._post(url, payload, files=files, timeout=30)
             if response.status_code == 200:
                 return True, "OK"
             elif response.status_code == 429:
@@ -261,7 +280,7 @@ class TelegramNotifier:
                 except Exception:
                     retry_after = 5
                 time.sleep(retry_after)
-                requests.post(url, data=payload, files=files, timeout=30)
+                self._post(url, payload, files=files, timeout=30)
                 return False, f"Rate limited, waited {retry_after}s"
             else:
                 return False, f"HTTP {response.status_code}: {response.text[:200]}"

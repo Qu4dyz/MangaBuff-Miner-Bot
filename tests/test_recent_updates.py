@@ -248,5 +248,38 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(self.notifier.notify_trade_offer('10', receive_photos=[b'r'], wait=True), (False, 'bad image'))
 
 
+class TelegramTopicTests(unittest.TestCase):
+    def setUp(self):
+        self.notifier = object.__new__(TelegramNotifier)
+        self.settings = {'tg_token': 't', 'tg_chat_id': '1', 'tg_enabled': True}
+        getter = patch('tg_notifier.DataManager.get_setting', side_effect=lambda key, default=None: self.settings.get(key, default))
+        getter.start()
+        self.addCleanup(getter.stop)
+
+    @patch('tg_notifier.requests.post')
+    def test_messages_go_to_configured_topic(self, post):
+        post.return_value = SimpleNamespace(status_code=200, text='{"ok":true}')
+        self.settings['tg_thread_id'] = '55'
+        self.assertEqual(self.notifier._send_http('hi'), (True, 'OK'))
+        self.assertEqual(post.call_args.kwargs['data']['message_thread_id'], 55)
+
+    @patch('tg_notifier.requests.post')
+    def test_no_topic_keeps_main_chat(self, post):
+        post.return_value = SimpleNamespace(status_code=200, text='{"ok":true}')
+        self.notifier._send_photo_http(b'\x89PNG')
+        self.assertNotIn('message_thread_id', post.call_args.kwargs['data'])
+
+    @patch('tg_notifier.requests.post')
+    def test_deleted_topic_falls_back_to_main_chat(self, post):
+        post.side_effect = [
+            SimpleNamespace(status_code=400, text='{"description":"Bad Request: message thread not found"}'),
+            SimpleNamespace(status_code=200, text='{"ok":true}'),
+        ]
+        self.settings['tg_thread_id'] = 55
+        self.assertEqual(self.notifier._send_http('hi'), (True, 'OK'))
+        self.assertEqual(post.call_count, 2)
+        self.assertNotIn('message_thread_id', post.call_args.kwargs['data'])
+
+
 if __name__ == '__main__':
     unittest.main()
