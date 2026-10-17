@@ -2238,10 +2238,22 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             "X-Requested-With": "XMLHttpRequest", "Referer": "https://mangabuff.ru/tower",
         }
         best = None
+        options = []
         seen = set()
         count = 0
         deadline = time.monotonic() + 120
         min_chance = 70.0
+        by_progress = DataManager.get_setting("tower_priority", "rewards") == "progress"
+
+        def pick():
+            # Progress differs by hundredths between difficulties while crystals differ by ~40%,
+            # so in "rewards" mode near-equal progress (within 10%) is a tie decided by crystals.
+            if by_progress:
+                return max(options, key=lambda o: o[0])
+            top = max(o[0][0] for o in options)
+            close = [o for o in options if o[0][0] >= 0.9 * top]
+            return max(close, key=lambda o: (o[0][1], o[0][0], o[0][2], o[0][3]))
+
         def evaluate(candidate):
             nonlocal best, count
             signature = tuple((key, str(candidate[key])) for key in sorted(candidate))
@@ -2270,8 +2282,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             if data.get("warning") or chance < min_chance or progress < 0 or low < 0 or high < low:
                 return True
             score = (progress / hours, (low + high) / (2 * hours), chance, -hours)
-            if best is None or score > best[0]:
-                best = (score, dict(candidate), chance, data)
+            options.append((score, dict(candidate), chance, data))
+            best = pick()
             return True
         try:
             if not evaluate(payload):

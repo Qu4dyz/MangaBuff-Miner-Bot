@@ -646,5 +646,36 @@ class DeckSealLimitTests(unittest.TestCase):
         self.assertEqual(seals['regeneration'], 2)
 
 
+class TowerChoiceTests(unittest.TestCase):
+    def _plan(self, priority):
+        html = ('<div id="t" data-preview-url="https://mangabuff.ru/tower/preview">'
+                '<button data-tower-option="difficulty" data-value="normal"></button>'
+                '<button data-tower-option="difficulty" data-value="nightmare"></button></div>')
+        soup = BeautifulSoup(html, 'html.parser')
+        root = soup.select_one('#t')
+        forecasts = {'normal': (0.90 * 12, 4800), 'nightmare': (0.87 * 12, 7900)}
+
+        def post(url, json=None, **kw):
+            progress, crystals = forecasts[json['difficulty_type']]
+            return Mock(status_code=200, json=lambda: {'data': {
+                'power_ratio': 1.5, 'estimated_progress': progress, 'warning': None,
+                'rewards': {'dark_crystals': {'min': crystals, 'max': crystals}}}})
+        bot = object.__new__(MangaMinerBot)
+        bot.log = Mock()
+        bot.session = Mock(post=post)
+        bot.csrf_token = 't'
+        bot._module_cancelled = lambda: False
+        payload = {'card_user_ids': [1, 2, 3, 4], 'duration_minutes': 720, 'route_type': 'frontier',
+                   'difficulty_type': 'normal', 'order_type': 'gathering'}
+        with patch('engine.DataManager.get_setting', side_effect=lambda k, d=None: priority if k == 'tower_priority' else d):
+            return bot._plan_tower_expedition(root, soup, payload)['difficulty_type']
+
+    def test_rewards_priority_takes_nightmare_when_progress_is_close(self):
+        self.assertEqual(self._plan('rewards'), 'nightmare')
+
+    def test_progress_priority_keeps_the_old_choice(self):
+        self.assertEqual(self._plan('progress'), 'normal')
+
+
 if __name__ == '__main__':
     unittest.main()
