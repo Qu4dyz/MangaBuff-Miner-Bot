@@ -1425,6 +1425,7 @@ class ManualArenaController:
         self.state = None
         self.card_stats = {}
         self.hit_history = set()
+        self.decisions = []  # every move with the state it was made in, to replay policies offline
         self.history_complete = False
         self.history_revision = None
         for selector in ('[data-battle-log-json]', '[data-manual-state-json]'):
@@ -1472,7 +1473,8 @@ class ManualArenaController:
                           for c in self.state.get('final', {}).get(s, [])] for s in ('attacker', 'defender')}
                 item = {'id': self.fight_id, 'observed_at': time.time(), 'own_side': side,
                       'is_win': self.state.get('winner_user_id') == uid, 'cards': cards, 'source': 'manual_opponent_cards'}
-                battle_store.record(battle_store.db_path(str(history_path.parent)), item, 'cup')
+                archived = dict(item, decisions=self.decisions[-300:], taunts=sorted(taunts))
+                battle_store.record(battle_store.db_path(str(history_path.parent)), archived, 'cup')
                 history = [h for h in history if h.get('id') != self.fight_id] + [item]
                 temporary = history_path.with_suffix('.tmp')
                 temporary.write_text(json.dumps({'battles': history[-40:]}), encoding='utf-8')
@@ -1499,6 +1501,9 @@ class ManualArenaController:
                                        self.hit_history if self.history_complete else None)
                 if action:
                     kind, payload = action
+                    self.decisions.append({'turn': self.state.get('turn'), 'final': self.state.get('final'),
+                                           'used_cards': self.state.get('used_cards'),
+                                           'tactics': self.state.get('tactics'), 'kind': kind, 'payload': payload})
                     self.pending = {'fight_id': self.fight_id, 'revision': revision, 'kind': kind, 'payload': payload}
                     self.save()
                     context = 'fight=' + self.fight_id + ' turn=' + str(self.state.get('turn')) + ' revision=' + str(revision) + ' kind=' + kind + ' cards=' + str(payload)
