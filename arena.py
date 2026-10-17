@@ -2406,11 +2406,16 @@ class ArenaAutomationMixin(ArenaManagementMixin):
         pending = getattr(self, '_cup_active', False) or bool(DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_state.json')).get('active_fight'))
         completed = self.management_state().get('cup_completed_date') == now.date().isoformat()
         if completed and not pending:
+            # Done for today: keep the scheduler from waking every few minutes until 22:00
+            self._cup_retry_at = now.replace(hour=22, minute=0, second=0, microsecond=0).timestamp()
             return False
+        if not pending and time.time() < getattr(self, '_cup_retry_at', 0):
+            return False  # not "busy": the other modules keep running meanwhile
         if time.time() < getattr(self, '_cup_next_check_at', 0):
             return pending or True
 
         if not pending and not self.prepare_arena_deck():
+            self._cup_retry_at = time.time() + 30 * 60  # no deck to play with yet
             return False
         result = run_cup_cycle(self, max_seconds=180, cancelled=self._module_cancelled,
             state_path=os.path.join(BASE_DIR, 'manual_arena_state.json'), allow_repeat_attempts=True)

@@ -706,5 +706,21 @@ class ClubScheduleTests(unittest.TestCase):
         self.bot.session.post.assert_not_called()
 
 
+class CupScheduleTests(unittest.TestCase):
+    def test_cup_without_a_deck_waits_without_blocking_other_modules(self):
+        from datetime import datetime, timedelta, timezone
+
+        bot = object.__new__(MangaMinerBot)
+        bot.log = Mock()
+        bot._msk_now = lambda: datetime(2026, 10, 18, 20, 0, tzinfo=timezone(timedelta(hours=3)))
+        bot.management_state = lambda: {}
+        bot.prepare_arena_deck = Mock(return_value=False)
+        with patch('arena.DataManager.get_setting', return_value=True),                 patch('arena.DataManager.load_json', return_value={}):
+            self.assertFalse(bot.run_evening_cup())
+            self.assertFalse(bot.run_evening_cup())
+        bot.prepare_arena_deck.assert_called_once()
+        self.assertGreater(bot._cup_retry_at, __import__('time').time() + 25 * 60)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -3709,7 +3709,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 if DataManager.get_setting('arena_cup_enabled',True):
                     cup_now=self._msk_now()
                     if 19<=cup_now.hour<22:
-                        candidates.append(('Вечерний кубок',max(1,getattr(self,'_cup_next_check_at',0)-time.time())))
+                        cup_at=max(getattr(self,'_cup_next_check_at',0),getattr(self,'_cup_retry_at',0))
+                        candidates.append(('Вечерний кубок',max(1,cup_at-time.time())))
                     else:
                         cup_open=cup_now.replace(hour=19,minute=0,second=0,microsecond=0)
                         if cup_open<=cup_now:cup_open+=timedelta(days=1)
