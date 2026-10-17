@@ -1400,7 +1400,10 @@ class ManualArenaController:
                 'buttons': buttons[:80],
                 'state_keys': sorted(state.keys()),
                 'tactics': state.get('tactics'),
-                'extra': {k: state[k] for k in state if any(w in k for w in ('tactic', 'abilit', 'skill', 'heal', 'action'))
+                # one full card per side, to see where the cup keeps buffs and other per-card fields
+                'sample_cards': {side: (team or [None])[0] for side, team in (state.get('final') or {}).items()},
+                'buff_keys': sorted(k for k in state if 'buff' in k),
+                'extra': {k: state[k] for k in state if any(w in k for w in ('tactic', 'abilit', 'skill', 'heal', 'action', 'buff'))
                           and k != 'tactics'},
             }
             try:
@@ -1445,7 +1448,7 @@ class ManualArenaController:
                     for card in cards if isinstance(cards, list) else []:
                         cid = int(card['card_user_id'])
                         self.card_stats.setdefault(cid, {}).update({key: card[key] for key in
-                                               ('attack', 'crit_chance', 'max_hp', 'seal', 'seal_slug', 'seal_code')
+                                               ('attack', 'crit_chance', 'max_hp', 'seal', 'seal_slug', 'seal_code', 'buff_code', 'buff')
                                                if key in card})
         side = root.get('data-bottom-real-side')
         uid = int(root.get('data-current-user-id') or getattr(self.bot, 'user_id', 0) or 0)
