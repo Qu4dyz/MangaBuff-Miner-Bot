@@ -602,5 +602,31 @@ class ArenaAnalysisTests(unittest.TestCase):
         self.assertEqual(len(teams), 2)
 
 
+class CupSecretTests(unittest.TestCase):
+    def _state(self, tactic):
+        def team(base, hp):
+            return [{'card_user_id': base + i, 'hp': h, 'max_hp': 2000, 'attack': 250, 'crit_chance': 20}
+                    for i, h in enumerate(hp)]
+        return {'final': {'attacker': team(1, [2000, 1500, 2000, 1900]), 'defender': team(11, [2000] * 4)},
+                'used_cards': {'attacker': [], 'defender': []},
+                'tactics': {'attacker': tactic, 'defender': {}}}
+
+    def test_unused_tactic_becomes_a_trap_on_the_most_wounded_card(self):
+        from arena import choose_action
+
+        state = self._state({'used_this_round': False, 'blocked_kind': None, 'secret_active': False, 'boost': None})
+        self.assertEqual(choose_action(state, 'attacker'),
+                         ('tactic', {'kind': 'secret', 'secret_type': 'trap', 'card_user_id': 2}))
+
+    def test_no_secret_when_set_blocked_disabled_or_unsupported(self):
+        from arena import choose_action
+
+        for tactic, allow in ((dict(used_this_round=False, secret_active=True), True),
+                              (dict(used_this_round=False, secret_active=False, blocked_kind='secret'), True),
+                              (dict(used_this_round=False, secret_active=False), False),
+                              (dict(used_this_round=False), True)):
+            self.assertEqual(choose_action(self._state(tactic), 'attacker', allow_secret=allow)[0], 'attack')
+
+
 if __name__ == '__main__':
     unittest.main()

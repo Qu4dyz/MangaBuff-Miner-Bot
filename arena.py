@@ -1237,7 +1237,21 @@ def optimize_deck(current_ids, cards, banned_id, opponent_teams, rules=None,
 # ==========================================
 # MANUAL ARENA (EVENING CUP)
 # ==========================================
-def choose_action(state, side, taunt_ids=(), hit_history=None):
+# Everything the cup page offered on 2026-10-17; anything else is reported once as new
+CUP_KNOWN = {
+    'tactic': {'heal', 'boost', 'secret'},
+    'secret': {'trap', 'mirror', 'mend'},
+    'state': {'battle_steps', 'current_turn_user_id', 'fight_id', 'fight_status', 'final', 'finished_reason',
+              'private_tactics', 'revision', 'server_time', 'steps', 'tactics', 'tournament_result',
+              'tournament_url', 'turn', 'turn_base_seconds', 'turn_deadline_at', 'turn_limits', 'turn_seconds',
+              'used_cards', 'winner_user_id'},
+    'url': {'data-manual-attack-url', 'data-manual-state-url', 'data-manual-surrender-url',
+            'data-manual-tactic-url', 'data-manual-turn-state'},
+    'tactic_field': {'used_this_round', 'blocked_kind', 'secret_active', 'boost'},
+}
+
+
+def choose_action(state, side, taunt_ids=(), hit_history=None, allow_secret=True):
     """Conservative legal one-step policy, not a full battle simulator."""
     other = 'defender' if side == 'attacker' else 'attacker'
     alive = lambda c: c.get('alive', True) and c.get('is_alive', True) and float(c.get('hp', 0)) > 0
@@ -1283,6 +1297,12 @@ def choose_action(state, side, taunt_ids=(), hit_history=None):
             atk, hp = attack_value(attacker), float(target['hp'])
             if atk < hp <= round(atk * 1.3):
                 return ('tactic', {'kind': 'boost', 'card_user_id': int(attacker['card_user_id'])})
+        # Otherwise the round's tactic would be wasted: a trap costs the next attacker 20% of its max HP.
+        # It goes on our most wounded card, the one players usually finish off.
+        if (allow_secret and 'secret_active' in tactic and not tactic.get('secret_active')
+                and tactic.get('blocked_kind') != 'secret'):
+            bait = min(own, key=lambda c: (float(c['hp']) / max(1.0, float(c.get('max_hp', 0))), int(c['card_user_id'])))
+            return ('tactic', {'kind': 'secret', 'secret_type': 'trap', 'card_user_id': int(bait['card_user_id'])})
     return ('attack', {'from_card_user_id': int(attacker['card_user_id']), 'target_card_user_id': int(target['card_user_id'])})
 
 
@@ -1407,11 +1427,28 @@ class ManualArenaController:
                           and k != 'tactics'},
             }
             try:
-                items = json.loads(path.read_text(encoding='utf-8')).get('fights', [])
+                saved = json.loads(path.read_text(encoding='utf-8'))
             except (OSError, ValueError):
-                items = []
-            path.write_text(json.dumps({'fights': (items + [entry])[-5:]}, ensure_ascii=False, default=str),
-                            encoding='utf-8')
+                saved = {}
+            current = {
+                'tactic': {el.get('data-tactic-kind') for el in root.select('[data-tactic-kind]')},
+                'secret': {el.get('data-tactic-secret') for el in root.select('[data-tactic-secret]')},
+                'state': set(state.keys()), 'url': set(entry['manual_urls']),
+                'tactic_field': {k for t in (state.get('tactics') or {}).values() if isinstance(t, dict) for k in t},
+            }
+            alerted = set(saved.get('alerted', []))
+            new = sorted(f'{group}:{name}' for group, names in current.items()
+                         for name in names - CUP_KNOWN.get(group, set()) if f'{group}:{name}' not in alerted)
+            if new:
+                getattr(self.bot, 'log', print)('⚠️ Кубок: на странице появилось новое — ' + ', '.join(new))
+                try:
+                    self.bot.notifier.notify_alert('в кубке появилось что-то новое',
+                                                   'Бот этого не знает: ' + ', '.join(new))
+                except Exception:
+                    pass
+            path.write_text(json.dumps({'fights': (saved.get('fights', []) + [entry])[-5:],
+                                        'alerted': sorted(alerted | set(new))},
+                                       ensure_ascii=False, default=str), encoding='utf-8')
         except Exception:
             pass
 
@@ -1431,6 +1468,13 @@ class ManualArenaController:
         self._page_html = response.text
         soup = BeautifulSoup(response.text, 'html.parser')
         root = soup.select_one('[data-fight-id][data-manual-state-url]')
+        self._page_blocks = {}
+        for node in soup.select('[data-battle-buffs-json], [data-battle-seals-json], [data-battle-reward-json]'):
+            name = next(k for k in node.attrs if k.endswith('-json'))
+            try:
+                self._page_blocks[name] = json.loads(node.get_text())
+            except ValueError:
+                pass
         if root is None:
             raise ValueError('Manual battle metadata missing')
         self.fight_id = str(root['data-fight-id'])
@@ -1439,7 +1483,8 @@ class ManualArenaController:
         self.state = None
         self.card_stats = {}
         self.hit_history = set()
-        self.decisions = []  # every move with the state it was made in, to replay policies offline
+        self.decisions = []  # every move with the full state it was made in, to replay policies offline
+        self.secret_disabled = False
         self.history_complete = False
         self.history_revision = None
         for selector in ('[data-battle-log-json]', '[data-manual-state-json]'):
@@ -1487,7 +1532,8 @@ class ManualArenaController:
                           for c in self.state.get('final', {}).get(s, [])] for s in ('attacker', 'defender')}
                 item = {'id': self.fight_id, 'observed_at': time.time(), 'own_side': side,
                       'is_win': self.state.get('winner_user_id') == uid, 'cards': cards, 'source': 'manual_opponent_cards'}
-                archived = dict(item, decisions=self.decisions[-300:], taunts=sorted(taunts))
+                archived = dict(item, decisions=self.decisions[-300:], taunts=sorted(taunts),
+                                page_blocks=getattr(self, '_page_blocks', {}))
                 battle_store.record(battle_store.db_path(str(history_path.parent)), archived, 'cup')
                 history = [h for h in history if h.get('id') != self.fight_id] + [item]
                 temporary = history_path.with_suffix('.tmp')
@@ -1513,12 +1559,11 @@ class ManualArenaController:
             blocked = self.pending and self.pending.get('fight_id') == self.fight_id and self.pending.get('revision') == revision
             if not blocked and int(self.state.get('current_turn_user_id', 0)) == uid and self.remaining() > 2:
                 action = choose_action(self.state, side, taunts,
-                                       self.hit_history if self.history_complete else None)
+                                       self.hit_history if self.history_complete else None,
+                                       allow_secret=not self.secret_disabled)
                 if action:
                     kind, payload = action
-                    self.decisions.append({'turn': self.state.get('turn'), 'final': self.state.get('final'),
-                                           'used_cards': self.state.get('used_cards'),
-                                           'tactics': self.state.get('tactics'), 'kind': kind, 'payload': payload})
+                    self.decisions.append({'state': self.state, 'kind': kind, 'payload': payload})
                     self.pending = {'fight_id': self.fight_id, 'revision': revision, 'kind': kind, 'payload': payload}
                     self.save()
                     context = 'fight=' + self.fight_id + ' turn=' + str(self.state.get('turn')) + ' revision=' + str(revision) + ' kind=' + kind + ' cards=' + str(payload)
@@ -1534,6 +1579,8 @@ class ManualArenaController:
                                       and self.clock() - self.received < 2 and self.remaining() > 2)
                     except Exception as exc:
                         log('Кубок: действие ' + context + ' status=' + type(exc).__name__ + '; синхронизация')
+                        if kind == 'tactic' and payload.get('kind') == 'secret':
+                            self.secret_disabled = True
                     continue
             self.sleep(min(2, max(0, end - self.clock())))
         return 'budget'
