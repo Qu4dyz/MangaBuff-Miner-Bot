@@ -8,6 +8,8 @@ pywebview does not expose them.
 from __future__ import annotations
 
 import collections
+import logging
+import logging.handlers
 import os
 import platform
 import re
@@ -95,6 +97,7 @@ class BuffyApi:
     def _log(self, message):
         raw = str(message)
         ts = time.strftime("%H:%M:%S")
+        _file_log().info(raw)
         with self._log_lock:
             self._raw.append(f"[{ts}] {raw}")
             try:
@@ -193,6 +196,8 @@ class BuffyApi:
                 stats_callback=lambda **_: None,
             )
             ok = bot.login_and_steal_keys()
+            for line in bot.auth_log_buffer:
+                _file_log().info("[login] " + str(line))
             if ok:
                 self._log(f"✅ Вход выполнен: {email}")
                 return {"ok": True}
@@ -541,6 +546,29 @@ def build_issue_url(description, raw_lines, secrets=(), status=""):
         if len(url) <= ISSUE_URL_LIMIT or not lines:
             return url
         lines = lines[max(1, len(lines) // 8):]  # drop the oldest lines first
+
+
+_FILE_LOG = None
+
+
+def _file_log():
+    """Technical log in the data folder (buffy.log, 2 x 2 MB), for reading problems after the fact."""
+    global _FILE_LOG
+    if _FILE_LOG is None:
+        from config import BASE_DIR
+
+        logger = logging.getLogger("buffy.file")
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        try:
+            handler = logging.handlers.RotatingFileHandler(
+                os.path.join(BASE_DIR, "buffy.log"), maxBytes=2_000_000, backupCount=1, encoding="utf-8")
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+            logger.addHandler(handler)
+        except OSError:
+            logger.addHandler(logging.NullHandler())
+        _FILE_LOG = logger
+    return _FILE_LOG
 
 
 def _data_file():

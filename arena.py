@@ -1858,6 +1858,11 @@ class ArenaManagementMixin:
         ban = home.select_one('.battle-home__banned-seal strong')
         banned = seal_id(ban.get_text()) if ban else None
         fighters = home.select('.battle-home__fighter')
+        if len(fighters) < 4 and not (ban and banned is None):
+            # New accounts have no arena deck yet: say what to do and look again in 6 hours
+            self.log('🃏 Арена: на аккаунте ещё нет колоды из 4 карт. Собери её на сайте: Карточные бои → Колоды.')
+            self._arena_next_check_at = time.time() + 6 * 3600
+            return False
         if len(fighters) != 4 or (ban and banned is None):
             raise ValueError('Unknown arena composition/ban')
         deck_soup, decks = self.management_page('/battle/decks', '.battle-decks')
