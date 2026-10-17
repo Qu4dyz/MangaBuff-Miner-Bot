@@ -2865,7 +2865,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         losses = 0
         consecutive_zero_essence = 0
         consecutive_unknown = 0
-        next_micro_break = random.randint(10, 15)
+        next_micro_break = random.randint(12, 18)
         cap_reached = False
         attempts = 0
         max_battles = max(1, min(50, int(DataManager.get_setting('arena_batch_battles', 30))))
@@ -2874,7 +2874,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
         while (self._alive() and battles_done < max_battles and attempts < max_battles + 5
                and time.monotonic() < batch_ends_at):
-            for _ in range(int(random.uniform(4.5, 12.2) * 4)):
+            for _ in range(int(random.uniform(3, 7) * 4)):
                 if not self._alive():
                     break
                 self._touch_heartbeat()
@@ -2942,12 +2942,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
             # Micro-break
             if battles_done >= next_micro_break:
-                brk = random.uniform(35, 75)
+                brk = random.uniform(20, 40)
                 print(f"😴 Micro-break ({brk:.0f}s)...")
                 self._pause(brk)
-                next_micro_break = battles_done + random.randint(10, 15)
+                next_micro_break = battles_done + random.randint(12, 18)
 
-            self._pause(random.uniform(10, 18))
+            self._pause(random.uniform(5, 10))
 
         # Summary
         if battles_done > 0:
