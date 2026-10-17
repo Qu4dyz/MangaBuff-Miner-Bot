@@ -2507,6 +2507,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             rem_sec = s_data.get("data", {}).get("remaining_seconds") or (duration_mins * 60)
                             dur_hours = duration_mins // 60
                             self.log(tr("log_tower_started", diff=difficulty.capitalize(), dur=dur_hours))
+                            DataManager.set_setting("tower_no_squad", False)
                             self.notifier.notify_tower_started(difficulty.capitalize(), dur_hours, ends_at)
                             return max(60, int(rem_sec))
                         except Exception:
@@ -2516,6 +2517,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         return None
                 else:
                     self.log("ℹ️ Отряд для Башни не выбран (выберите отряд на сайте mangabuff.ru/tower). Башня пропущена.")
+                    DataManager.set_setting("tower_no_squad", True)
                     return None
             else:
                 self.log(tr("log_tower_running", left=time_str))

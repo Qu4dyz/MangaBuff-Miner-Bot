@@ -1861,10 +1861,13 @@ class ArenaManagementMixin:
         if len(fighters) < 4 and not (ban and banned is None):
             # New accounts have no arena deck yet: say what to do and look again in 6 hours
             self.log('🃏 Арена: на аккаунте ещё нет колоды из 4 карт. Собери её на сайте: Карточные бои → Колоды.')
+            DataManager.set_setting('arena_no_deck', True)
             self._arena_next_check_at = time.time() + 6 * 3600
             return False
         if len(fighters) != 4 or (ban and banned is None):
             raise ValueError('Unknown arena composition/ban')
+        if DataManager.get_setting('arena_no_deck'):
+            DataManager.set_setting('arena_no_deck', False)
         deck_soup, decks = self.management_page('/battle/decks', '.battle-decks')
         active = decks.select_one('.battle-decks__deck--active[data-deck-id]')
         form = decks.select_one('.card-filter-form[data-url]')

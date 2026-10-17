@@ -137,7 +137,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 
 .pill {
   display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
-  background: rgba(255,255,255,0.05); border: 1px solid var(--border); font-size: 13px; font-weight: 600;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border); font-size: 13px; font-weight: 600; white-space: nowrap; flex: none;
 }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
 .pill.running .dot { background: var(--success); box-shadow: 0 0 0 0 rgba(61,220,151,.6); animation: pulse 1.8s infinite; }
@@ -408,7 +408,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
           <div class="card stat">
             <div class="k"><span class="ic">🏰</span>Башня Разлома</div>
             <div class="v" id="tower-v" style="font-size:20px">—</div>
-            <div class="s">Экспедиция до возвращения</div>
+            <div class="s" id="tower-s">Экспедиция до возвращения</div>
           </div>
           <div class="card stat">
             <div class="k"><span class="ic" id="rank-ic">⚔️</span>Арена</div>
@@ -528,11 +528,11 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
             <h3>Приложение</h3>
             <p class="lead">Как Buffy живёт на компьютере.</p>
             <div class="setting">
-              <div class="txt"><b>Запуск вместе с Windows</b><span>Тихо стартует в трее после включения ПК</span></div>
+              <div class="txt"><b>Открывать Buffy при включении ПК</b><span>Тихо стартует в трее, окно не всплывает</span></div>
               <label class="switch"><input type="checkbox" data-setting="autostart_windows"><span></span></label>
             </div>
             <div class="setting">
-              <div class="txt"><b>Сразу запускать бота</b><span>Не нужно нажимать «Запустить» после открытия</span></div>
+              <div class="txt"><b>Запускать бота при открытии Buffy</b><span>Не нужно каждый раз нажимать «Запустить»</span></div>
               <label class="switch"><input type="checkbox" data-setting="app_start_bot_on_launch"><span></span></label>
             </div>
             <div class="setting">
@@ -894,14 +894,21 @@ function renderState(st) {
   $("#dia-s").textContent = p.diamonds_total != null ? `Капитал ≈ ${fmt(p.diamonds_total)} 💎 с учётом руды` : " ";
   $("#ore-v").textContent = fmt(p.ore);
   $("#ore-s").textContent = p.ore != null ? `≈ ${fmt(Math.floor(p.ore / 100))} 💎` : " ";
-  $("#tower-v").textContent = p.tower && p.tower !== "Отключена / Не настроена" ? p.tower : "—";
+  const setup = st.setup || {};
+  $("#tower-v").textContent = setup.tower_no_squad ? "Нет отряда"
+    : p.tower && p.tower !== "Отключена / Не настроена" ? p.tower : "—";
+  $("#tower-s").textContent = setup.tower_no_squad ? "Выбери отряд на сайте в разделе «Башня»" : "Экспедиция до возвращения";
 
   $("#rank-ic").textContent = r.icon || "⚔️";
-  $("#rank-v").textContent = r.division || r.tier || "—";
-  $("#rank-s").textContent = r.tier ? `${r.wins || 0} побед · ${r.losses || 0} поражений в ранге` : "Победы и поражения в текущем ранге";
+  $("#rank-v").textContent = setup.arena_no_deck ? "Нет колоды" : r.division || r.tier || "—";
+  $("#rank-s").textContent = setup.arena_no_deck ? "Собери 4 карты на сайте: Карточные бои → Колоды"
+    : r.tier ? `${r.wins || 0} побед · ${r.losses || 0} поражений в ранге` : "Победы и поражения в текущем ранге";
 
   renderManual(st.manual);
   if (st.status === "stopped") $("#status-text").textContent = st.manual_busy ? "Выполняю модуль…" : STATUS.stopped;
+  const restUntil = st.status === "running" && p.next_wake_at && new Date(p.next_wake_at) > Date.now() && p.next_action !== "Вечерний кубок"
+    ? new Date(p.next_wake_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : null;
+  if (st.status === "running") $("#status-text").textContent = restUntil ? `Работает · отдых до ${restUntil}` : STATUS.running;
   const running = ["running", "starting", "restarting"].includes(st.status);
   const fresh = p.updated_at && (Date.now() - new Date(p.updated_at)) < 10 * 60 * 1000;
   const hero = $(".hero");
@@ -1115,6 +1122,7 @@ $("#proxy-clear").addEventListener("click", async () => {
 /* Settings page */
 let boot = {};
 $("#acc-change").addEventListener("click", async () => {
+  if (!confirm("Выйти из аккаунта? Бот остановится, а Buffy попросит войти заново.")) return;
   await api.logout();
   wizard.open(1);
 });

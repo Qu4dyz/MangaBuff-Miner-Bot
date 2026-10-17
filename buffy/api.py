@@ -181,7 +181,7 @@ class BuffyApi:
     def check_login(self, email, password):
         """Save credentials and verify them with one real login."""
         email = (email or "").strip()
-        password = (password or "").strip()
+        password = password or ""  # spaces may be part of a password
         if not email or not password:
             return {"ok": False, "error": "Введи почту и пароль"}
         if self._status in ("running", "starting"):
@@ -386,6 +386,8 @@ class BuffyApi:
                 "diamonds_total": panel.get("diamonds_total"),
                 "updated_at": panel.get("updated_at"),
             },
+            "setup": {"arena_no_deck": bool(DataManager.get_setting("arena_no_deck")),
+                      "tower_no_squad": bool(DataManager.get_setting("tower_no_squad"))},
             "rank": {
                 "tier": rank.get("current_tier"),
                 "division": rank.get("division"),
