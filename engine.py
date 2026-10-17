@@ -3480,9 +3480,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 else:
                     chapters_wait_sec = get_seconds_until_midnight_msk()
 
+                cards_off = DataManager.get_setting("bonus_cards_off_date") == str(self._msk_now().date())
                 if cards_found >= cards_max:
                     card_wait_sec = get_seconds_until_midnight_msk()
                     self.log(f"🃏 Все бонусные карты за сегодня собраны ({cards_found}/{cards_max}).")
+                elif card_ready and cards_off:
+                    card_wait_sec = get_seconds_until_midnight_msk()
                 elif card_ready:
                     self.log(
                         f"🃏 Бонусная карта готова к дропу ({cards_found}/{cards_max})! "
@@ -3494,7 +3497,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         reading_stats = fresh_r
                         ch_read = int(fresh_r.get("chapters_read") or ch_read)
                         ch_max = int(fresh_r.get("chapters_max") or ch_max)
+                        before = cards_found
                         cards_found = int(fresh_r.get("cards_found") or cards_found)
+                        # "Ready" but nothing drops: accounts without access (e.g. no VIP) never get them
+                        self._card_dry_chapters = 0 if cards_found > before else getattr(self, "_card_dry_chapters", 0) + 10
+                        if self._card_dry_chapters >= 30:
+                            DataManager.set_setting("bonus_cards_off_date", str(self._msk_now().date()))
+                            self.log("🃏 Бонусные карты не выпадают — похоже, аккаунту они недоступны. "
+                                     "До завтра читаю только ради квеста на 75 глав.")
                         if not fresh_r.get("card_ready", True):
                             card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
                         else:

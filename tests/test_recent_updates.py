@@ -722,5 +722,21 @@ class CupScheduleTests(unittest.TestCase):
         self.assertGreater(bot._cup_retry_at, __import__('time').time() + 25 * 60)
 
 
+class BonusCardAccessTests(unittest.TestCase):
+    def test_reading_for_cards_stops_when_ready_cards_never_drop(self):
+        settings = {}
+        bot = object.__new__(MangaMinerBot)
+        bot.log = Mock()
+        bot.get_reading_stats = Mock(return_value={'chapters_read': 75, 'chapters_max': 75, 'cards_found': 0,
+                                                   'cards_max': 10, 'card_ready': True, 'card_cooldown': ''})
+        bot.read_manga_chapters = Mock()
+        out = {'card_wait_sec': 0, 'chapters_wait_sec': 0, 'ch_read': 0, 'ch_max': 75, 'cards_found': 0, 'cards_max': 10}
+        with patch('engine.DataManager.get_setting', side_effect=lambda k, d=None: settings.get(k, d)),                 patch('engine.DataManager.set_setting', side_effect=settings.__setitem__):
+            for _ in range(4):
+                bot._reading_step(dict(out))
+        self.assertEqual(bot.read_manga_chapters.call_count, 3)
+        self.assertIn('bonus_cards_off_date', settings)
+
+
 if __name__ == '__main__':
     unittest.main()
