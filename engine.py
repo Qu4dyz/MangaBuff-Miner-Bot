@@ -342,6 +342,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
     def login_and_steal_keys(self):
         self.auth_log_buffer.append("Logging in via API...")
+        self.login_rejected = False  # True when the site answered and refused the email/password
         try:
             self.session.cookies.clear()
         except Exception:
@@ -385,6 +386,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             except ValueError:
                 self.auth_log_buffer.append(tr("log_login_fail_page"))
                 return False
+            if not isinstance(response_data, dict):
+                response_data = {}
 
             if response_data.get("status") is True:
                 # 4. Configure API headers for subsequent requests
@@ -401,9 +404,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 DataManager.save_session(cookies_dict, self.csrf_token, self.user_agent)
                 self.auth_log_buffer.append(tr("log_login_ok"))
                 return True
-            else:
-                self.auth_log_buffer.append(tr("log_login_fail_page"))
-                return False
+            # The site answered: a 422/401 or "status": false is a refused email/password
+            self.login_rejected = True
+            errors = response_data.get("errors") or {}
+            first = next((v[0] if isinstance(v, list) and v else v for v in errors.values()), None) if isinstance(errors, dict) else None
+            reason = first or response_data.get("message") or "Неверная почта или пароль"
+            self.auth_log_buffer.append(f"❌ Сайт не принял вход: {reason}")
+            return False
 
         except Exception as e:
             self.auth_log_buffer.append(tr("log_login_crash", e=e))

@@ -641,16 +641,6 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
       </div>
 
       <div class="wiz-step" data-step="2">
-        <h2>Что делать?</h2>
-        <p class="lead">Включи нужное. Поменять можно в любой момент в разделе «Модули».</p>
-        <div class="mini-mods" id="w-mods"></div>
-        <div class="wiz-nav">
-          <button class="btn ghost" data-back>Назад</button>
-          <button class="btn primary" data-next>Дальше</button>
-        </div>
-      </div>
-
-      <div class="wiz-step" data-step="3">
         <h2>Уведомления в Telegram</h2>
         <p class="lead">По желанию. Buffy напишет о дропах карт, обменах и если понадобится твоя помощь.</p>
         <ol class="steps">
@@ -668,17 +658,18 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
         </div>
       </div>
 
-      <div class="wiz-step" data-step="4" style="text-align:center">
+      <div class="wiz-step" data-step="3" style="text-align:center">
         <img class="wiz-logo" src="logo.png" alt="">
         <h2>Всё готово ✨</h2>
         <p class="lead">Buffy будет работать, пока открыт или свёрнут в трей. Можно закрыть окно — бот продолжит в фоне.</p>
+        <p class="muted" style="font-size:13px;margin:-6px 0 14px">Все модули уже включены (кроме пробуждения карт). Что каждый делает и как его выключить — во вкладке «Модули».</p>
         <div class="setting" style="text-align:left;border:0">
           <div class="txt"><b>Запускаться вместе с Windows</b><span>Чтобы ничего не пропускать</span></div>
           <label class="switch"><input type="checkbox" id="w-autostart"><span></span></label>
         </div>
         <div class="wiz-nav" style="justify-content:center"><button class="btn primary big" id="w-finish">Запустить Buffy</button></div>
       </div>
-      <div class="progress-dots" id="w-dots"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+      <div class="progress-dots" id="w-dots"><i class="on"></i><i></i><i></i><i></i></div>
     </div>
   </div>
 </div>
@@ -1039,8 +1030,6 @@ function renderModules() {
           : `<span class="mod-note">${m.note || ""}</span>`}
       </div>
     </div>`).join("");
-  $("#w-mods").innerHTML = MODULES.filter((m) => m.key && !m.soon).map((m) => `
-    <label><span>${m.emoji} ${m.title}</span><span class="switch"><input type="checkbox" data-setting="${m.key}"><span></span></span></label>`).join("");
   $$("[data-run]").forEach((b) => b.addEventListener("click", () => runModule(b.dataset.run)));
   renderManual(lastManual);
   bindSwitches();
@@ -1238,7 +1227,7 @@ $("#w-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin
 
 $("#w-tg").addEventListener("click", (e) => busy(e.currentTarget, async () => {
   const token = $("#w-token").value.trim();
-  if (!token) { wizard.show(4); return; }
+  if (!token) { wizard.show(3); return; }
   const found = await api.find_chat_id(token);
   if (!found.ok) { setMsg($("#w-tg-msg"), found.error, false); return; }
   const r = await api.test_telegram(token, found.chat_id);
@@ -1249,7 +1238,7 @@ $("#w-tg").addEventListener("click", (e) => busy(e.currentTarget, async () => {
   Object.assign(settings, { tg_enabled: true, tg_token: token, tg_chat_id: found.chat_id });
   $("#tg-token").value = token; $("#tg-chat").value = found.chat_id;
   bindSwitches(); renderTg(); renderModules();
-  wizard.show(4);
+  wizard.show(3);
 }));
 
 $("#w-finish").addEventListener("click", async () => {

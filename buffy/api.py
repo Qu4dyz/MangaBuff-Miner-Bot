@@ -193,11 +193,12 @@ class BuffyApi:
                 stats_callback=lambda **_: None,
             )
             ok = bot.login_and_steal_keys()
-            detail = bot.auth_log_buffer[-1] if bot.auth_log_buffer else ""
             if ok:
                 self._log(f"✅ Вход выполнен: {email}")
                 return {"ok": True}
-            return {"ok": False, "error": detail or "Сайт не принял почту или пароль"}
+            if getattr(bot, "login_rejected", False):
+                return {"ok": False, "error": "Неверная почта или пароль. Проверь и попробуй ещё раз."}
+            return {"ok": False, "error": "Не удалось связаться с MangaBuff. Проверь интернет или прокси на странице «Сеть»."}
         except Exception as e:
             return {"ok": False, "error": f"Ошибка соединения: {e}"}
 
