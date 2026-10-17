@@ -1628,7 +1628,9 @@ class ManualArenaController:
             now = float(data.get('server_time') or cup.get('server_time') or 0)
             if not now or not float(cup.get('opens_at', 0)) <= now < float(cup.get('closes_at', 0)):
                 return 'closed'
-            if cup.get('attempt_status') == 'champion':
+            # Winners may start another attempt (the winners list counts cups per player)
+            champion_again = cup.get('attempt_status') == 'champion'
+            if champion_again and not allow_repeat_attempts:
                 return 'champion'
             if cup.get('attempt_status') == 'eliminated' and not allow_repeat_attempts:
                 return 'eliminated'
@@ -1665,8 +1667,12 @@ class ManualArenaController:
                     if result.get('status') == 'searching':
                         self.registration = None
                         self.save()
+                    elif champion_again:
+                        return 'champion'  # no new attempt after the win: done for today
                 except Exception:
-                    pass
+                    if champion_again:
+                        return 'champion'
+
             self.sleep(min(5, max(0, end - self.clock())))
         return 'budget'
 
