@@ -66,7 +66,11 @@ DEFAULT_RULES = {
     'crit_multiplier': 2.0, 'jitter': .10, 'max_turns': 100,
     'phoenix_once': True, 'own_buff': None,
     'hunter_multiplier': 1.75,
-    'candidate_limit': 12, 'opponent_limit': 6,
+    'candidate_limit': 12, 'opponent_limit': 12,
+    # Seal effects; checked against replays by arena_analysis.measure()
+    'dodge_chance': .20, 'barrier_block': .70, 'regeneration_heal': .07,
+    'vampirism_heal': .25, 'thorns_reflect': .30, 'double_strike_chance': .30,
+    'chain_attack_chance': .25, 'rage_multiplier': 1.3, 'execution_multiplier': 1.35,
 }
 
 ASSUMPTIONS = [
@@ -462,15 +466,15 @@ def simulate(team, opponent, seed=0, first_side=0, rules=None, opponent_buff=Non
         return rng.choice(taunts or pool) if pool else None
 
     def power(c):
-        return c['attack'] * (1 + .3 * c['kills'] if c['seal'] == 'berserk' else 1) * (1.3 if c['seal'] == 'rage' and c['hp'] < .5 * c['max_hp'] else 1)
+        return c['attack'] * (1 + .3 * c['kills'] if c['seal'] == 'berserk' else 1) * (r['rage_multiplier'] if c['seal'] == 'rage' and c['hp'] < .5 * c['max_hp'] else 1)
 
     def hurt(victim, source, damage, side, depth=0, direct=True):
         if victim['hp'] <= 0 or depth > 8:
             return 0, False
-        if direct and victim['seal'] == 'dodge' and rng.random() < .20:
+        if direct and victim['seal'] == 'dodge' and rng.random() < r['dodge_chance']:
             return 0, False
         if direct and victim['first_hit'] and victim['seal'] == 'barrier':
-            damage *= .30
+            damage *= 1 - r['barrier_block']
         if direct:
             victim['first_hit'] = False
         before = victim['hp']
@@ -489,7 +493,7 @@ def simulate(team, opponent, seed=0, first_side=0, rules=None, opponent_buff=Non
                 victim['hp'] = _round(.30 * victim['max_hp'])
         killed = victim['hp'] <= 0
         if direct and victim['seal'] == 'thorns' and source['hp'] > 0:
-            hurt(source, victim, .30 * dealt, 1 - side, depth + 1, False)
+            hurt(source, victim, r['thorns_reflect'] * dealt, 1 - side, depth + 1, False)
         if killed and victim['seal'] == 'revenge' and source['hp'] > 0:
             hurt(source, victim, power(victim), 1 - side, depth + 1, False)
         return dealt, killed
@@ -503,14 +507,14 @@ def simulate(team, opponent, seed=0, first_side=0, rules=None, opponent_buff=Non
                 damage *= 1.55
         actor['first_attack'] = False
         if actor['seal'] == 'execution' and victim['hp'] < .35 * victim['max_hp']:
-            damage *= 1.35
+            damage *= r['execution_multiplier']
         if rng.random() < actor['crit'] / 100 or (actor['buff'] == 'executioner' and victim['hp'] < .30 * victim['max_hp']):
             damage *= r['crit_multiplier']
         damage *= rng.uniform(1 - r['jitter'], 1 + r['jitter'])
         dealt, killed = hurt(victim, actor, damage, 1 - side)
         if actor['hp'] > 0:
             if actor['seal'] == 'vampirism':
-                actor['hp'] = min(actor['max_hp'], actor['hp'] + _round(.25 * dealt))
+                actor['hp'] = min(actor['max_hp'], actor['hp'] + _round(r['vampirism_heal'] * dealt))
             if killed:
                 actor['kills'] += 1
                 if actor['buff'] == 'blood_thirst':
@@ -526,13 +530,13 @@ def simulate(team, opponent, seed=0, first_side=0, rules=None, opponent_buff=Non
                 break
             attack(actor, victim, side)
             if actor['hp'] > 0 and actor['seal'] in ('double_strike', 'chain_attack'):
-                chance = .30 if actor['seal'] == 'double_strike' else .25
+                chance = r['double_strike_chance'] if actor['seal'] == 'double_strike' else r['chain_attack_chance']
                 if rng.random() < chance:
                     extra = target(1 - side, victim if actor['seal'] == 'chain_attack' else None)
                     if extra:
                         attack(actor, extra, side)
             if actor['hp'] > 0 and actor['seal'] == 'regeneration':
-                actor['hp'] = min(actor['max_hp'], actor['hp'] + _round(.07 * actor['max_hp']))
+                actor['hp'] = min(actor['max_hp'], actor['hp'] + _round(r['regeneration_heal'] * actor['max_hp']))
         if not living(0) or not living(1):
             break
     alive = [bool(living(i)) for i in (0, 1)]
@@ -791,6 +795,23 @@ def opponent_teams(battles, limit=6):
         if len(teams) >= limit:
             break
     return teams
+
+
+def archive_opponent_teams(battles, limit=8):
+    """Distinct opponent teams, the most often met first, then the most recent."""
+    seen = {}
+    for order, battle in enumerate(battles):
+        side = 'defender' if battle.get('own_side') == 'attacker' else 'attacker'
+        team = (battle.get('cards') or {}).get(side)
+        if not isinstance(team, list) or len(team) != 4:
+            continue
+        identity = tuple(sorted(c.get('card_user_id') or 0 for c in team))
+        entry = seen.setdefault(identity, {'team': team, 'count': 0, 'last': 0})
+        entry['count'] += 1
+        if order >= entry['last']:
+            entry['team'], entry['last'] = team, order
+    ranked = sorted(seen.values(), key=lambda e: (e['count'], e['last']), reverse=True)
+    return [e['team'] for e in ranked[:limit]]
 
 
 def calibrate_rules(battles):
@@ -1073,7 +1094,7 @@ def optimize_deck(current_ids, cards, banned_id, opponent_teams, rules=None,
                               entry.get('source', 'sample') if isinstance(entry, dict) else 'sample'))
     if not opponents:
         return None
-    opponents = opponents[-max(1, min(8, int(rules.get('opponent_limit', 6)))):]
+    opponents = opponents[-max(1, min(12, int(rules.get('opponent_limit', 12)))):]
     pool = _shortlist(legal, current, max(18, min(24, int(rules.get('pool_limit', 24)))))
     pool_ids = [c['id'] for c in pool]
     cache = {}
@@ -1363,6 +1384,34 @@ class ManualArenaController:
         response.raise_for_status()
         return self.unwrap(response)
 
+    def probe_controls(self, root):
+        """Record which actions the cup page offers, to spot new buttons/tactics. Never raises."""
+        try:
+            if not self.path:
+                return
+            path = self.path.with_name('cup_controls_probe.json')
+            state = self.state or {}
+            buttons = sorted({(b.get('data-action') or b.get('data-kind') or b.get('data-tactic') or
+                               ' '.join(b.get('class', [])))[:60]
+                              for b in root.select('button, [data-action], [data-kind], [data-tactic]')})
+            entry = {
+                'at': time.time(), 'fight_id': self.fight_id,
+                'manual_urls': sorted(k for k in root.attrs if k.startswith('data-manual-')),
+                'buttons': buttons[:80],
+                'state_keys': sorted(state.keys()),
+                'tactics': state.get('tactics'),
+                'extra': {k: state[k] for k in state if any(w in k for w in ('tactic', 'abilit', 'skill', 'heal', 'action'))
+                          and k != 'tactics'},
+            }
+            try:
+                items = json.loads(path.read_text(encoding='utf-8')).get('fights', [])
+            except (OSError, ValueError):
+                items = []
+            path.write_text(json.dumps({'fights': (items + [entry])[-5:]}, ensure_ascii=False, default=str),
+                            encoding='utf-8')
+        except Exception:
+            pass
+
     def fight(self, url, end, cancelled):
         response = get_html(self.bot.session, safe_url(url), timeout=10)
         response.raise_for_status()
@@ -1409,6 +1458,7 @@ class ManualArenaController:
         taunts = {int(c['data-card-user-id']) for c in root.select('.battle-card--taunt[data-card-user-id]') if c.get('data-real-side') != side}
         fresh_post = False
         log = getattr(self.bot, 'log', lambda _: None)
+        probed = False
 
         def finished():
             if self.path:
@@ -1436,6 +1486,9 @@ class ManualArenaController:
                 data = self.unwrap(self.get(endpoints['state']))
                 if not self.accept(data):
                     raise ValueError('Invalid manual state revision or fight identity')
+                if not probed:
+                    probed = True
+                    self.probe_controls(root)
             fresh_post = False
             if self.state.get('fight_status') == 'finished':
                 return finished()
@@ -1770,7 +1823,11 @@ class ArenaManagementMixin:
                 rows = observed.get('cards', {}).get(side, [])
                 if len(rows) == 4:
                     manual_teams.append({'cards': rows, 'source': 'manual_opponent_cards'})
-            opponents = opponent_teams(battles, limit=3) + manual_teams + meta[:2]
+            # A wide pool of real opponents from the archive instead of the last three
+            archive = battle_store.load(battle_store.db_path(BASE_DIR), source='arena',
+                                        since=time.time() - 3 * 86400, limit=600, with_steps_only=True)
+            pool = archive_opponent_teams(archive, limit=8) if len(archive) >= 20 else opponent_teams(battles, limit=3)
+            opponents = pool + manual_teams + meta[:2]
 
             def currently_legal_opponent(entry):
                 rows = entry.get('cards', []) if isinstance(entry, dict) else entry
@@ -1780,18 +1837,21 @@ class ArenaManagementMixin:
             normalized = normalized_owned(cards, battles, energy)
             known = {int(c['id']): c for c in normalized}
             rules = calibrate_rules(battles)
+            if len(archive) >= 50:
+                import arena_analysis
+                rules.update(arena_analysis.learned_rules(archive))
             buff_ranking = evaluate_buffs([known[i] for i in current], opponents, buff_options, rules, samples=24, cancelled=self._module_cancelled)
             if buff_ranking:
                 buff_code = buff_ranking[0]['code']
             result = optimize_deck(current, normalized, banned, opponents,
-                rules=dict(rules, own_buff=buff_code), energy_map=energy, cancelled=self._module_cancelled, budget_seconds=12)
+                rules=dict(rules, own_buff=buff_code), energy_map=energy, cancelled=self._module_cancelled, budget_seconds=20)
             if result:
                 ranking = evaluate_buffs([known[i] for i in result[0]], opponents, buff_options, rules, samples=24, cancelled=self._module_cancelled)
                 if ranking and ranking[0]['code'] != buff_code:
                     buff_code = ranking[0]['code']
                     buff_ranking = ranking
                     result = optimize_deck(current, normalized, banned, opponents,
-                        rules=dict(rules, own_buff=buff_code), energy_map=energy, cancelled=self._module_cancelled, budget_seconds=12)
+                        rules=dict(rules, own_buff=buff_code), energy_map=energy, cancelled=self._module_cancelled, budget_seconds=20)
         if result is None:
             byid = {int(c['id']): c for c in cards}
             if any(cid not in byid or int(byid[cid].get('battle_seal_id') or 0) == banned for cid in current):

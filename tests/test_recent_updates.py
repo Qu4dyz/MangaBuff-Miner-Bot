@@ -565,5 +565,42 @@ class BattleArchiveTests(unittest.TestCase):
         self.assertFalse(battle_store.record('/nonexistent/dir/x.sqlite3', {'id': 'x'}, 'arena'))
 
 
+class ArenaAnalysisTests(unittest.TestCase):
+    @staticmethod
+    def _battle(steps, defender_seal='barrier'):
+        attacker = [{'card_user_id': 1, 'attack': 200, 'max_hp': 1000, 'seal_code': 'vampirism'}] +                    [{'card_user_id': i, 'attack': 100, 'max_hp': 1000, 'seal_code': 'hunter'} for i in (2, 3, 4)]
+        defender = [{'card_user_id': 11, 'attack': 100, 'max_hp': 1000, 'seal_code': defender_seal}] +                    [{'card_user_id': i, 'attack': 100, 'max_hp': 1000, 'seal_code': 'hunter'} for i in (12, 13, 14)]
+        return {'own_side': 'attacker', 'is_win': True, 'cards': {'attacker': attacker, 'defender': defender},
+                'steps': steps}
+
+    def test_barrier_share_uses_the_full_hit(self):
+        import arena_analysis
+
+        step = {'type': 'attack', 'from_side': 'attacker', 'to_side': 'defender', 'from_card_user_id': 1,
+                'to_card_user_id': 11, 'damage': 60, 'dealt_damage': 60, 'hp_before': 100, 'hp_after': 94,
+                'effects': [{'type': 'shield', 'amount': 140, 'card_user_id': 11}]}
+        est = arena_analysis.measure([self._battle([step])])
+        self.assertAlmostEqual(est['barrier_block'].value, 0.7)
+
+    def test_dodge_counts_zero_damage_hits(self):
+        import arena_analysis
+
+        hit = {'type': 'attack', 'from_card_user_id': 2, 'to_card_user_id': 11, 'damage': 100, 'dealt_damage': 100}
+        miss = dict(hit, damage=0, dealt_damage=0)
+        est = arena_analysis.measure([self._battle([hit, hit, hit, miss], defender_seal='dodge')])
+        self.assertEqual(est['dodge_chance'].value, 0.25)
+        self.assertEqual(est['dodge_chance'].samples, 4)
+
+    def test_opponent_pool_prefers_teams_met_most(self):
+        import arena
+
+        def battle(ids):
+            return {'own_side': 'attacker', 'cards': {'defender': [{'card_user_id': i} for i in ids]}}
+        battles = [battle([1, 2, 3, 4]), battle([5, 6, 7, 8]), battle([4, 3, 2, 1]), battle([9, 10, 11, 12])]
+        teams = arena.archive_opponent_teams(battles, limit=2)
+        self.assertEqual(sorted(c['card_user_id'] for c in teams[0]), [1, 2, 3, 4])
+        self.assertEqual(len(teams), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
