@@ -27,3 +27,5 @@ audit_*/
 .stage_*/
 backup_*/
 .kilo/
+# Battle archive (local data)
+*.sqlite3

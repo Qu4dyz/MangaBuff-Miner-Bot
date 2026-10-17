@@ -25,6 +25,7 @@ from urllib.parse import urljoin, urlparse, urlsplit
 
 from bs4 import BeautifulSoup
 
+import battle_store
 from config import CONFIG
 from data_management import DataManager
 from http_session import is_anti_bot_page
@@ -752,6 +753,11 @@ def load_observations(path):
 def save_observation(path, observation):
     if observation is None:
         return
+    # Full history goes to the long-term archive; this JSON stays the short live window
+    base_dir = os.path.dirname(os.path.abspath(path))
+    if not os.path.exists(battle_store.db_path(base_dir)):
+        battle_store.backfill(base_dir)
+    battle_store.record(battle_store.db_path(base_dir), observation, 'arena')
     battles = load_observations(path)
     if any(b.get('id') == observation['id'] for b in battles):
         return
@@ -1416,6 +1422,7 @@ class ManualArenaController:
                           for c in self.state.get('final', {}).get(s, [])] for s in ('attacker', 'defender')}
                 item = {'id': self.fight_id, 'observed_at': time.time(), 'own_side': side,
                       'is_win': self.state.get('winner_user_id') == uid, 'cards': cards, 'source': 'manual_opponent_cards'}
+                battle_store.record(battle_store.db_path(str(history_path.parent)), item, 'cup')
                 history = [h for h in history if h.get('id') != self.fight_id] + [item]
                 temporary = history_path.with_suffix('.tmp')
                 temporary.write_text(json.dumps({'battles': history[-40:]}), encoding='utf-8')

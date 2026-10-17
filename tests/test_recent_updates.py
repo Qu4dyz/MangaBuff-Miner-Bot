@@ -538,5 +538,32 @@ class ProxyRetryTests(unittest.TestCase):
         self.assertEqual(session._raw_request_once.call_count, 1)
 
 
+class BattleArchiveTests(unittest.TestCase):
+    def test_archive_keeps_every_battle_once_and_filters(self):
+        import tempfile
+
+        import battle_store
+
+        path = battle_store.db_path(tempfile.mkdtemp())
+        sides = {'attacker': [{'card_user_id': i} for i in range(4)],
+                 'defender': [{'card_user_id': 10 + i} for i in range(4)]}
+        for n in range(60):
+            battle = {'id': f'b{n}', 'observed_at': 1000 + n, 'own_side': 'attacker',
+                      'is_win': n % 2 == 0, 'cards': sides, 'steps': [{'type': 'attack'}]}
+            self.assertTrue(battle_store.record(path, battle, 'arena'))
+        self.assertFalse(battle_store.record(path, {'id': 'b0', 'observed_at': 1}, 'arena'))
+        battle_store.record(path, {'id': 'cup1', 'observed_at': 2000, 'own_side': 'defender',
+                                   'is_win': False, 'cards': sides}, 'cup')
+        self.assertEqual(len(battle_store.load(path)), 61)
+        self.assertEqual([b['id'] for b in battle_store.load(path, source='arena', limit=2)], ['b58', 'b59'])
+        self.assertEqual(len(battle_store.load(path, with_steps_only=True)), 60)
+        self.assertEqual(battle_store.stats(path)['arena']['wins'], 30)
+
+    def test_broken_archive_never_raises(self):
+        import battle_store
+
+        self.assertFalse(battle_store.record('/nonexistent/dir/x.sqlite3', {'id': 'x'}, 'arena'))
+
+
 if __name__ == '__main__':
     unittest.main()
