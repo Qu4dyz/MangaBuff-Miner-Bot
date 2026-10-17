@@ -628,5 +628,23 @@ class CupSecretTests(unittest.TestCase):
             self.assertEqual(choose_action(self._state(tactic), 'attacker', allow_secret=allow)[0], 'attack')
 
 
+class DeckSealLimitTests(unittest.TestCase):
+    def test_optimizer_never_puts_three_same_seals_in_a_deck(self):
+        from collections import Counter
+
+        import arena
+
+        def card(i, seal, attack):
+            return {'id': i, 'base_id': 100 + i, 'attack': attack, 'max_hp': 2500, 'crit': 20, 'seal': seal,
+                    'seal_id': 1, 'in_trade': False, 'energy': 60, 'stats_source': 'inventory'}
+        cards = [card(i, 'regeneration', 400) for i in range(1, 6)] + [card(i, 'hunter', 150) for i in range(6, 10)]
+        opponents = [{'cards': [{'card_user_id': 50 + j, 'attack': 250, 'max_hp': 1800, 'crit_chance': 20,
+                                 'seal_code': 'hunter', 'buff_code': None} for j in range(4)]}]
+        ids, _ = arena.optimize_deck([6, 7, 8, 9], cards, 999, opponents, budget_seconds=3)
+        seals = Counter(c['seal'] for c in cards if c['id'] in ids)
+        self.assertLessEqual(max(seals.values()), arena.MAX_SAME_SEAL)
+        self.assertEqual(seals['regeneration'], 2)
+
+
 if __name__ == '__main__':
     unittest.main()

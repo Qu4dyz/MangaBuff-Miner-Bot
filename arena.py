@@ -5,6 +5,7 @@ awakening, research policy, and Evening Cup controller.
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 import itertools
 import json
 import math
@@ -61,6 +62,9 @@ BUFF_NAMES = {
     'Стеклянная пушка': 'glass_cannon',
     'Палач': 'executioner',
 }
+
+# Site rule: a deck may hold at most two cards with the same seal (HTTP 422 otherwise)
+MAX_SAME_SEAL = 2
 
 DEFAULT_RULES = {
     'crit_multiplier': 2.0, 'jitter': .10, 'max_turns': 100,
@@ -1080,7 +1084,8 @@ def optimize_deck(current_ids, cards, banned_id, opponent_teams, rules=None,
     def valid(ids):
         return (len(ids) == 4 and len(set(ids)) == 4 and
                 all(i in known and available(known[i]) for i in ids) and
-                len({known[i]['base_id'] for i in ids}) == 4)
+                len({known[i]['base_id'] for i in ids}) == 4 and
+                max(Counter(known[i]['seal'] for i in ids).values()) <= MAX_SAME_SEAL)
 
     legal = [c for c in known.values() if available(c)]
     if len({c['base_id'] for c in legal}) < 4:
@@ -1130,11 +1135,12 @@ def optimize_deck(current_ids, cards, banned_id, opponent_teams, rules=None,
         return result
 
     def seed_team(order):
-        ids, bases = [], set()
+        ids, bases, seals = [], set(), Counter()
         for cid in order:
-            if known[cid]['base_id'] not in bases:
+            if known[cid]['base_id'] not in bases and seals[known[cid]['seal']] < MAX_SAME_SEAL:
                 ids.append(cid)
                 bases.add(known[cid]['base_id'])
+                seals[known[cid]['seal']] += 1
             if len(ids) == 4:
                 return tuple(ids)
 
@@ -1150,7 +1156,7 @@ def optimize_deck(current_ids, cards, banned_id, opponent_teams, rules=None,
             seeds.append(seed_team(front + pool_ids))
     coarse = max(1, min(8, int(rules.get('search_samples', 2))))
     scored = {}
-    for ids in dict.fromkeys(seeds):
+    for ids in dict.fromkeys(s for s in seeds if s and valid(s)):
         score = evaluate(ids, coarse)
         if score:
             scored[ids] = score
@@ -2195,7 +2201,9 @@ def legal_replacement(current_ids, cards, banned_id):
     for index, cid in enumerate(chosen):
         if cid is not None:
             continue
-        candidate = next((c for c in eligible if int(c['id']) not in used and int(c['card_id']) not in base), None)
+        seals = Counter(int(known[i].get('battle_seal_id') or 0) for i in chosen if i is not None)
+        candidate = next((c for c in eligible if int(c['id']) not in used and int(c['card_id']) not in base
+                          and seals[int(c.get('battle_seal_id') or 0)] < MAX_SAME_SEAL), None)
         if candidate is None:
             return None
         cid = int(candidate['id'])
