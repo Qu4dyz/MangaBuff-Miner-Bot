@@ -88,6 +88,7 @@ class UpdateTests(unittest.TestCase):
         self.settings['arena_rank_mode'] = False
         self.bot._alive = Mock(return_value=True)
         self.bot._touch_heartbeat = Mock()
+        self.bot._pause = Mock()
         self.bot.check_and_claim_quests = Mock()
         self.bot.check_arena_rank_promotion = Mock()
         self.bot.start_battle = Mock(return_value='battle-url')
@@ -346,6 +347,35 @@ class DesktopLifecycleTests(unittest.TestCase):
         bot.stop()
         self.assertFalse(bot.running)
         self.assertTrue(bot._module_cancelled())
+
+    def _arena_bot(self):
+        import threading
+
+        bot = object.__new__(MangaMinerBot)
+        bot.running = True
+        bot.log = Mock()
+        bot._module_abort = threading.Event()
+        bot._heartbeat_lock = threading.Lock()
+        bot.check_arena_rank_promotion = Mock()
+        bot.check_and_claim_quests = Mock()
+        return bot
+
+    def test_pause_returns_as_soon_as_module_is_aborted(self):
+        import threading
+        import time
+
+        bot = self._arena_bot()
+        threading.Timer(0.3, bot._module_abort.set).start()
+        started = time.monotonic()
+        bot._pause(60)
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_farm_batch_stops_on_its_time_budget(self):
+        bot = self._arena_bot()
+        bot.start_battle = Mock(return_value=None)
+        with patch('engine.ARENA_BATCH_SECONDS', 0):
+            bot.run_farm_loop(prepared=True)
+        bot.start_battle.assert_not_called()
 
     def test_panel_snapshot_keeps_last_known_values(self):
         state = {'panel': {'ore': 500, 'diamonds': 12, 'energy': 3}}

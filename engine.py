@@ -53,6 +53,11 @@ TIER_ICONS = {
     "Легенда": "🔥",
 }
 
+# Arena module limit, and how long one batch of battles may run inside it.
+# A 30-battle batch with human-like pauses takes ~15 min, so it is cut by time.
+ARENA_MODULE_SECONDS = 20 * 60
+ARENA_BATCH_SECONDS = 12 * 60
+
 
 # ==========================================
 # BOT ENGINE
@@ -2864,8 +2869,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         cap_reached = False
         attempts = 0
         max_battles = max(1, min(50, int(DataManager.get_setting('arena_batch_battles', 30))))
+        # Finish the batch well inside the module time limit; the rest goes into the next batch
+        batch_ends_at = time.monotonic() + ARENA_BATCH_SECONDS
 
-        while self._alive() and battles_done < max_battles and attempts < max_battles + 5:
+        while (self._alive() and battles_done < max_battles and attempts < max_battles + 5
+               and time.monotonic() < batch_ends_at):
             for _ in range(int(random.uniform(4.5, 12.2) * 4)):
                 if not self._alive():
                     break
@@ -2883,7 +2891,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 break
             elif not match_url:
                 print("Matchmaking transient — backing off 25s, will retry.")
-                time.sleep(25)
+                self._pause(25)
                 continue
 
             result = self.check_battle_result(match_url)
@@ -2892,7 +2900,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 if consecutive_unknown >= 3:
                     self.log("⚠️ 3 consecutive unparseable battle results — stopping.")
                     break
-                time.sleep(random.uniform(10, 15))
+                self._pause(random.uniform(10, 15))
                 continue
 
             consecutive_unknown = 0
@@ -2936,11 +2944,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             if battles_done >= next_micro_break:
                 brk = random.uniform(35, 75)
                 print(f"😴 Micro-break ({brk:.0f}s)...")
-                time.sleep(brk)
+                self._pause(brk)
                 next_micro_break = battles_done + random.randint(10, 15)
 
-            delay = random.uniform(10, 18)
-            time.sleep(delay)
+            self._pause(random.uniform(10, 18))
 
         # Summary
         if battles_done > 0:
@@ -3200,6 +3207,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self.running = False
         self.log(tr("log_mining_finish"))
 
+    def _pause(self, seconds):
+        """Sleep inside a module; returns early on stop or module abort."""
+        end = time.monotonic() + seconds
+        while self._alive() and time.monotonic() < end:
+            self._touch_heartbeat()
+            time.sleep(0.25)
+
     def _sleep_alive(self, seconds):
         """Sleep in 1 s slices, keeping the watchdog fed and honoring stop()."""
         end = time.monotonic() + seconds
@@ -3303,7 +3317,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
     MANUAL_MODULES = {
         "daily": ("Ежедневные награды", 3 * 60),
         "mining": ("Шахта", 25 * 60),
-        "arena": ("Арена", 15 * 60),
+        "arena": ("Арена", ARENA_MODULE_SECONDS),
         "ads": ("Реклама", 5 * 60),
         "tower": ("Башня Разлома", 8 * 60),
         "reading": ("Чтение глав", 20 * 60),
@@ -3570,7 +3584,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 arena_now = time.time()
                 if arena_now >= getattr(self, '_arena_next_check_at', 0):
                     self._arena_next_check_at = arena_now + 30 * 60
-                    self._run_module('arena', self.run_arena_cycle, 15 * 60)
+                    self._run_module('arena', self.run_arena_cycle, ARENA_MODULE_SECONDS)
 
 
                 # 2. Daily Ads check (3x7 💎)
