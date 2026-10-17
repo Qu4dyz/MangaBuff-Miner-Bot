@@ -505,5 +505,29 @@ class FriendlyJournalTests(unittest.TestCase):
             self.assertNotIn(secret, text)
 
 
+class ProxyRetryTests(unittest.TestCase):
+    def _session(self, outcomes):
+        from http_session import GuardedSession
+
+        session = object.__new__(GuardedSession)
+        session.should_abort = None
+        session.on_heartbeat = None
+        session._raw_request_once = Mock(side_effect=outcomes)
+        return session
+
+    @patch('http_session.random.uniform', return_value=0)
+    def test_tunnel_failure_is_retried(self, _):
+        session = self._session([RuntimeError('curl: (7) CONNECT tunnel failed, response 502'), 'ok'])
+        self.assertEqual(session._raw_request('POST', 'https://mangabuff.ru/battle/fight/start'), 'ok')
+        self.assertEqual(session._raw_request_once.call_count, 2)
+
+    @patch('http_session.random.uniform', return_value=0)
+    def test_other_errors_are_not_retried(self, _):
+        session = self._session([RuntimeError('HTTP 500')])
+        with self.assertRaises(RuntimeError):
+            session._raw_request('GET', 'https://mangabuff.ru/')
+        self.assertEqual(session._raw_request_once.call_count, 1)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -303,7 +303,28 @@ class GuardedSession:
         self._last_request_at = 0.0
         self._last_request_mono = 0.0
 
+    # The proxy failed to open the tunnel: the request never reached the site,
+    # so even a POST is safe to send again.
+    PROXY_RETRY_MARKERS = ("CONNECT tunnel failed", "Proxy CONNECT aborted", "curl: (7)")
+    PROXY_RETRIES = 2
+
     def _raw_request(self, method, url, **kwargs):
+        """Request with a couple of quick retries when the proxy drops the tunnel."""
+        for attempt in range(self.PROXY_RETRIES + 1):
+            try:
+                return self._raw_request_once(method, url, **kwargs)
+            except Exception as exc:
+                text = str(exc)
+                if attempt >= self.PROXY_RETRIES or not any(m in text for m in self.PROXY_RETRY_MARKERS):
+                    raise
+                if self.should_abort and self.should_abort():
+                    raise
+                end = time.monotonic() + random.uniform(2.0, 4.0) * (attempt + 1)
+                while time.monotonic() < end:
+                    self._heartbeat()
+                    time.sleep(0.25)
+
+    def _raw_request_once(self, method, url, **kwargs):
         """
         Run underlying request with a hard wall-clock deadline.
         Critical: never use `with ThreadPoolExecutor()` — on timeout its
