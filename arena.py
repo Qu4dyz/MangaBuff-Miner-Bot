@@ -1415,9 +1415,20 @@ class ManualArenaController:
         except Exception:
             pass
 
+    def dump_raw(self, state_response):
+        """Keep the latest cup page and first state response, to see every field the cup sends. Never raises."""
+        try:
+            if self.path:
+                self.path.with_name('cup_page_dump.html').write_text(getattr(self, '_page_html', ''), encoding='utf-8')
+                self.path.with_name('cup_state_dump.json').write_text(
+                    json.dumps(state_response, ensure_ascii=False, default=str), encoding='utf-8')
+        except Exception:
+            pass
+
     def fight(self, url, end, cancelled):
         response = get_html(self.bot.session, safe_url(url), timeout=10)
         response.raise_for_status()
+        self._page_html = response.text
         soup = BeautifulSoup(response.text, 'html.parser')
         root = soup.select_one('[data-fight-id][data-manual-state-url]')
         if root is None:
@@ -1494,6 +1505,7 @@ class ManualArenaController:
                 if not probed:
                     probed = True
                     self.probe_controls(root)
+                    self.dump_raw(data)
             fresh_post = False
             if self.state.get('fight_status') == 'finished':
                 return finished()
