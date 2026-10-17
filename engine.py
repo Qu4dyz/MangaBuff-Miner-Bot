@@ -3503,8 +3503,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         self._card_dry_chapters = 0 if cards_found > before else getattr(self, "_card_dry_chapters", 0) + 10
                         if self._card_dry_chapters >= 30:
                             DataManager.set_setting("bonus_cards_off_date", str(self._msk_now().date()))
-                            self.log("🃏 Бонусные карты не выпадают — похоже, аккаунту они недоступны. "
-                                     "До завтра читаю только ради квеста на 75 глав.")
+                            self.log("🃏 Бонусные карты не выпадают — похоже, аккаунту они пока недоступны "
+                                     "(у новых аккаунтов сайт ставит дополнительные условия). "
+                                     "До завтра читаю только ради 75 глав за алмазы.")
                         if not fresh_r.get("card_ready", True):
                             card_wait_sec = parse_card_cooldown_seconds(fresh_r.get("card_cooldown", "")) or (45 * 60)
                         else:
