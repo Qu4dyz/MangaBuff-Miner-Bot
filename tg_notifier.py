@@ -681,10 +681,13 @@ class TelegramNotifier:
 
         interval_sec = max(900, int(float(interval_hours) * 3600))  # At least 15 min
         now = time.time()
-        if not force and (now - self._last_heartbeat_time < interval_sec):
+        # Kept on disk: an in-memory stamp made every restart send a report
+        last = max(self._last_heartbeat_time, float(DataManager.get_setting("tg_last_heartbeat_at") or 0))
+        if not force and (now - last < interval_sec):
             return
 
         self._last_heartbeat_time = now
+        DataManager.set_setting("tg_last_heartbeat_at", now)
 
         ore_dia = (balance // 100) if balance else 0
         dia_part = f" | 💎 Баланс: <b>{diamonds:,}</b>" if diamonds is not None else ""

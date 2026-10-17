@@ -3079,83 +3079,90 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         consecutive_errors = 0
         initial_hits = None
 
-        while self._alive():
-            try:
-                response = self.session.post(self.API_URL, json={"hits": 1}, timeout=5)
+        # The mine page allows about one hit per second (tap animation + request); the global
+        # 1.35-2.2 s spacing between requests made mining twice as slow as a person.
+        pace = (self.session.min_request_interval, self.session.max_request_jitter)
+        self.session.min_request_interval, self.session.max_request_jitter = 0.55, 0.35
+        try:
+            while self._alive():
+                try:
+                    response = self.session.post(self.API_URL, json={"hits": 1}, timeout=5)
 
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                        if data.get('status') is False:
-                            self.log(f"⚠️ Mine rejected: {data}")
+                    if response.status_code == 200:
+                        try:
+                            data = response.json()
+                            if data.get('status') is False:
+                                self.log(f"⚠️ Mine rejected: {data}")
+                                time.sleep(2)
+                                continue
+
+                            ore = data.get('ore', 0)
+                            hits_left = data.get('hits_left', 0)
+                            added = data.get('added', 0)
+
+                            if initial_hits is None:
+                                initial_hits = max(hits_left, 100)
+
+                            self.current_balance = ore
+                            clicks += 1
+                            total_added += added
+                            consecutive_errors = 0
+
+                            self.update_stats(energy=hits_left, balance=ore)
+                            prog = 1.0 - (hits_left / float(initial_hits))
+                            self.update_progress(max(0.0, min(1.0, prog)))
+
+                            if hits_left <= 0:                           
+                                self.update_stats(energy=0, balance=ore)
+                                break
+
+                            time.sleep(random.uniform(0.30, 0.50))
+
+                        except Exception as e:
+                            self.log(f"⚠️ JSON Error: {e}")
                             time.sleep(2)
                             continue
 
-                        ore = data.get('ore', 0)
-                        hits_left = data.get('hits_left', 0)
-                        added = data.get('added', 0)
-
-                        if initial_hits is None:
-                            initial_hits = max(hits_left, 100)
-
-                        self.current_balance = ore
-                        clicks += 1
-                        total_added += added
-                        consecutive_errors = 0
-
-                        self.update_stats(energy=hits_left, balance=ore)
-                        prog = 1.0 - (hits_left / float(initial_hits))
-                        self.update_progress(max(0.0, min(1.0, prog)))
-
-                        if hits_left <= 0:                           
-                            self.update_stats(energy=0, balance=ore)
+                    else:
+                        if response.status_code == 403:
+                            self.log("⚡ Ore energy depleted (403). Moving to battles.")
+                            self.update_stats(energy=0)
                             break
-
-                        time.sleep(random.uniform(0.30, 0.50))
-
-                    except Exception as e:
-                        self.log(f"⚠️ JSON Error: {e}")
-                        time.sleep(2)
-                        continue
-
-                else:
-                    if response.status_code == 403:
-                        self.log("⚡ Ore energy depleted (403). Moving to battles.")
-                        self.update_stats(energy=0)
-                        break
-                    elif response.status_code == 419:
-                        self.log("♻️ Session expired (419). Auto-refreshing...")
-                        if self.login_and_steal_keys():
-                            self.log("✅ Re-login successful! Resuming...")
+                        elif response.status_code == 419:
+                            self.log("♻️ Session expired (419). Auto-refreshing...")
+                            if self.login_and_steal_keys():
+                                self.log("✅ Re-login successful! Resuming...")
+                                consecutive_errors = 0
+                                time.sleep(1)
+                                continue
+                            else:
+                                self.log("❌ Re-login failed. Stopping.")
+                                break
+                        elif response.status_code == 429:
+                            self.log("⚠️ Rate limited (429). Backing off 30s...")
+                            time.sleep(30)
                             consecutive_errors = 0
-                            time.sleep(1)
                             continue
                         else:
-                            self.log("❌ Re-login failed. Stopping.")
-                            break
-                    elif response.status_code == 429:
-                        self.log("⚠️ Rate limited (429). Backing off 30s...")
-                        time.sleep(30)
-                        consecutive_errors = 0
-                        continue
-                    else:
-                        self.log(f"⚠️ Server: {response.status_code}")
-                        consecutive_errors += 1
-                        time.sleep(2)
-                        if consecutive_errors > 3:
-                            self.log(tr("log_session_restart"))
-                            if self.login_and_steal_keys():
-                                consecutive_errors = 0
-                                continue
-                            break
+                            self.log(f"⚠️ Server: {response.status_code}")
+                            consecutive_errors += 1
+                            time.sleep(2)
+                            if consecutive_errors > 3:
+                                self.log(tr("log_session_restart"))
+                                if self.login_and_steal_keys():
+                                    consecutive_errors = 0
+                                    continue
+                                break
 
-            except Exception as e:
-                err_name = type(e).__name__
-                if "Timeout" in err_name or "timeout" in str(e).lower():
-                    self.log(tr("log_timeout"))
-                else:
-                    self.log(tr("log_error_generic", e=e))
-                    time.sleep(1)
+                except Exception as e:
+                    err_name = type(e).__name__
+                    if "Timeout" in err_name or "timeout" in str(e).lower():
+                        self.log(tr("log_timeout"))
+                    else:
+                        self.log(tr("log_error_generic", e=e))
+                        time.sleep(1)
+        finally:
+            self.session.min_request_interval, self.session.max_request_jitter = pace
 
         if clicks > 0:
             self.log(tr("log_mining_summary", clicks=clicks, added=total_added))
