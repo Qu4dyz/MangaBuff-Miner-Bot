@@ -314,28 +314,17 @@ class ArenaEnergyModelTests(unittest.TestCase):
         self.assertEqual(points[8], (2000.0, 49))  # loss costs 1
         self.assertNotIn(99, points)               # opponent cards are not ours
 
-    def test_tired_card_recovers_with_time_and_caps_at_full(self):
-        import arena
-        points = {1: (0.0, 9), 2: (0.0, 95)}
-        est = arena.projected_energy(points, regen_per_hour=4, now=3 * 3600)
-        self.assertEqual(est[1], 21)
-        self.assertEqual(est[2], 100)
-        self.assertGreaterEqual(est[1], arena.ENERGY_TO_FIGHT)
+    def test_energy_is_full_after_a_4_hour_reset_mark(self):
+        from datetime import datetime, timedelta, timezone
 
-    def test_regen_is_learned_only_from_meaningful_reads(self):
         import arena
-        points = {1: (0.0, 9), 2: (0.0, 50), 3: (6800.0, 20), 4: (0.0, 30)}
-        fresh = {1: 29, 2: 100, 3: 40, 4: 25}  # 1: +20 in 2h; 2: capped; 3: too soon; 4: dropped
-        regen = arena.learn_regen(None, points, fresh, now=7200)
-        self.assertEqual(regen, {'per_hour': 10.0, 'samples': 1})
-        again = arena.learn_regen(regen, {1: (7200.0, 29)}, {1: 39}, now=7200 + 3600)
-        self.assertEqual(again['samples'], 2)
-        self.assertAlmostEqual(again['per_hour'], 10.0)
-
-    def test_without_samples_the_prior_is_used(self):
-        import arena
-        regen = arena.learn_regen({}, {}, {1: 50})
-        self.assertEqual(regen, {'per_hour': arena.REGEN_DEFAULT_PER_HOUR, 'samples': 0})
+        msk = timezone(timedelta(hours=3))
+        mark = datetime(2026, 10, 18, 12, 0, tzinfo=msk).timestamp()  # 12:00 MSK reset
+        points = {1: (mark - 600, 3), 2: (mark + 600, 7)}             # read at 11:50 and 12:10
+        est = arena.projected_energy(points, now=mark + 3600)         # now 13:00
+        self.assertEqual(est[1], arena.ENERGY_MAX)  # a reset passed since the read
+        self.assertEqual(est[2], 7)                 # no reset since: still tired
+        self.assertEqual(arena.last_energy_reset(mark + 3 * 3600), mark)
 
 
 class DesktopLifecycleTests(unittest.TestCase):

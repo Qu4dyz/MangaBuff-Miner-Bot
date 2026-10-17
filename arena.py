@@ -16,7 +16,7 @@ import statistics
 import tempfile
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from itertools import combinations
 from math import isfinite, sqrt
 from pathlib import Path
@@ -924,8 +924,6 @@ def normalized_owned(cards, battles, current_energy=None):
 # saw them, plus regeneration learned from the account's own observations.
 ENERGY_MAX = 100
 ENERGY_TO_FIGHT = 10
-REGEN_DEFAULT_PER_HOUR = 4.0  # prior until real samples exist
-REGEN_MIN_GAP_HOURS = 0.25
 
 
 def last_energy_points(battles, observations):
@@ -954,36 +952,17 @@ def last_energy_points(battles, observations):
     return points
 
 
-def projected_energy(points, regen_per_hour, now=None):
-    """Estimate current energy from the last known points and the regen rate."""
+def last_energy_reset(now=None):
+    """Most recent full-energy moment: the site resets energy to 100 at 00/04/08/12/16/20 MSK."""
     now = time.time() if now is None else now
-    rate = max(0.0, float(regen_per_hour or 0))
-    return {cid: int(min(ENERGY_MAX, value + rate * max(0.0, now - at) / 3600))
-            for cid, (at, value) in points.items()}
+    msk = datetime.fromtimestamp(now, timezone(timedelta(hours=3)))
+    return msk.replace(hour=msk.hour - msk.hour % 4, minute=0, second=0, microsecond=0).timestamp()
 
 
-def learn_regen(regen, points, fresh, now=None):
-    """Update the learned regen rate from fresh exact reads of the active fighters.
-
-    A sample needs a known earlier point, enough time in between and a value
-    below the cap (a full card hides how fast it got there). Returns the new
-    {'per_hour', 'samples'} state.
-    """
-    now = time.time() if now is None else now
-    rate = float((regen or {}).get('per_hour') or REGEN_DEFAULT_PER_HOUR)
-    samples = int((regen or {}).get('samples') or 0)
-    for cid, value in (fresh or {}).items():
-        prev = points.get(int(cid))
-        if not prev:
-            continue
-        hours = (now - prev[0]) / 3600
-        if hours < REGEN_MIN_GAP_HOURS or value >= ENERGY_MAX or value <= prev[1]:
-            continue
-        sample = (value - prev[1]) / hours
-        rate = sample if samples == 0 else 0.7 * rate + 0.3 * sample
-        rate = max(0.5, min(60.0, rate))
-        samples += 1
-    return {'per_hour': round(rate, 3), 'samples': samples}
+def projected_energy(points, now=None):
+    """Current energy from the last known points: full if a reset mark passed since then."""
+    reset = last_energy_reset(now)
+    return {cid: ENERGY_MAX if at < reset else int(value) for cid, (at, value) in points.items()}
 
 
 # ==========================================
@@ -1860,7 +1839,8 @@ class ArenaManagementMixin:
         fighters = home.select('.battle-home__fighter')
         if len(fighters) < 4 and not (ban and banned is None):
             # New accounts have no arena deck yet: say what to do and look again in 6 hours
-            self.log('🃏 Арена: на аккаунте ещё нет колоды из 4 карт. Собери её на сайте: Карточные бои → Колоды.')
+            self.log('🃏 Арена: на аккаунте ещё нет колоды из 4 карт. Пробуди 4 карты в «Пробуждении» (первые 4 бесплатно) '
+                     'и собери из них колоду: Карточные бои → Колоды.')
             DataManager.set_setting('arena_no_deck', True)
             self._arena_next_check_at = time.time() + 6 * 3600
             return False
@@ -1884,13 +1864,11 @@ class ArenaManagementMixin:
                 raise ValueError('Unknown fighter energy')
             energy[cid] = int(m[1])
         state = self.management_state()
-        # Bench cards: last seen energy plus regeneration since then
+        # Bench cards: last seen energy, or full if a 4-hour reset mark has passed since
         points = last_energy_points(load_observations(os.path.join(BASE_DIR, 'arena_observations.json')),
                                     state.get('energy_observations', {}))
-        regen = learn_regen(state.get('energy_regen'), points, energy)
-        for cid, value in projected_energy(points, regen['per_hour']).items():
+        for cid, value in projected_energy(points).items():
             energy.setdefault(cid, value)
-        self.management_save({'energy_regen': regen})
         cards = self.load_arena_inventory(form)
         self.management_save({'inventory': cards, 'inventory_at': time.time()})
         protected = self.protect_arena_cards(cards, current, current)
@@ -2393,7 +2371,7 @@ class ArenaAutomationMixin(ArenaManagementMixin):
                     return
         if self._arena_low_energy:
             self.log('⏳ Арена: энергия карты ниже 10 — ждём восстановления.')
-            self._arena_next_check_at = time.time() + 4 * 3600
+            self._arena_next_check_at = last_energy_reset() + 4 * 3600 + 120  # just after the next full reset
             return
         self.run_farm_loop(prepared=True)
         if (getattr(self, '_arena_min_energy', 100) or 0) < 10 or getattr(self, '_arena_buff_depleted', False):

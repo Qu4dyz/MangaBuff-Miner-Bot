@@ -3389,8 +3389,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if name == "daily":
             self.ping_daily_visit()
             if not self._find_active_claim_url():
-                return ("визит засчитан. Награды из календаря сейчас нет — она уже забрана "
-                        "или на этом аккаунте календарь не открыт")
+                return ("визит засчитан. Награды из календаря сейчас нет: она уже забрана, или календарь "
+                        "ещё закрыт — он открывается с PRO, донатом от 300 ₽ или через 3 месяца при рейтинге от 300")
             self.claim_daily_reward()
             return "визит засчитан, награда дня забрана"
         if name == "mining":
