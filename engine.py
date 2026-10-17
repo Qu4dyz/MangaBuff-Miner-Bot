@@ -580,7 +580,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
                 # If this is not the first ad in this session, wait for video ad duration (cooldown ~20s)
                 if i > 0:
-                    delay = random.uniform(18.0, 22.0)
+                    delay = random.uniform(21.0, 25.0)  # the site's ad cooldown is ~20 s; 18 s got 429s
                     for _ in range(int(delay * 4)):
                         if not self.running:
                             break
