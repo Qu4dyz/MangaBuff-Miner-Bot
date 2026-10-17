@@ -305,7 +305,9 @@ class GuardedSession:
 
     # The proxy failed to open the tunnel: the request never reached the site,
     # so even a POST is safe to send again.
-    PROXY_RETRY_MARKERS = ("CONNECT tunnel failed", "Proxy CONNECT aborted", "curl: (7)")
+    # "Connection timed out" is curl's connect-phase timeout, also before anything is sent
+    # ("Operation timed out" is not: the request may already be on the server).
+    PROXY_RETRY_MARKERS = ("CONNECT tunnel failed", "Proxy CONNECT aborted", "curl: (7)", "Connection timed out after")
     PROXY_RETRIES = 2
 
     def _raw_request(self, method, url, **kwargs):

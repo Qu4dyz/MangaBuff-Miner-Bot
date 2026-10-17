@@ -522,6 +522,15 @@ class ProxyRetryTests(unittest.TestCase):
         self.assertEqual(session._raw_request_once.call_count, 2)
 
     @patch('http_session.random.uniform', return_value=0)
+    def test_connect_timeout_is_retried_but_read_timeout_is_not(self, _):
+        session = self._session([RuntimeError('curl: (28) Connection timed out after 10002 milliseconds'), 'ok'])
+        self.assertEqual(session._raw_request('POST', 'https://mangabuff.ru/battle/cup/action'), 'ok')
+        session = self._session([RuntimeError('curl: (28) Operation timed out after 10002 milliseconds with 0 bytes received')])
+        with self.assertRaises(RuntimeError):
+            session._raw_request('POST', 'https://mangabuff.ru/battle/cup/action')
+        self.assertEqual(session._raw_request_once.call_count, 1)
+
+    @patch('http_session.random.uniform', return_value=0)
     def test_other_errors_are_not_retried(self, _):
         session = self._session([RuntimeError('HTTP 500')])
         with self.assertRaises(RuntimeError):
