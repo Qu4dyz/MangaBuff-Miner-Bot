@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import re
 import time
+from datetime import datetime, timedelta, timezone
+
 from bs4 import BeautifulSoup
 from data_management import DataManager
 
 
+def _msk_today():
+    return datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+
+
 class ClubAutomationMixin:
     """Mixin for MangaMinerBot providing automated club contributions."""
+
+    def club_check_interval(self) -> int:
+        """Seconds until the next club visit: crystals are a daily 10/10, the wanted card rotates."""
+        today = _msk_today()
+        if DataManager.get_setting("club_none_date") == today:
+            return 6 * 3600  # not in a club: looked once today
+        if DataManager.get_setting("club_crystals_date") == today:
+            return 3 * 3600  # crystals done: only the wanted-card alert is left
+        return 30 * 60
 
     def get_club_slug(self) -> str:
         """Detect and return user's club slug, cached in memory and settings."""
@@ -48,8 +63,12 @@ class ClubAutomationMixin:
         if not DataManager.get_setting("club_enabled", True):
             return
 
+        today = _msk_today()
+        if DataManager.get_setting("club_none_date") == today:
+            return
         slug = self.get_club_slug()
         if not slug:
+            DataManager.set_setting("club_none_date", today)
             self.log("ℹ️ Клуб не найден на /balance — вклады пропущены.")
             return
         boost_url = f"https://mangabuff.ru/clubs/{slug}/boost"
@@ -64,21 +83,24 @@ class ClubAutomationMixin:
             self.log(f"⚠️ Ошибка загрузки страницы клуба: {e}")
             return
 
-        # 1. Personal crystal contribution
-        self._process_crystal_contributions(soup, boost_url)
+        # 1. Personal crystal contribution (10 a day)
+        if DataManager.get_setting("club_crystals_date") != today:
+            if self._process_crystal_contributions(soup, boost_url):
+                DataManager.set_setting("club_crystals_date", today)
 
         # 2. Check rotating card contribution
         self._process_card_contribution_alert(soup, boost_url)
 
     def _process_crystal_contributions(self, soup, boost_url: str):
-        """Automate personal crystal contribution up to 10/10 as long as crystals exist."""
+        """Contribute crystals up to 10/10; True once today's limit is reached."""
         cryst_box = soup.select_one(".club-crystals")
         if not cryst_box:
-            return
+            return False
 
         contribute_url = cryst_box.get("data-contribute-url")
         if not contribute_url:
-            return
+            return False
+        finished = False
 
         contributed_count = 0
         total_exp = 0
@@ -89,8 +111,10 @@ class ClubAutomationMixin:
             progress_el = cryst_box.select_one(".club-crystals__progress")
             progress_text = progress_el.get_text(strip=True) if progress_el else ""
             if "10 / 10" in progress_text or "10/10" in progress_text:
+                finished = True
                 break
             if cryst_box.select_one(".club-crystals__complete"):
+                finished = True
                 break
 
             submit_btn = cryst_box.select_one(".club-crystals__submit")
@@ -148,6 +172,8 @@ class ClubAutomationMixin:
                 f"Получено опыта клубу: <b>+{total_exp}</b>",
                 silent=True,
             )
+
+        return finished
 
     def _process_card_contribution_alert(self, soup, boost_url: str):
         """Check rotating card requested by club; alert user via TG if available in collection."""

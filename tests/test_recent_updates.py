@@ -677,5 +677,34 @@ class TowerChoiceTests(unittest.TestCase):
         self.assertEqual(self._plan('progress'), 'normal')
 
 
+class ClubScheduleTests(unittest.TestCase):
+    def setUp(self):
+        self.settings = {}
+        get = patch('club.DataManager.get_setting', side_effect=lambda k, d=None: self.settings.get(k, d))
+        put = patch('club.DataManager.set_setting', side_effect=lambda k, v: self.settings.__setitem__(k, v))
+        get.start(); put.start()
+        self.addCleanup(get.stop); self.addCleanup(put.stop)
+        self.bot = object.__new__(MangaMinerBot)
+        self.bot.log = Mock()
+        self.bot.session = Mock()
+
+    def test_no_club_is_looked_up_once_a_day(self):
+        self.bot.get_club_slug = Mock(return_value=None)
+        self.bot.run_club_cycle()
+        self.bot.run_club_cycle()
+        self.assertEqual(self.bot.get_club_slug.call_count, 1)
+        self.assertEqual(self.bot.club_check_interval(), 6 * 3600)
+
+    def test_full_crystals_switch_to_rare_checks(self):
+        self.assertEqual(self.bot.club_check_interval(), 30 * 60)
+        html = '<div class="club-crystals" data-contribute-url="/c"><div class="club-crystals__progress">10 / 10</div></div>'
+        self.bot.get_club_slug = Mock(return_value='my-club')
+        self.bot.session.get.return_value = Mock(status_code=200, text=html)
+        self.bot._process_card_contribution_alert = Mock()
+        self.bot.run_club_cycle()
+        self.assertEqual(self.bot.club_check_interval(), 3 * 3600)
+        self.bot.session.post.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

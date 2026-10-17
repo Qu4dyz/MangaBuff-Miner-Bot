@@ -3684,7 +3684,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # 4.5. Club operations (crystals & card donation alerts)
                 if self.running and DataManager.get_setting("club_enabled", True):
                     now_ts = time.time()
-                    if now_ts - getattr(self, "_last_club_check_at", 0) >= 30 * 60:
+                    if now_ts - getattr(self, "_last_club_check_at", 0) >= self.club_check_interval():
                         self._run_module("club", self.run_club_cycle, 4 * 60)
                         self._last_club_check_at = now_ts
 
@@ -3702,7 +3702,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     ("Шахта", mine_wait_sec),
                     ("Реклама", ads_wait_sec),
                     ('Арена', max(1, getattr(self, '_arena_next_check_at', time.time()) - time.time())),
-                    ('Клуб (вклады)', max(60, int(30 * 60 - (time.time() - getattr(self, '_last_club_check_at', 0))))),
+                    ('Клуб (вклады)', max(60, int(self.club_check_interval() - (time.time() - getattr(self, '_last_club_check_at', 0))))),
                 ]
 
 
