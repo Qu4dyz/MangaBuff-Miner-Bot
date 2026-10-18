@@ -191,11 +191,13 @@ class FourthCheckTests(unittest.TestCase):
             with open(data, "w", encoding="utf-8") as f:
                 json.dump({"email": "old@x.ru", "password": "p", "club_slug": "old-club", "tg_token": "keep"}, f)
             open(os.path.join(d, "reading_state.json"), "w").close()
+            open(os.path.join(d, "arena_management.json"), "w").close()
             with patch.object(dm, "DATA_FILE", data), patch.object(dm, "SESSION_FILE", os.path.join(d, "s.json")):
                 dm.DataManager.clear_credentials()
                 dm.DataManager.switch_account("new@x.ru")
                 saved = dm.DataManager.load_json(data)
-            self.assertIsNone(saved["club_slug"])
+            self.assertNotIn("club_slug", saved)  # removed, so get_setting(key, default) gets the default
+            self.assertFalse(os.path.exists(os.path.join(d, "arena_management.json")))
             self.assertEqual(saved["tg_token"], "keep")
             self.assertFalse(os.path.exists(os.path.join(d, "reading_state.json")))
 

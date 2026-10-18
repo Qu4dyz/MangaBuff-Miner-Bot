@@ -26,16 +26,18 @@ class DataManager:
             return {}
 
     @staticmethod
-    def save_json(filename, data):
-        """Atomically saves JSON data to prevent file corruption on crash."""
+    def save_json(filename, data, drop=()):
+        """Atomically saves JSON data to prevent file corruption on crash; `drop` removes keys."""
         with _WRITE_LOCK:
-            DataManager._save_json_locked(filename, data)
+            DataManager._save_json_locked(filename, data, drop)
 
     @staticmethod
-    def _save_json_locked(filename, data):
+    def _save_json_locked(filename, data, drop=()):
         try:
             current = DataManager.load_json(filename)
             current.update(data)
+            for key in drop:
+                current.pop(key, None)
             dir_name = os.path.dirname(os.path.abspath(filename))
             os.makedirs(dir_name, exist_ok=True)
             
@@ -61,14 +63,14 @@ class DataManager:
     ACCOUNT_KEYS = ("arena_no_deck", "arena_rank_tracker", "bonus_cards_dry", "bonus_cards_off_date",
                     "club_crystals_date", "club_none_date", "club_slug", "notified_trade_ids",
                     "tower_no_squad", "tower_squad", "tracked_active_trades", "visit_ping_day")
-    ACCOUNT_FILES = ("reading_state.json", "manual_arena_state.json", "jackpot_cards.json")
+    ACCOUNT_FILES = ("reading_state.json", "manual_arena_state.json", "jackpot_cards.json", "arena_management.json")
 
     @staticmethod
     def switch_account(email):
         """Forget the previous account's state when a different account logs in."""
         previous = DataManager.get_setting("account_email")
         if previous and previous.lower() != email.lower():
-            DataManager.save_json(DATA_FILE, {k: None for k in DataManager.ACCOUNT_KEYS})
+            DataManager.save_json(DATA_FILE, {}, drop=DataManager.ACCOUNT_KEYS)
             base = os.path.dirname(os.path.abspath(DATA_FILE))
             for name in DataManager.ACCOUNT_FILES:
                 try:
