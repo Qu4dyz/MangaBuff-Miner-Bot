@@ -325,6 +325,8 @@ class GuardedSession:
                 while time.monotonic() < end:
                     self._heartbeat()
                     time.sleep(0.25)
+                if self.should_abort and self.should_abort():
+                    raise  # Stop came during the wait: no retry
 
     def _raw_request_once(self, method, url, **kwargs):
         """

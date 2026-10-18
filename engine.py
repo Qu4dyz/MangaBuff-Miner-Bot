@@ -2355,6 +2355,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             return None
 
         self.log(tr("log_tower_check"))
+        self._tower_page_ok = False  # lets a manual run tell "no expedition" from "page did not load"
         try:
             res = self.session.get("https://mangabuff.ru/tower", timeout=12)
             if res.status_code != 200:
@@ -2369,6 +2370,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             if not root:
                 self.log("⚠️ Could not locate Tower container.")
                 return None
+            self._tower_page_ok = True
 
             # HQ upgrades work even during an active expedition — spend crystals first.
             # No currency reserve: compare marginal value before each bounded purchase.
@@ -3474,16 +3476,20 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.run_arena_cycle()
             return "арена проверена, бои проведены, если карты были готовы"
         if name == "ads":
-            out = {"ads_count": 0}
+            out = {"ads_count": None}
             self._ads_step(msk_today, out)
             if out.get("available") is False:
                 return "на этом аккаунте реклама за алмазы недоступна"
+            if out["ads_count"] is None:
+                return ManualFailed("счётчик рекламы не загрузился — сколько засчитано, неизвестно. Запусти ещё раз позже")
             return f"просмотрено {out['ads_count']}/3 за сегодня"
         if name == "tower":
             left = self.check_tower_expedition()
             if left:
                 h, m = divmod(max(60, int(left)) // 60, 60)
                 return f"отряд в Башне, вернётся через {f'{h} ч {m} мин' if h else f'{m} мин'}"
+            if not getattr(self, "_tower_page_ok", True):
+                return ManualFailed("страница Башни не открылась — проверить не получилось. Запусти ещё раз позже")
             return "Башня проверена"
         if name == "reading":
             out = {"card_wait_sec": 45 * 60, "chapters_wait_sec": 0, "ch_read": 0,

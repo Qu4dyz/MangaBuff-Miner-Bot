@@ -293,5 +293,32 @@ class DeepCheckTests(unittest.TestCase):
         raw.request.assert_not_called()
 
 
+class PartialAnswerTests(unittest.TestCase):
+    def test_ads_counter_that_did_not_load_is_not_zero_of_three(self):
+        b = bot()
+        b.watch_daily_ads = Mock()
+        b.session.get.return_value = SimpleNamespace(status_code=500, text="")
+        self.assertEqual(type(b._manual_step("ads")).__name__, "ManualFailed")
+
+    def test_tower_page_that_did_not_load_is_not_checked(self):
+        b = bot()
+        b.session.get.return_value = SimpleNamespace(status_code=404, text="not found")
+        with patch("engine.DataManager.get_setting", return_value=True):
+            self.assertEqual(type(b._manual_step("tower")).__name__, "ManualFailed")
+
+    def test_stop_during_proxy_retry_wait_cancels_the_retry(self):
+        import threading
+        from http_session import GuardedSession
+        cancelled = threading.Event()
+        raw = Mock()
+        raw.request.side_effect = RuntimeError("CONNECT tunnel failed")
+        g = GuardedSession(raw, should_abort=cancelled.is_set)
+        g.PROXY_RETRY_MARKERS = ("CONNECT tunnel failed",)
+        with patch("http_session.random.uniform", return_value=0.001),                 patch("http_session.time.sleep", side_effect=lambda s: cancelled.set()):
+            with self.assertRaises(RuntimeError):
+                g._raw_request("POST", "https://mangabuff.ru/action", timeout=1)
+        self.assertEqual(raw.request.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
