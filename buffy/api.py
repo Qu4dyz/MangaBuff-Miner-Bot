@@ -411,6 +411,7 @@ class BuffyApi:
                 "diamonds_total": panel.get("diamonds_total"),
                 "updated_at": panel.get("updated_at"),
             },
+            "halloween": _halloween_state(today),
             "setup": {"bonus_cards_off": DataManager.get_setting("bonus_cards_off_date") == today,
                       "arena_no_deck": bool(DataManager.get_setting("arena_no_deck")),
                       "tower_no_squad": bool(DataManager.get_setting("tower_no_squad"))},
@@ -539,6 +540,16 @@ class BuffyApi:
         if self._quit:
             threading.Thread(target=self._quit, daemon=True).start()
         return True
+
+
+def _halloween_state(today):
+    """Candy balance (from the event page) and today's reading drops, or None outside the event."""
+    info = DataManager.get_setting("halloween_event_info")
+    if not info:
+        return None
+    day = DataManager.get_setting("halloween_candy_day") or {}
+    return {"balance": info.get("balance"), "reading_today": day.get("n", 0) if day.get("date") == today else 0,
+            "temperature": info.get("temperature")}
 
 
 def _tg_error(description):

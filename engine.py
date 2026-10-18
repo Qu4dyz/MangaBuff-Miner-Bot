@@ -1765,6 +1765,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 day = event_candy_day(self._msk_now().date())
                 day["n"] += 1
                 DataManager.set_setting("halloween_candy_day", day)
+                info = DataManager.get_setting("halloween_event_info") or {}
+                if info.get("balance") is not None:  # the page is re-read every 30 min; keep the count live meanwhile
+                    info["balance"] += 3 if drop.get("type") == "pumpkin" else 1
+                    DataManager.set_setting("halloween_event_info", info)
                 self.log(f"🍬 Ивент: подобрал {what} за чтение ({day['n']}/{EVENT_CANDY_DROPS} за сегодня)")
             else:
                 self.log(f"⚠️ Ивент: не удалось подобрать {what} (HTTP {r.status_code})")

@@ -710,6 +710,11 @@ class TelegramNotifier:
         ch_part = f"📖 Главы: <b>{chapters_str}</b> | " if chapters_str else ""
         msg += f"{ch_part}📺 Реклама: <b>{ads_count}/3</b> | 🃏 Карты: <b>{cards_count}</b>\n"
         msg += f"🏰 Башня: <b>{tower_str}</b>\n"
+        hw = DataManager.get_setting("halloween_event_info")
+        if hw and hw.get("balance") is not None:
+            day = DataManager.get_setting("halloween_candy_day") or {}
+            msg += (f"🎃 Конфеты: <b>{hw['balance']}</b> | за чтение сегодня {day.get('n', 0)}/35"
+                    f" | 🔥 котёл {hw.get('temperature') or 0}°\n")
         msg += f"💤 Следующее: <b>{next_action}</b> (~{next_wait_min} мин)"
         self.send_message(msg, silent=True)
 
