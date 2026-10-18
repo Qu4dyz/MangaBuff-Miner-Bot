@@ -2,7 +2,7 @@
 ; Build: ISCC /DAppVersion=11.0.0 /DDistDir=<folder with Buffy.exe> installer\buffy.iss
 
 #ifndef AppVersion
-  #define AppVersion "11.0.4"
+  #define AppVersion "11.0.5"
 #endif
 #ifndef DistDir
   #define DistDir "..\dist\Buffy"
