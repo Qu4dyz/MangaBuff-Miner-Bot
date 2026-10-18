@@ -1626,7 +1626,8 @@ class ManualArenaController:
                 self.sleep(min(2, max(0, end - self.clock())))
                 continue
             if data.get('status') != 'searching' and not joined:
-                if self.registration:
+                # A registration the server never confirmed must not block the cup for the rest of the evening
+                if self.registration and 0 <= time.time() - float(self.registration.get('at', 0)) < 90:
                     return 'registration_pending'
                 prepare = getattr(self.bot, 'prepare_arena_deck', None)
                 if callable(prepare) and not prepare():
@@ -1634,10 +1635,11 @@ class ManualArenaController:
                 if self.clock() >= end:
                     return 'budget'
                 joined = True
-                self.registration = {'signature': signature}
+                self.registration = {'signature': signature, 'at': time.time()}
                 self.save()
                 try:
-                    result = self.post(start_url, {}, getattr(self.bot, 'csrf_token', None) or token_el['content'])
+                    # The page's token is fresh; the bot's may be stale after a relogin (HTTP 419/422)
+                    result = self.post(start_url, {}, token_el['content'] or getattr(self.bot, 'csrf_token', None))
                     active = result.get('redirect_url') or (result.get('active_fight') or {}).get('url')
                     if active:
                         self.registration = None
@@ -1649,6 +1651,8 @@ class ManualArenaController:
                     elif champion_again:
                         return 'champion'  # no new attempt after the win: done for today
                 except Exception:
+                    self.registration = None  # the start was refused: nothing is pending
+                    self.save()
                     if champion_again:
                         return 'champion'
 

@@ -441,5 +441,39 @@ class UpdateCacheTests(unittest.TestCase):
         self.assertEqual(settings["app_ui_version"], __version__)
 
 
+class CupRegistrationTests(unittest.TestCase):
+    def runner(self, start_result):
+        from arena import ManualArenaController
+        page = ('<meta name="csrf-token" content="fresh"><div class="battle-tournament" '
+                'data-cup-queue-url="/battle/tournament/queue" data-cup-start-url="/battle/tournament/start"></div>')
+        b = Mock()
+        b.csrf_token = "stale"
+        b.prepare_arena_deck.return_value = True
+        clock = [0.0]
+        c = ManualArenaController(b, clock=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + max(s, 1)))
+        queue = {"status": "idle", "server_time": 100, "tournament": {"opens_at": 0, "closes_at": 1000, "attempt_number": 6}}
+        c.get = Mock(return_value=SimpleNamespace(json=lambda: queue))
+        c.post = Mock(side_effect=start_result)
+        with patch("arena.get_html", return_value=SimpleNamespace(text=page, raise_for_status=lambda: None)):
+            return c, c.run(max_seconds=20)
+
+    def test_refused_start_does_not_block_later_registrations(self):
+        c, result = self.runner(RuntimeError("HTTP Error 422"))
+        self.assertIsNone(c.registration)
+        self.assertEqual(c.post.call_args.args[2], "fresh")   # the page token, not the stale one
+
+    def test_old_unconfirmed_registration_expires(self):
+        from arena import ManualArenaController
+        c, _ = self.runner([{"status": "searching"}])
+        c.registration = {"signature": ["x"], "at": 0}          # left over from hours ago
+        c.post.reset_mock()
+        c.post.side_effect = [{"status": "searching"}]
+        with patch("arena.get_html", return_value=SimpleNamespace(
+                text='<meta name="csrf-token" content="fresh"><div class="battle-tournament" data-cup-queue-url="/battle/tournament/queue" data-cup-start-url="/battle/tournament/start"></div>',
+                raise_for_status=lambda: None)):
+            self.assertNotEqual(c.run(max_seconds=20), "registration_pending")
+        c.post.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
