@@ -406,6 +406,13 @@ class HalloweenReviewTests(unittest.TestCase):
         self.assertEqual(settings["halloween_candy_day"]["misses"], 0)
         self.assertGreaterEqual(out["event_wait_sec"], 8 * 60)
 
+    def test_after_a_bonus_card_read_candies_come_back_in_minutes(self):
+        settings = {"halloween_event_info": {"balance": 10}}
+        b, out = self.step(settings, {"chapters_read": 75, "chapters_max": 75, "cards_found": 5, "cards_max": 10,
+                                      "card_ready": True, "card_cooldown": ""}, 2)
+        self.assertFalse(b.read_manga_chapters.call_args.kwargs.get("for_event"))   # the card read
+        self.assertLessEqual(out["event_wait_sec"], 240)
+
     def test_cauldron_takes_the_balance_the_server_reports(self):
         from seasonal import HalloweenEventMixin
         html = '<div class="js-event-balance">10</div><b class="js-summer-heat-temp">100°</b><button class="js-summer-heat-take">x</button>'

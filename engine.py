@@ -3664,6 +3664,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 DataManager.set_setting("halloween_candy_day", day)
                 # a read the site did not accept says nothing about drops: retry later, not every 3 min
                 out["event_wait_sec"] = random.randint(190, 240) if accepted else random.randint(8 * 60, 12 * 60)
+            elif reading_stats and ch_read >= ch_max and self._event_candies_wanted():
+                # This pass read for a bonus card; come back for candies in minutes, not after its 45 min cooldown
+                out["event_wait_sec"] = random.randint(190, 240)
         finally:
             out.update(card_wait_sec=card_wait_sec, chapters_wait_sec=chapters_wait_sec, ch_read=ch_read, ch_max=ch_max, cards_found=cards_found, cards_max=cards_max)
 
