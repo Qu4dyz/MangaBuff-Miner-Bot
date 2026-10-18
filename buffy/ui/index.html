@@ -1043,7 +1043,7 @@ function bindSwitches(root = document) {
       if (ok === false) { inp.checked = !inp.checked; toast("Не удалось сохранить", "err"); return; }
       settings[key] = inp.checked;
       renderManual(lastManual);
-      if (key === "tg_enabled") renderTg();
+      if (key === "tg_enabled") { renderTg(); renderModules(); }
       $$(`input[data-setting="${key}"]`).forEach((o) => { if (o !== inp) o.checked = inp.checked; });
     });
   });
@@ -1052,7 +1052,7 @@ function bindSwitches(root = document) {
 function tgConnected() { return !!(settings.tg_token && settings.tg_chat_id); }
 
 function renderModules() {
-  const tg = tgConnected();
+  const tg = tgConnected() && settings.tg_enabled;
   $("#modules-grid").innerHTML = MODULES.map((m) => `
     <div class="card mod${m.soon ? " soon" : ""}" data-mod="${m.run || ""}">
       <div class="mod-head">
@@ -1282,6 +1282,7 @@ async function doLogin() {
     const r = await api.check_login($("#w-email").value, $("#w-pass").value);
     if (r.ok) { setMsg($("#w-login-msg"), "", true); wizard.show(2); }
     else if (/«Сеть»|^Ошибка соединения/.test(r.error || "")) {
+      if ($("#w-proxy-box").hidden) $("#w-proxy").value = settings.proxy || "";  // a retry must not wipe a saved proxy
       $("#w-proxy-box").hidden = false;
       setMsg($("#w-login-msg"), "Не удалось связаться с MangaBuff. Проверь интернет или укажи прокси выше и нажми «Войти» ещё раз.", false);
     }

@@ -62,6 +62,10 @@ ARENA_BATCH_SECONDS = 12 * 60
 # ==========================================
 # BOT ENGINE
 # ==========================================
+class ManualFailed(str):
+    """A manual-run summary that reports a failure (shown as an error, not a green tick)."""
+
+
 class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixin, SiteWatchMixin):
 
     def __init__(self, log_callback, progress_callback, stats_callback, proxy=None):
@@ -3413,7 +3417,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         summary = result.get("summary") or "не получилось — подробности в журнале"
         self.log(f"🟣 Ручной запуск «{title}»: {summary}")
         if self.manual_callback:
-            self.manual_callback(name, "done" if result.get("summary") else "error", summary)
+            ok = result.get("summary") and not isinstance(summary, ManualFailed)
+            self.manual_callback(name, "done" if ok else "error", summary)
         try:
             if self.running:  # after Stop/Logout this could log the old account back in
                 self.refresh_live_panel()
@@ -3432,21 +3437,23 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             elif self._msk_now().hour < 2:
                 visit = "визит сайт засчитывает только после 02:00 МСК — бот отметит его сам"
             else:
-                visit = "визит не засчитался — сайт не ответил, бот попробует ещё раз сам"
+                visit = "визит не засчитался — сайт не ответил"
             if not self._find_active_claim_url():
                 return (f"{visit}. Награды из календаря сейчас нет: она уже забрана, или календарь "
                         "ещё закрыт — он открывается с PRO, донатом от 300 ₽ или через 3 месяца при рейтинге от 300")
             self.claim_daily_reward()
-            if self.daily_reward_claimed:
+            if self.daily_reward_claimed and not visit.startswith("визит не"):
                 return f"{visit}, награда дня забрана"
-            return f"{visit}; награду дня забрать не получилось — бот попробует ещё раз сам"
+            reward = "награда дня забрана" if self.daily_reward_claimed else "награду дня забрать не получилось"
+            return ManualFailed(f"{visit}; {reward}. Работающий бот повторит сам, или запусти ещё раз позже")
         if name == "mining":
             out = {"energy": 0}
             self._mining_step(msk_today, out)
             if out.get("mined"):
                 return f"руда добыта, на балансе {int(self.current_balance or 0):,}".replace(",", " ")
             if out.get("energy"):
-                return f"добыть не получилось, энергии осталось {out['energy']} — бот попробует ещё раз через несколько минут"
+                return ManualFailed(f"добыть не получилось, энергии осталось {out['energy']}. "
+                                    "Работающий бот повторит через несколько минут, или запусти ещё раз позже")
             return (f"энергии шахты {out['energy']} — копать нечего. "
                     "Энергия появляется раз в день, после полуночи МСК")
         if name == "arena":

@@ -214,6 +214,7 @@ class UserReviewTests(unittest.TestCase):
         with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)):
             summary = b._manual_step("daily")
         self.assertIn("не засчитался", summary)
+        self.assertEqual(type(summary).__name__, "ManualFailed")
         self.assertIn("не получилось", summary)
 
     def test_proxy_check_does_not_call_a_protection_page_success(self):
@@ -228,6 +229,20 @@ class UserReviewTests(unittest.TestCase):
         api = BuffyApi()
         api._manual_bot = Mock()
         self.assertTrue(api.is_running())
+
+
+class ManualResultTests(unittest.TestCase):
+    def test_failed_manual_run_is_reported_as_error(self):
+        from engine import ManualFailed
+        import collections, threading
+        b = bot()
+        b._module_abort, b._heartbeat_lock = threading.Event(), threading.Lock()
+        b._manual_queue, b.fatal_exit, b.running = collections.deque(), Mock(), True
+        b.refresh_live_panel = Mock()
+        b.manual_callback = Mock()
+        b._manual_step = lambda name: ManualFailed("визит не засчитался")
+        b.run_manual_module("daily")
+        self.assertEqual(b.manual_callback.call_args.args[1], "error")
 
 
 if __name__ == "__main__":
