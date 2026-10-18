@@ -350,7 +350,12 @@ class EventCandyTests(unittest.TestCase):
     def test_candy_dropped_by_reading_is_picked_up(self):
         b = bot()
         b.session.post.return_value = SimpleNamespace(status_code=200)
-        b._take_event_drop({"token": "abc", "type": "candy"}, {"X-CSRF-TOKEN": "t"})
+        settings = {"halloween_event_info": {"balance": 10}}
+        b._msk_now = lambda: __import__("datetime").datetime(2026, 10, 18, 12)
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+            b._take_event_drop({"token": "abc", "type": "candy"}, {"X-CSRF-TOKEN": "t"})
+        self.assertEqual(settings["halloween_event_info"]["balance"], 11)
+        self.assertEqual(settings["halloween_candy_day"]["n"], 1)
         url = b.session.post.call_args.args[0]
         self.assertIn("/halloween/takeCandy", url)
         self.assertEqual(b.session.post.call_args.kwargs["data"], {"token": "abc"})
@@ -364,7 +369,7 @@ class EventReadingTests(unittest.TestCase):
         b._msk_now = lambda: dt.datetime(2026, 10, 18, 19)
         b.get_reading_stats = Mock(return_value={"chapters_read": 75, "chapters_max": 75, "cards_found": 10,
                                                  "cards_max": 10, "card_ready": False, "card_cooldown": ""})
-        b.read_manga_chapters = Mock()
+        b.read_manga_chapters = Mock(side_effect=lambda **kw: setattr(b, '_last_read_count', 2))  # read, no drop
         out = {"card_wait_sec": 0, "chapters_wait_sec": 0, "ch_read": 0, "ch_max": 75, "cards_found": 0, "cards_max": 10}
         with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
             for _ in range(8):
@@ -373,6 +378,43 @@ class EventReadingTests(unittest.TestCase):
         self.assertEqual(b.read_manga_chapters.call_count, 6)   # no drops: gives up after 6 reads
         self.assertTrue(b.read_manga_chapters.call_args.kwargs["for_event"])
         self.assertNotIn("event_wait_sec", o)
+
+
+class HalloweenReviewTests(unittest.TestCase):
+    def step(self, settings, stats, read_count):
+        import datetime as dt
+        b = bot()
+        b._msk_now = lambda: dt.datetime(2026, 10, 18, 12)
+        b.get_reading_stats = Mock(return_value=stats)
+        b.read_manga_chapters = Mock(side_effect=lambda **kw: setattr(b, "_last_read_count", read_count))
+        out = {"card_wait_sec": 0, "chapters_wait_sec": 0, "ch_read": 0, "ch_max": 75, "cards_found": 0, "cards_max": 10}
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+            b._reading_step(out)
+        return b, out
+
+    def test_candies_do_not_wait_for_bonus_cards_on_cooldown(self):
+        settings = {"halloween_event_info": {"balance": 10}}
+        b, out = self.step(settings, {"chapters_read": 75, "chapters_max": 75, "cards_found": 5, "cards_max": 10,
+                                      "card_ready": False, "card_cooldown": "40 мин"}, 2)
+        self.assertTrue(b.read_manga_chapters.call_args.kwargs.get("for_event"))
+
+    def test_failed_reads_back_off_but_do_not_end_the_day(self):
+        settings = {"halloween_event_info": {"balance": 10}}
+        stats = {"chapters_read": 75, "chapters_max": 75, "cards_found": 10, "cards_max": 10, "card_ready": False, "card_cooldown": ""}
+        for _ in range(8):
+            b, out = self.step(settings, stats, 0)
+        self.assertEqual(settings["halloween_candy_day"]["misses"], 0)
+        self.assertGreaterEqual(out["event_wait_sec"], 8 * 60)
+
+    def test_cauldron_takes_the_balance_the_server_reports(self):
+        from seasonal import HalloweenEventMixin
+        html = '<div class="js-event-balance">10</div><b class="js-summer-heat-temp">100°</b><button class="js-summer-heat-take">x</button>'
+        h = HalloweenEventMixin()
+        h.log, h.session = Mock(), Mock()
+        h.session.get.side_effect = lambda url, **kw: SimpleNamespace(status_code=200, text=html, json=lambda: {})
+        h.session.post.return_value = SimpleNamespace(status_code=200, json=lambda: {"balance": 15})
+        with patch("seasonal.DataManager.set_setting"):
+            self.assertEqual(h.run_halloween_event()["balance"], 15)
 
 
 if __name__ == "__main__":

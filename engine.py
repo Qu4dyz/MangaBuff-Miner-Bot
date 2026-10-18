@@ -3556,6 +3556,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
     def _reading_step(self, out):
         """One reading pass: chapters toward the daily quest and bonus-card drops; updates out in place."""
+        self._last_read_count = None  # stays None unless this pass reads (normal reads drop candies too)
         card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max = (out["card_wait_sec"], out["chapters_wait_sec"], out["ch_read"], out["ch_max"], out["cards_found"], out["cards_max"])
         try:
             reading_stats = self.get_reading_stats()
@@ -3649,14 +3650,20 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 chapters_wait_sec = random.randint(10 * 60, 15 * 60)
                 ch_read, ch_max = 0, 75
                 self.log("⚠️ Стата чтения недоступна — повтор через ~10–15 мин.")
-            if reading_stats and ch_read >= ch_max and cards_found >= cards_max and self._event_candies_wanted():
+            if (reading_stats and ch_read >= ch_max and self._last_read_count is None
+                    and self._event_candies_wanted()):
                 # Halloween: reading drops a candy at most every 3 min, up to 35 a day
                 before = event_candy_day(self._msk_now().date())["n"]
                 self.read_manga_chapters(target_count=2, for_event=True)
                 day = event_candy_day(self._msk_now().date())
-                day["misses"] = 0 if day["n"] > before else day.get("misses", 0) + 1
+                accepted = (self._last_read_count or 0) > 0
+                if day["n"] > before:
+                    day["misses"] = 0
+                elif accepted:
+                    day["misses"] = day.get("misses", 0) + 1
                 DataManager.set_setting("halloween_candy_day", day)
-                out["event_wait_sec"] = random.randint(190, 240)
+                # a read the site did not accept says nothing about drops: retry later, not every 3 min
+                out["event_wait_sec"] = random.randint(190, 240) if accepted else random.randint(8 * 60, 12 * 60)
         finally:
             out.update(card_wait_sec=card_wait_sec, chapters_wait_sec=chapters_wait_sec, ch_read=ch_read, ch_max=ch_max, cards_found=cards_found, cards_max=cards_max)
 

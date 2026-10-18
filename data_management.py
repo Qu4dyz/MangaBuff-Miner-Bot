@@ -62,7 +62,8 @@ class DataManager:
     # Remembered per account; app preferences (toggles, Telegram, proxy) stay shared
     ACCOUNT_KEYS = ("arena_no_deck", "arena_rank_tracker", "bonus_cards_dry", "bonus_cards_off_date",
                     "club_crystals_date", "club_none_date", "club_slug", "notified_trade_ids",
-                    "tower_no_squad", "tower_squad", "tracked_active_trades", "visit_ping_day")
+                    "tower_no_squad", "tower_squad", "tracked_active_trades", "visit_ping_day",
+                    "halloween_candy_day", "halloween_event_info", "halloween_watch_state")
     ACCOUNT_FILES = ("reading_state.json", "manual_arena_state.json", "jackpot_cards.json", "arena_management.json")
 
     @staticmethod

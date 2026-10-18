@@ -259,6 +259,17 @@ def parse_event_pack(html: str) -> Dict:
     }
 
 
+def _balance_after(res, old, gained):
+    """Balance the server reports after a claim, else the old one plus the known reward."""
+    try:
+        value = (res.json() or {}).get("balance")
+        if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().isdigit()):
+            return int(value)
+    except Exception:
+        pass
+    return old + gained if isinstance(old, int) else old
+
+
 class HalloweenEventMixin:
     """Free Halloween rewards that need no choice: the cauldron treat. Spending candies stays manual."""
 
@@ -275,5 +286,22 @@ class HalloweenEventMixin:
                                   timeout=15, headers={"X-Requested-With": "XMLHttpRequest", "Referer": self.EVENT_PACK_URL})
             info["claimed"] = r.status_code == 200
             self.log("🍬 Котёл кошмаров: " + ("забрал 5 конфет" if info["claimed"] else f"не получилось забрать (HTTP {r.status_code})"))
+            if info["claimed"]:
+                info["balance"] = _balance_after(r, info.get("balance"), 5)
+        reward = self._quest_reward_ready()
+        if reward:
+            msg = SiteWatchMixin._claim_halloween_reward(self)  # same claim as the owner-only watcher
+            self.log("🍬 Личная награда за расследование: " + msg)
+            if msg.startswith("забрал"):
+                info["balance"] = (info.get("balance") or 0) + 10
         DataManager.set_setting("halloween_event_info", info)
         return info
+
+    def _quest_reward_ready(self) -> bool:
+        try:
+            r = self.session.get("https://mangabuff.ru/halloween/quest/state", timeout=15,
+                                 headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"})
+            inv = (r.json() or {}).get("investigation") or {} if r.status_code == 200 else {}
+        except Exception:
+            return False
+        return bool(inv.get("reward_available") and not inv.get("reward_claimed"))
