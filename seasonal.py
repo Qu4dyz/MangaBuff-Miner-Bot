@@ -16,6 +16,7 @@ SEASONAL_PROBE_PATHS: Tuple[Tuple[str, str], ...] = (
     ("/halloween/pack", "Хэллоуин — паки"),
     ("/event", "Ивент — главная"),
     ("/event/boost", "Ивент — boost"),
+    ("/event/pack", "Ивент — праздничные активности"),
 )
 
 SETTING_ALERTED = "seasonal_alerted_paths"
@@ -117,7 +118,7 @@ class SeasonalWatchMixin:
 
 
 # Pages whose scripts are scanned for new site features (achievement easter eggs, event scripts).
-SITE_WATCH_PAGES = ("/", "/balance", "/battle", "/halloween/quest")
+SITE_WATCH_PAGES = ("/", "/balance", "/battle", "/halloween/quest", "/event/pack")
 SITE_WATCH_INTERVAL_SEC = 6 * 3600
 ACHIEVEMENT_RE = re.compile(r"/achievements/[\w-]+")
 
@@ -165,3 +166,80 @@ class SiteWatchMixin:
             self.notifier.notify_alert("на сайте появилось новое", "\n".join(lines))
             self.log("🔭 На сайте новое: " + ", ".join(new.get("achievements", []) + new.get("scripts", [])))
         return new
+
+    # ---------------------------------------------------------------- Halloween opening
+    HALLOWEEN_STATE_URL = "https://mangabuff.ru/halloween/quest/state"
+    HALLOWEEN_MILESTONES = (90, 95, 99)
+
+    def run_halloween_watch(self) -> List[str]:
+        """Owner-only: report the global candy goal, the holiday start and claim the personal reward."""
+        try:
+            res = self.session.get(self.HALLOWEEN_STATE_URL, timeout=15,
+                                   headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"})
+            data = res.json() if res.status_code == 200 else None
+        except Exception:
+            data = None
+        if not isinstance(data, dict) or not isinstance(data.get("event"), dict):
+            return []
+        ev, inv = data["event"], data.get("investigation") or {}
+        now = time.time()
+        prev = DataManager.get_setting("halloween_watch_state") or {}
+        cur = {"at": now, "returned": ev.get("returned_candies"), "percent": ev.get("percent"),
+               "remaining": ev.get("remaining"), "completed": bool(ev.get("completed")), "holiday": bool(ev.get("holiday_started")),
+               "locks": ev.get("locks"), "keys": sorted(set(ev) | set(data))}
+        DataManager.set_setting("halloween_watch_state", cur)
+        if not prev:
+            return []  # first look: only remember
+
+        events = halloween_changes(prev, cur, self.HALLOWEEN_MILESTONES)
+        if inv.get("reward_available") and not inv.get("reward_claimed"):
+            events.append("🍬 Личная награда: " + self._claim_halloween_reward())
+        if cur["holiday"] and not prev.get("holiday"):
+            # The moment it opens: look at everything new at once instead of in 6 h
+            DataManager.set_setting("site_watch_last_at", 0)
+            new = self.run_site_watch() or {}
+            found = new.get("scripts", []) + new.get("achievements", [])
+            events.append("🧩 Новое на сайте: " + (", ".join(found) if found else "новых скриптов пока не видно"))
+        if events:
+            self.notifier.notify_alert("Хэллоуин", "\n".join(events) + "\n<a href=\"https://mangabuff.ru/halloween/quest\">Открыть</a>")
+            self.log("🎃 " + " | ".join(events))
+        return events
+
+    def _claim_halloween_reward(self) -> str:
+        try:
+            page = self.session.get("https://mangabuff.ru/halloween/quest", timeout=15).text
+            m = re.search(r'<meta name="csrf-token" content="([^"]+)"', page)
+            r = self.session.post("https://mangabuff.ru/halloween/quest/reward", json={}, timeout=15, headers={
+                "Accept": "application/json", "X-Requested-With": "XMLHttpRequest",
+                "X-CSRF-TOKEN": m.group(1) if m else getattr(self, "csrf_token", "")})
+            return "забрал 10 конфет" if r.status_code == 200 else f"забрать не получилось (HTTP {r.status_code})"
+        except Exception as e:
+            return f"забрать не получилось ({e})"
+
+
+def halloween_changes(prev: Dict, cur: Dict, milestones=(90, 95, 99)) -> List[str]:
+    """Human lines for what changed between two snapshots of the Halloween event."""
+    out = []
+    pct, old_pct = float(cur.get("percent") or 0), float(prev.get("percent") or 0)
+    eta = ""
+    try:
+        rate = (cur["returned"] - prev["returned"]) / max(1.0, cur["at"] - prev["at"])
+        if rate > 0 and pct < 100:
+            mins = int(cur["remaining"] / rate / 60)
+            eta = f" — при нынешнем темпе 100% примерно через {mins // 60} ч {mins % 60} мин" if mins >= 60 else f" — 100% примерно через {mins} мин"
+    except (KeyError, TypeError, ZeroDivisionError):
+        pass
+    for m in milestones:
+        if old_pct < m <= pct:
+            out.append(f"📈 Собрано {pct:g}% конфет{eta}")
+            break
+    if cur.get("locks") != prev.get("locks") and prev.get("locks") is not None:
+        out.append(f"🔓 Замки изменились: {prev.get('locks')} → {cur.get('locks')}")
+    if cur.get("completed") and not prev.get("completed"):
+        out.append("🎃 Все конфеты собраны — Хэллоуин вот-вот начнётся!")
+    if cur.get("holiday") and not prev.get("holiday"):
+        out.append("🎉 ХЭЛЛОУИН НАЧАЛСЯ! Праздничные активности: https://mangabuff.ru/event/pack")
+    new_keys = sorted(set(cur.get("keys") or []) - set(prev.get("keys") or []))
+    if new_keys and prev.get("keys"):
+        out.append("🆕 В состоянии ивента появились поля: " + ", ".join(new_keys))
+    return out

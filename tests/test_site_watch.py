@@ -34,3 +34,38 @@ class SiteWatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HalloweenWatchTest(unittest.TestCase):
+    def state(self, returned, completed=False, holiday=False, reward=False):
+        return {"event": {"returned_candies": returned, "remaining": 1_000_000 - returned, "percent": returned / 10_000,
+                          "completed": completed, "holiday_started": holiday, "locks": [True, True, returned >= 1_000_000]},
+                "investigation": {"reward_available": reward, "reward_claimed": False}}
+
+    def run_watch(self, settings, data, post_status=200):
+        bot = SiteWatchMixin()
+        bot.session = Mock()
+        bot.session.get.side_effect = lambda url, **kw: SimpleNamespace(
+            status_code=200, json=lambda: data, text='<meta name="csrf-token" content="t">')
+        bot.session.post.return_value = SimpleNamespace(status_code=post_status)
+        bot.notifier, bot.log = Mock(), Mock()
+        bot.run_site_watch = Mock(return_value={"scripts": ["/js/event-pack.js"]})
+        with patch("seasonal.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)), \
+                patch("seasonal.DataManager.set_setting", side_effect=settings.__setitem__):
+            return bot.run_halloween_watch(), bot
+
+    def test_opening_is_reported_and_reward_claimed(self):
+        settings = {}
+        events, bot = self.run_watch(settings, self.state(821_000))
+        self.assertEqual(events, [])                              # first look only remembers
+        settings["halloween_watch_state"]["at"] -= 600            # ten minutes later
+        events, bot = self.run_watch(settings, self.state(905_000))
+        self.assertTrue(any("90.5%" in e and "мин" in e for e in events))
+        events, bot = self.run_watch(settings, self.state(1_000_000, completed=True, holiday=True, reward=True))
+        text = "\n".join(events)
+        self.assertIn("вот-вот начнётся", text)
+        self.assertIn("ХЭЛЛОУИН НАЧАЛСЯ", text)
+        self.assertIn("забрал 10 конфет", text)
+        self.assertIn("/js/event-pack.js", text)
+        bot.session.post.assert_called_once()
+        bot.notifier.notify_alert.assert_called_once()

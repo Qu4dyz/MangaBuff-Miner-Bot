@@ -3803,6 +3803,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # Owner-only watcher for new site features; off unless enabled in settings
                 if self.running and DataManager.get_setting("site_watch_enabled", False):
                     self._run_module("site_watch", self.run_site_watch, 3 * 60)
+                if self.running and DataManager.get_setting("halloween_watch_enabled", False):
+                    self._run_module("halloween_watch", self.run_halloween_watch, 2 * 60)
 
                 # 5. Mine wait: energy is once per day at 00:00:10 MSK!
                 mine_wait_sec = get_seconds_until_midnight_msk() if energy <= 0 else 60
@@ -3925,6 +3927,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         try:
                             self.process_mangabuff_notifications()
                             self._last_notif_poll_at = time.time()
+                        except Exception:
+                            pass
+                    elif tick > 0 and tick % 180 == 0 and DataManager.get_setting("halloween_watch_enabled", False):
+                        try:
+                            self.run_halloween_watch()  # the opening must not wait for a long sleep to end
                         except Exception:
                             pass
                     elif tick > 0 and tick % 2700 == 0:
