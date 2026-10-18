@@ -3721,15 +3721,25 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 if not (19 <= cup_now_h < 22 and DataManager.get_setting('arena_cup_enabled', True)):
                     self._cup_fight_live = False
                 if 19 <= cup_now_h < 22 and DataManager.get_setting('arena_cup_enabled', True):
+                    cup_failed = [False]
+
                     def _mod_cup():
                         try:
                             cup_busy[0] = self.run_evening_cup()
+                        except Exception:
+                            cup_failed[0] = True
+                            raise
                         finally:
                             cup_busy[0] = cup_busy[0] or bool(DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_state.json')).get('active_fight'))
                     self._run_module('evening_cup', _mod_cup, 5 * 60)
                     self._cup_fight_live = bool(cup_busy[0])
+                    self._cup_fail_streak = getattr(self, '_cup_fail_streak', 0) + 1 if cup_failed[0] else 0
+                    if self._cup_fail_streak >= 3 and not self._validate_session_with_server():
+                        self.log("🔑 Кубок: сессия слетела — вхожу заново")
+                        self.login_and_steal_keys()
                     if cup_busy[0]:
-                        wait = min(30, max(1, getattr(self, '_cup_next_check_at', 0) - time.time()))
+                        # A failing cup page must not be hammered every second (that earns a 429)
+                        wait = 30 if cup_failed[0] else min(30, max(1, getattr(self, '_cup_next_check_at', 0) - time.time()))
                         self._persist_panel_state(next_action="Вечерний кубок", next_wait_sec=wait)
                         self._sleep_alive(wait)
                         continue
