@@ -475,5 +475,55 @@ class CupRegistrationTests(unittest.TestCase):
         c.post.assert_called_once()
 
 
+class TowerPlannerTests(unittest.TestCase):
+    def test_downtime_counts_the_evening_cup(self):
+        import datetime as dt
+        from engine import tower_downtime_hours
+        self.assertAlmostEqual(tower_downtime_hours(dt.datetime(2026, 10, 18, 12, 0), 2), 0.15)
+        self.assertAlmostEqual(tower_downtime_hours(dt.datetime(2026, 10, 18, 18, 30), 2), 1 + 35 / 60)  # back 20:30 -> 22:05
+        self.assertAlmostEqual(tower_downtime_hours(dt.datetime(2026, 10, 18, 18, 30), 2, cup=False), 0.15)
+
+    def plan(self, hour):
+        import datetime as dt
+        from bs4 import BeautifulSoup
+        html = ('<div id="t" data-preview-url="https://mangabuff.ru/tower/preview">'
+                + "".join(f'<button data-tower-option="difficulty" data-value="{d}"></button>' for d in ("dangerous", "nightmare"))
+                + "".join(f'<button data-tower-option="duration" data-value="{h}"></button>' for h in (2, 12))
+                + "".join(f'<button data-tower-option="route" data-value="{r}"></button>' for r in ("frontier", "depths"))
+                + '</div>')
+        soup = BeautifulSoup(html, "html.parser")
+        rate = {"dangerous": 590, "nightmare": 765}
+        calls = []
+
+        def post(url, json=None, **kw):
+            calls.append(json)
+            hours = json["duration_minutes"] / 60
+            progress = hours * (1.0 if json["route_type"] == "frontier" else 0.5)
+            crystals = rate[json["difficulty_type"]] * hours
+            return Mock(status_code=200, json=lambda: {"data": {
+                "power_ratio": 1.5, "estimated_progress": progress, "warning": None,
+                "rewards": {"dark_crystals": {"min": crystals, "max": crystals}}}})
+        b = bot()
+        b.session = Mock(post=post)
+        b.csrf_token = "t"
+        b._module_cancelled = lambda: False
+        b._msk_now = lambda: dt.datetime(2026, 10, 18, hour, 30)
+        payload = {"card_user_ids": [1, 2, 3, 4], "duration_minutes": 120, "route_type": "frontier",
+                   "difficulty_type": "dangerous", "order_type": "balanced"}
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: d):
+            return b._plan_tower_expedition(soup.select_one("#t"), soup, payload), calls
+
+    def test_every_difficulty_and_duration_is_checked(self):
+        chosen, calls = self.plan(10)
+        pairs = {(c["difficulty_type"], c["duration_minutes"]) for c in calls}
+        self.assertEqual(pairs, {("dangerous", 120), ("dangerous", 720), ("nightmare", 120), ("nightmare", 720)})
+        self.assertEqual(chosen["difficulty_type"], "nightmare")
+        self.assertEqual(chosen["route_type"], "frontier")
+
+    def test_short_trip_that_returns_during_the_cup_loses_to_a_long_one(self):
+        chosen, _ = self.plan(18)      # 2 h from 18:30 comes back at 20:30, in the middle of the cup
+        self.assertEqual(chosen["duration_minutes"], 720)
+
+
 if __name__ == "__main__":
     unittest.main()

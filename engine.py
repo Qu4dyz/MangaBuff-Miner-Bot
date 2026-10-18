@@ -70,6 +70,21 @@ def event_candy_day(today):
     return day if day.get("date") == str(today) else {"date": str(today), "n": 0, "misses": 0}
 
 
+def tower_downtime_hours(now_msk, hours, cup=True):
+    """Expected wait after the squad returns until the bot sends it again.
+
+    Normally minutes (the bot wakes for the tower); during the evening cup (19-22 MSK) the bot only fights,
+    so a squad back at 20:30 waits until about 22:05.
+    """
+    from datetime import timedelta
+
+    back = now_msk + timedelta(hours=hours)
+    wait = 0.15
+    if cup and 19 <= back.hour < 22:
+        wait = max(wait, (back.replace(hour=22, minute=5, second=0, microsecond=0) - back).total_seconds() / 3600)
+    return wait
+
+
 class ManualFailed(str):
     """A manual-run summary that reports a failure (shown as an error, not a green tick)."""
 
@@ -2285,10 +2300,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             return None
 
     def _plan_tower_expedition(self, root, soup, payload):
-        """Bounded coordinate search using fresh server previews, no paid actions.
+        """Pick the expedition from fresh server previews, no paid actions.
 
-        Prefer reliable progress/hour, then crystal income/hour; preserve the squad.
-        Twelve requests maximum; this is a heuristic, not an exhaustive search.
+        Every difficulty x duration the page offers, then routes and orders for the three best.
+        Rates are per real cycle: travel time plus the wait until the bot sends the squad again,
+        so a short trip that comes back in the middle of the evening cup is not mistaken for a fast one.
         """
         preview_url = root.get("data-preview-url")
         if not preview_url or len(payload.get("card_user_ids", [])) != 4:
@@ -2298,16 +2314,16 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             "X-CSRF-TOKEN": root.get("data-csrf-token") or self.csrf_token,
             "X-Requested-With": "XMLHttpRequest", "Referer": "https://mangabuff.ru/tower",
         }
-        best = None
-        options = []
-        tried = []  # every previewed variant with its verdict, for the journal
-        seen = set()
-        count = 0
-        deadline = time.monotonic() + 120
         min_chance = 70.0
+        max_previews = 48
         by_progress = DataManager.get_setting("tower_priority", "rewards") == "progress"
+        cup = DataManager.get_setting("arena_cup_enabled", True)
+        now = self._msk_now()
+        deadline = time.monotonic() + 300
+        results = {}  # signature -> option tuple, or None when the preview rejected it
+        rejected = []
 
-        def pick():
+        def pick(options):
             # Progress differs by hundredths between difficulties while crystals differ by ~40%,
             # so in "rewards" mode near-equal progress (within 10%) is a tie decided by crystals.
             if by_progress:
@@ -2316,15 +2332,33 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             close = [o for o in options if o[0][0] >= 0.9 * top]
             return max(close, key=lambda o: (o[0][1], o[0][0], o[0][2], o[0][3]))
 
+        def offered(group):
+            if group == "order" and not DataManager.get_setting("tower_order_auto", True):
+                return []
+            nodes = soup.select('[data-tower-option="%s"][data-value]' % group)
+            if group == "order":
+                nodes += soup.select('[data-hq-order-select][data-order-key]')
+            values = []
+            for node in nodes:
+                if node.has_attr("disabled") or node.get("data-locked") == "1" or "is-locked" in node.get("class", []):
+                    continue
+                value = node.get("data-value") or node.get("data-order-key")
+                if group == "duration":
+                    if not str(value).isdigit():
+                        continue
+                    value = int(value) * 60
+                if value and value not in values:
+                    values.append(value)
+            return values
+
         def evaluate(candidate):
-            nonlocal best, count
+            """False only when the search must stop (error, rate limit, cancel)."""
+            import math
             signature = tuple((key, str(candidate[key])) for key in sorted(candidate))
-            if signature in seen or count >= 12:
+            if signature in results or len(results) >= max_previews:
                 return True
             if self._module_cancelled() or time.monotonic() >= deadline:
                 return False
-            seen.add(signature)
-            count += 1
             response = self.session.post(preview_url, json=candidate, headers=headers, timeout=10)
             if response.status_code != 200:
                 return False
@@ -2332,7 +2366,6 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             data = envelope.get("data", envelope)
             if not isinstance(data, dict) or data.get("power_ratio") is None or data.get("estimated_progress") is None:
                 return False
-            import math
             ratio = float(data["power_ratio"])
             progress = float(data["estimated_progress"])
             hours = float(candidate["duration_minutes"]) / 60
@@ -2340,55 +2373,57 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             low, high = float(reward.get("min", 0)), float(reward.get("max", 0))
             if hours <= 0 or not all(math.isfinite(x) for x in (ratio, progress, low, high)):
                 return False
+            cycle = hours + tower_downtime_hours(now, hours, cup)
             chance = max(5, min(99, ratio * 85))  # same display estimate as site JS
-            label = f"{candidate['difficulty_type']} {int(hours)}ч {chance:.0f}% п/ч {progress / hours:.2f} кр/ч ~{(low + high) / (2 * hours):.0f}"
-            if data.get("warning") or chance < min_chance or progress < 0 or low < 0 or high < low:
-                why = "предупреждение сайта" if data.get("warning") else f"шанс < {min_chance:.0f}%" if chance < min_chance else "странный прогноз"
-                tried.append(f"{label} — отброшен ({why})")
+            label = (f"{candidate['difficulty_type']} {int(hours)}ч {candidate['route_type']}/{candidate['order_type']} "
+                     f"{chance:.0f}% п/ч {progress / cycle:.2f} кр/ч ~{(low + high) / (2 * cycle):.0f}")
+            why = ("предупреждение сайта" if data.get("warning") else f"шанс < {min_chance:.0f}%" if chance < min_chance
+                   else "нет прогресса" if progress <= 0 else "странный прогноз" if low < 0 or high < low else None)
+            if why:
+                results[signature] = None
+                rejected.append(f"{label} — {why}")
                 return True
-            tried.append(label)
-            score = (progress / hours, (low + high) / (2 * hours), chance, -hours)
-            options.append((score, dict(candidate), chance, data))
-            best = pick()
+            score = (progress / cycle, (low + high) / (2 * cycle), chance, -hours)
+            results[signature] = (score, dict(candidate), chance, data, label)
             return True
+
+        def valid():
+            return [o for o in results.values() if o]
+
+        def pair(option):
+            return option[1]["difficulty_type"], option[1]["duration_minutes"]
+
         try:
             if not evaluate(payload):
                 return None
-            for group, field in (("difficulty", "difficulty_type"), ("duration", "duration_minutes"), ("route", "route_type"), ("order", "order_type")):
-                if group == "order" and not DataManager.get_setting("tower_order_auto", True):
-                    continue
-                selector = '[data-tower-option="%s"][data-value]' % group
-                nodes = soup.select(selector)
-                if group == "order":
-                    nodes += soup.select('[data-hq-order-select][data-order-key]')
-                values = []
-                for node in nodes:
-                    if node.has_attr("disabled") or node.get("data-locked") == "1" or "is-locked" in node.get("class", []):
-                        continue
-                    value = node.get("data-value") or node.get("data-order-key")
-                    if group == "duration":
-                        if not str(value).isdigit():
-                            continue
-                        value = int(value) * 60
-                    if value and value not in values:
-                        values.append(value)
-                anchor = dict(best[1] if best else payload)
-                for value in values:
-                    candidate = dict(anchor)
-                    candidate[field] = value
-                    if not evaluate(candidate):
-                        # A rate limit/error ends the search. Never launch with unverified fallback.
+            # 1. Difficulty x duration decide the haul: try every pair the page offers
+            for difficulty in offered("difficulty") or [payload["difficulty_type"]]:
+                for minutes in offered("duration") or [payload["duration_minutes"]]:
+                    if not evaluate(dict(payload, difficulty_type=difficulty, duration_minutes=minutes)):
                         return None
-                if count >= 12:
-                    break
-            if best is None:
-                self.log("⚠️ Башня: прогноз не нашёл безопасный вариант (шанс ≥70%, без предупреждений). Сравнил: " + "; ".join(tried))
+            # 2. Route and order for the three most promising pairs
+            leaders, pool = [], valid()
+            while pool and len(leaders) < 3:
+                leader = pick(pool)
+                leaders.append(leader)
+                pool = [o for o in pool if pair(o) != pair(leader)]
+            for leader in leaders:
+                for group, field in (("route", "route_type"), ("order", "order_type")):
+                    anchor = pick([o for o in valid() if pair(o) == pair(leader)])[1]
+                    for value in offered(group):
+                        if not evaluate(dict(anchor, **{field: value})):
+                            return None
+            options = valid()
+            if not options:
+                self.log("⚠️ Башня: прогноз не нашёл безопасный вариант (шанс ≥70%, без предупреждений). "
+                         "Отброшено: " + "; ".join(rejected[:10]))
                 return None
-            score, chosen, chance, data = best
-            self.log("🔎 Башня, сравнил: " + "; ".join(tried))
-            self.log(f"🔎 Башня: {chosen['difficulty_type']}, {chosen['duration_minutes']//60}ч, "
-                     f"{chosen['route_type']}/{chosen['order_type']}; прогноз {chance:.0f}%, "
-                     f"прогресс/ч {score[0]:.2f}, кристаллы/ч ~{score[1]:.0f}.")
+            score, chosen, chance, data, label = pick(options)
+            ranking = sorted(options, key=lambda o: o[0], reverse=True)[:8]
+            note = f". Отброшено {len(rejected)}: " + "; ".join(rejected[:4]) if rejected else ""
+            self.log(f"🔎 Башня: проверил {len(results)} вариантов (п/ч и кр/ч — на реальный цикл с простоем). "
+                     "Лучшие: " + "; ".join(o[4] for o in ranking) + note)
+            self.log(f"🔎 Башня: выбрал {label}.")
             return chosen
         except Exception as exc:
             self.log(f"⚠️ Башня: прогноз недоступен: {exc}")
