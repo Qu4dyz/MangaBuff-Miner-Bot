@@ -125,6 +125,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             persist_cookies=self._persist_session_cookies,
             should_abort=self._module_cancelled,
             on_heartbeat=self._touch_heartbeat,
+            on_csrf_expired=self._relogin_after_419,
             proxy=self.proxy,
             impersonate="chrome131",
         )
@@ -375,6 +376,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self.session.headers.pop("Content-Type", None)
         self.auth_log_buffer.append(tr("log_session_valid"))
         return True
+
+    def _relogin_after_419(self):
+        """The site answered 419: our session or CSRF token expired. Log in again (at most once a minute)."""
+        if time.time() - getattr(self, "_last_419_relogin", 0) < 60:
+            return self.csrf_token
+        self._last_419_relogin = time.time()
+        self.log("♻️ Сайт ответил 419 (сессия устарела) — вхожу заново и повторяю действие")
+        return self.csrf_token if self.login_and_steal_keys() else None
 
     def login_and_steal_keys(self):
         self.auth_log_buffer.append("Logging in via API...")

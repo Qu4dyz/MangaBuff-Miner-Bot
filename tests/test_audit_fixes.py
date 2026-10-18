@@ -525,5 +525,34 @@ class TowerPlannerTests(unittest.TestCase):
         self.assertEqual(chosen["duration_minutes"], 720)
 
 
+class Expired419Tests(unittest.TestCase):
+    def test_419_logs_in_again_and_repeats_the_action_once(self):
+        from http_session import GuardedSession
+        sent = []
+
+        def raw_request(method, url, **kw):
+            sent.append(kw["headers"]["X-CSRF-TOKEN"])
+            code = 419 if len(sent) == 1 else 200
+            return SimpleNamespace(status_code=code, text="{}", headers={"content-type": "application/json"}, content=b"{}")
+        raw = Mock()
+        raw.request.side_effect = raw_request
+        relogin = Mock(return_value="fresh")
+        g = GuardedSession(raw, on_csrf_expired=relogin)
+        g.min_request_interval = g.max_request_jitter = 0
+        r = g.post("https://mangabuff.ru/tower/expedition/claim", json={}, headers={"X-CSRF-TOKEN": "old"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(sent, ["old", "fresh"])
+        relogin.assert_called_once()
+
+    def test_a_second_419_is_not_retried_forever(self):
+        from http_session import GuardedSession
+        raw = Mock()
+        raw.request.return_value = SimpleNamespace(status_code=419, text="", headers={}, content=b"")
+        g = GuardedSession(raw, on_csrf_expired=Mock(return_value="fresh"))
+        g.min_request_interval = g.max_request_jitter = 0
+        self.assertEqual(g.post("https://mangabuff.ru/x", data={"_token": "old"}).status_code, 419)
+        self.assertEqual(raw.request.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

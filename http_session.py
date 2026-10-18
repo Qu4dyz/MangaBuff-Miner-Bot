@@ -94,6 +94,20 @@ def is_anti_bot_page(resp) -> str | None:
     return None
 
 
+def with_csrf_token(kwargs, token):
+    """Same request arguments with a fresh CSRF token wherever the old one was sent."""
+    out = dict(kwargs)
+    headers = dict(out.get("headers") or {})
+    for key in list(headers):
+        if key.lower() in ("x-csrf-token", "x-xsrf-token"):
+            headers[key] = token
+    out["headers"] = headers
+    for field in ("data", "json"):
+        if isinstance(out.get(field), dict) and "_token" in out[field]:
+            out[field] = dict(out[field], _token=token)
+    return out
+
+
 def create_raw_session(proxy: str | None = None, impersonate: str = "chrome131"):
     """Create an underlying Session (curl_cffi if available)."""
     if _HAS_CURL_CFFI:
@@ -244,6 +258,7 @@ class GuardedSession:
         persist_cookies=None,
         should_abort=None,
         on_heartbeat=None,
+        on_csrf_expired=None,
         proxy=None,
         impersonate="chrome131",
     ):
@@ -255,6 +270,8 @@ class GuardedSession:
         self.persist_cookies = persist_cookies  # callable() -> None
         self.should_abort = should_abort  # callable() -> bool
         self.on_heartbeat = on_heartbeat  # callable() -> None
+        self.on_csrf_expired = on_csrf_expired  # callable() -> fresh CSRF token or None
+        self._csrf_retry = False
         self._recovering = False
         self.last_block_reason = None
         self.last_block_at = 0.0
@@ -542,7 +559,18 @@ class GuardedSession:
             resp = self._raw_request(method, url, **kwargs)
             return resp
         resp = self._raw_request(method, url, **kwargs)
-        return self._after_response(method, url, resp, kwargs)
+        resp = self._after_response(method, url, resp, kwargs)
+        # 419 = the site expired our session/CSRF: log in again once and repeat the same action
+        if (method.upper() != "GET" and self.on_csrf_expired and not self._csrf_retry
+                and int(getattr(resp, "status_code", 0) or 0) == 419):
+            self._csrf_retry = True
+            try:
+                token = self.on_csrf_expired()
+                if token:
+                    resp = self.request(method, url, **with_csrf_token(kwargs, token))
+            finally:
+                self._csrf_retry = False
+        return resp
 
     def get(self, url, **kwargs):
         return self.request("GET", url, **kwargs)
