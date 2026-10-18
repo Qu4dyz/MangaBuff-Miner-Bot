@@ -200,6 +200,14 @@ def run(start_minimized=False):
     # Window closed for good
     api.stop()
     tray.stop()
+    # Give the bot a moment to finish its step, then exit hard: a request stuck in a worker
+    # thread would otherwise keep the process (and the single-instance lock) alive forever
+    import time
+
+    deadline = time.time() + 8
+    while api._status not in ("stopped",) and api._bot is not None and time.time() < deadline:
+        time.sleep(0.2)
+    os._exit(0)
 
 
 def _cup_hours():

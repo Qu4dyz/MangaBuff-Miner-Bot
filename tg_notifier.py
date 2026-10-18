@@ -123,46 +123,48 @@ class TelegramNotifier:
             if item is None:
                 break
             try:
-                if isinstance(item, tuple) and len(item) > 0 and item[0] == "__PHOTO__":
-                    # Format: ("__PHOTO__", photo_bytes, caption, parse_mode, disable_notification)
-                    photo_bytes = item[1]
-                    caption = item[2] if len(item) > 2 else None
-                    parse_mode = item[3] if len(item) > 3 else "HTML"
-                    disable_notification = item[4] if len(item) > 4 else False
-                    self._send_photo_http(
-                        photo_bytes,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        disable_notification=disable_notification
-                    )
-                elif isinstance(item, tuple) and len(item) > 0 and item[0] == "__MEDIA_GROUP__":
-                    # Format: ("__MEDIA_GROUP__", [photo_bytes...], caption, parse_mode, disable_notification)
-                    photos = item[1] if len(item) > 1 else []
-                    caption = item[2] if len(item) > 2 else None
-                    parse_mode = item[3] if len(item) > 3 else "HTML"
-                    disable_notification = item[4] if len(item) > 4 else False
-                    self._send_media_group_http(
-                        photos,
-                        caption=caption,
-                        parse_mode=parse_mode,
-                        disable_notification=disable_notification
-                    )
-                else:
-                    text = item[0]
-                    parse_mode = item[1] if len(item) > 1 else "HTML"
-                    disable_preview = item[2] if len(item) > 2 else True
-                    disable_notification = item[3] if len(item) > 3 else False
-                    self._send_http(
-                        text,
-                        parse_mode=parse_mode,
-                        disable_preview=disable_preview,
-                        disable_notification=disable_notification
-                    )
+                self._deliver(self._sender_for(item))
             except Exception as e:
                 print(f"Telegram queue error: {e}")
             self._queue.task_done()
             # Slight delay to respect Telegram's rate limits
             time.sleep(0.5)
+
+    RETRY_DELAYS = (10, 30)
+
+    def _deliver(self, send):
+        """Send, retrying network/rate-limit failures; a 4xx (bad request, blocked bot) won't fix itself."""
+        ok, err = send()
+        for delay in self.RETRY_DELAYS:
+            if ok or str(err).startswith("HTTP 4") or "disabled" in str(err) or err == "No photos":
+                break
+            time.sleep(delay)
+            ok, err = send()
+        return ok, err
+
+    def _sender_for(self, item):
+        if isinstance(item, tuple) and len(item) > 0 and item[0] == "__PHOTO__":
+            # Format: ("__PHOTO__", photo_bytes, caption, parse_mode, disable_notification)
+            return lambda: self._send_photo_http(
+                item[1],
+                caption=item[2] if len(item) > 2 else None,
+                parse_mode=item[3] if len(item) > 3 else "HTML",
+                disable_notification=item[4] if len(item) > 4 else False,
+            )
+        if isinstance(item, tuple) and len(item) > 0 and item[0] == "__MEDIA_GROUP__":
+            # Format: ("__MEDIA_GROUP__", [photo_bytes...], caption, parse_mode, disable_notification)
+            return lambda: self._send_media_group_http(
+                item[1] if len(item) > 1 else [],
+                caption=item[2] if len(item) > 2 else None,
+                parse_mode=item[3] if len(item) > 3 else "HTML",
+                disable_notification=item[4] if len(item) > 4 else False,
+            )
+        return lambda: self._send_http(
+            item[0],
+            parse_mode=item[1] if len(item) > 1 else "HTML",
+            disable_preview=item[2] if len(item) > 2 else True,
+            disable_notification=item[3] if len(item) > 3 else False,
+        )
 
     def _send_http(self, text, parse_mode="HTML", disable_preview=True, disable_notification=False):
         token, chat_id, enabled = self.get_credentials()

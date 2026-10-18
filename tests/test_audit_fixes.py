@@ -173,5 +173,32 @@ class ThirdCheckTests(unittest.TestCase):
         b.refresh_live_panel.assert_not_called()          # no re-login after Stop
 
 
+class FourthCheckTests(unittest.TestCase):
+    def test_failed_telegram_send_is_retried_but_bad_request_is_not(self):
+        n = object.__new__(TelegramNotifier)
+        send = Mock(side_effect=[(False, "network failed"), (True, "OK")])
+        with patch("tg_notifier.time.sleep"):
+            self.assertEqual(n._deliver(send), (True, "OK"))
+        bad = Mock(return_value=(False, "HTTP 400: can't parse entities"))
+        n._deliver(bad)
+        self.assertEqual(bad.call_count, 1)
+
+    def test_other_account_does_not_inherit_old_state(self):
+        import json, os, tempfile
+        import data_management as dm
+        with tempfile.TemporaryDirectory() as d:
+            data = os.path.join(d, "user_data.json")
+            with open(data, "w", encoding="utf-8") as f:
+                json.dump({"email": "old@x.ru", "password": "p", "club_slug": "old-club", "tg_token": "keep"}, f)
+            open(os.path.join(d, "reading_state.json"), "w").close()
+            with patch.object(dm, "DATA_FILE", data), patch.object(dm, "SESSION_FILE", os.path.join(d, "s.json")):
+                dm.DataManager.clear_credentials()
+                dm.DataManager.switch_account("new@x.ru")
+                saved = dm.DataManager.load_json(data)
+            self.assertIsNone(saved["club_slug"])
+            self.assertEqual(saved["tg_token"], "keep")
+            self.assertFalse(os.path.exists(os.path.join(d, "reading_state.json")))
+
+
 if __name__ == "__main__":
     unittest.main()

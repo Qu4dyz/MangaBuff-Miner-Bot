@@ -57,8 +57,31 @@ class DataManager:
     def set_credentials(email, password):
         DataManager.save_json(DATA_FILE, {"email": email, "password": password})
 
+    # Remembered per account; app preferences (toggles, Telegram, proxy) stay shared
+    ACCOUNT_KEYS = ("arena_no_deck", "arena_rank_tracker", "bonus_cards_dry", "bonus_cards_off_date",
+                    "club_crystals_date", "club_none_date", "club_slug", "notified_trade_ids",
+                    "tower_no_squad", "tower_squad", "tracked_active_trades", "visit_ping_day")
+    ACCOUNT_FILES = ("reading_state.json", "manual_arena_state.json", "jackpot_cards.json")
+
+    @staticmethod
+    def switch_account(email):
+        """Forget the previous account's state when a different account logs in."""
+        previous = DataManager.get_setting("account_email")
+        if previous and previous.lower() != email.lower():
+            DataManager.save_json(DATA_FILE, {k: None for k in DataManager.ACCOUNT_KEYS})
+            base = os.path.dirname(os.path.abspath(DATA_FILE))
+            for name in DataManager.ACCOUNT_FILES:
+                try:
+                    os.remove(os.path.join(base, name))
+                except OSError:
+                    pass
+        DataManager.set_setting("account_email", email)
+
     @staticmethod
     def clear_credentials():
+        email = DataManager.get_credentials()[0]
+        if email and not DataManager.get_setting("account_email"):
+            DataManager.set_setting("account_email", email)  # installs from before switch_account existed
         DataManager.save_json(DATA_FILE, {"email": None, "password": None})
         if os.path.exists(SESSION_FILE):
             try:

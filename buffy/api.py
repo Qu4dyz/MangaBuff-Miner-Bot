@@ -207,6 +207,7 @@ class BuffyApi:
             for line in bot.auth_log_buffer:
                 _file_log().info("[login] " + str(line))
             if ok:
+                DataManager.switch_account(email)
                 DataManager.set_credentials(email, password)
                 self._log(f"✅ Вход выполнен: {email}")
                 return {"ok": True}
