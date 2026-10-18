@@ -140,7 +140,7 @@ def run(start_minimized=False):
         js_api=api,
         width=width,
         height=height,
-        min_size=(980, 660),
+        min_size=(860, 540),  # fits a 1366x768 laptop at 125% scaling
         background_color="#0c0a14",
         hidden=start_minimized,
     )
@@ -188,6 +188,9 @@ def run(start_minimized=False):
     def on_started():
         tray.run()
         api._updater.start_background()
+        if start_minimized:
+            # Started with Windows: say it is running, or people launch it again or think it failed
+            threading.Timer(3, tray.hint_once).start()
         email, password = DataManager.get_credentials()
         onboarded = DataManager.get_setting("app_onboarded", False)
         if email and password and onboarded and DataManager.get_setting("app_start_bot_on_launch", True):
@@ -214,7 +217,7 @@ def _window_size(webview):
         height = min(height, int(screen.height * 0.88))
     except Exception:
         pass
-    return max(width, 980), max(height, 660)
+    return max(width, 860), max(height, 540)
 
 
 def _storage_dir():
