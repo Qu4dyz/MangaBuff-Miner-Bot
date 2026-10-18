@@ -3541,6 +3541,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             out = {"card_wait_sec": 45 * 60, "chapters_wait_sec": 0, "ch_read": 0,
                    "ch_max": 75, "cards_found": 0, "cards_max": 10}
             self._reading_step(out)
+            if not out.get("stats_ok"):
+                return ManualFailed("прогресс чтения не загрузился со страницы /balance — сколько прочитано, неизвестно. "
+                                    "Запусти ещё раз позже")
             line = (f"главы {out['ch_read']}/{out['ch_max']}, "
                     f"бонусные карты {out['cards_found']}/{out['cards_max']}")
             if out["cards_found"] >= out["cards_max"]:
@@ -3560,6 +3563,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max = (out["card_wait_sec"], out["chapters_wait_sec"], out["ch_read"], out["ch_max"], out["cards_found"], out["cards_max"])
         try:
             reading_stats = self.get_reading_stats()
+            out["stats_ok"] = bool(reading_stats)
             if not reading_stats:
                 self.log('⚠️ /balance недоступен или разметка изменилась — чтение отложено, cache только для панели.')
 

@@ -424,5 +424,22 @@ class HalloweenReviewTests(unittest.TestCase):
             self.assertEqual(h.run_halloween_event()["balance"], 15)
 
 
+class UpdateCacheTests(unittest.TestCase):
+    def test_new_version_drops_the_old_page_cache_once(self):
+        import os, tempfile
+        from buffy import app, __version__
+        settings = {"app_ui_version": "11.0.6"}
+        with tempfile.TemporaryDirectory() as d:
+            cache = os.path.join(d, "EBWebView", "Default", "Cache")
+            os.makedirs(cache)
+            with patch("buffy.app.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                     patch("buffy.app.DataManager.set_setting", side_effect=settings.__setitem__):
+                app._drop_stale_ui_cache(d)
+                self.assertFalse(os.path.exists(cache))
+                os.makedirs(cache)
+                app._drop_stale_ui_cache(d)       # same version again: cache is kept
+                self.assertTrue(os.path.exists(cache))
+        self.assertEqual(settings["app_ui_version"], __version__)
+
+
 if __name__ == "__main__":
     unittest.main()

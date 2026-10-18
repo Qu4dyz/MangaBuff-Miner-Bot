@@ -136,7 +136,8 @@ def run(start_minimized=False):
     width, height = _window_size(webview)
     window = webview.create_window(
         APP_NAME,
-        url=resource_path("buffy", "ui", "index.html"),
+        # A new address per version: WebView2 must never serve the previous release's cached page
+        url=resource_path("buffy", "ui", "index.html") + f"?v={__version__}",
         js_api=api,
         width=width,
         height=height,
@@ -161,8 +162,8 @@ def run(start_minimized=False):
     api._on_status_change = tray.refresh
     # The installer replaces our files, so quit as soon as it is running
     api._updater = Updater(
-        # Never restart into an update during the evening cup (19-22 MSK): it would drop a live fight
-        auto_enabled=lambda: DataManager.get_setting("app_auto_update", True) and not _cup_hours(),
+        # Never restart a working bot into an update during the evening cup (19-22 MSK): it would drop a live fight
+        auto_enabled=lambda: DataManager.get_setting("app_auto_update", True) and not (_cup_hours() and api.is_running()),
         on_install=quit_app,
     )
 
@@ -233,7 +234,19 @@ def _storage_dir():
 
     path = os.path.join(BASE_DIR, "webview")
     os.makedirs(path, exist_ok=True)
+    _drop_stale_ui_cache(path)
     return path
+
+
+def _drop_stale_ui_cache(path):
+    """WebView2 keeps serving the old index.html after an update: clear its page cache once per version."""
+    if DataManager.get_setting("app_ui_version") == __version__:
+        return
+    import shutil
+
+    for sub in ("Cache", "Code Cache"):
+        shutil.rmtree(os.path.join(path, "EBWebView", "Default", sub), ignore_errors=True)
+    DataManager.set_setting("app_ui_version", __version__)
 
 
 if __name__ == "__main__":
