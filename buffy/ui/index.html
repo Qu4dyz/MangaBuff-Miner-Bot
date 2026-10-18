@@ -1050,7 +1050,8 @@ function restUntilOf(st) {
 }
 const RUN_TEXT = {
   queued: (s) => status !== "running" ? "⏳ Вхожу в аккаунт…"
-    : curModule ? `⏳ В очереди — сначала Buffy закончит: ${curModule}` : "⏳ В очереди — запущу через пару секунд",
+    : curModule === "Вечерний кубок" ? "⏳ Запущу, как только закончится бой кубка"
+    : curModule ? `⏳ Прерываю «${curModule}» и запускаю…` : "⏳ Запускаю через пару секунд…",
   running: () => "⚙️ Работаю…",
   done: (s) => `✅ ${s.at}: ${s.summary}`,
   error: (s) => `⚠️ ${s.summary}`,

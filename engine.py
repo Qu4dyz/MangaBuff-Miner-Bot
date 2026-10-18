@@ -188,8 +188,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         Cooperative abort via _module_abort; if still stuck after grace → process exit
         (systemd restarts the service). Session stays on the main thread.
         """
+        # A manual run requested meanwhile goes first (and may have cut the previous step short)
+        if self._manual_queue and not getattr(self, "_draining", False):
+            self._drain_manual_queue()
         self._module_abort.clear()
         self._touch_heartbeat()
+        self._current_module = name
         self.log(f"▶️ Модуль «{name}» (лимит ~{max(1, timeout_sec // 60)} мин)")
 
         done = threading.Event()
@@ -228,6 +232,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             done.set()
             self._module_abort.clear()
             self._touch_heartbeat()
+            self._current_module = None
 
     def _on_anti_bot_block(self, reason, url):
         now = time.time()
@@ -3354,16 +3359,26 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
     }
 
     def request_manual_module(self, name):
-        """Queue a one-off run; the daemon picks it up at its next pause."""
+        """Queue a one-off run and cut the current step short so it starts right away.
+
+        The interrupted step simply runs again next cycle; a live cup fight is never cut.
+        """
         if name not in self.MANUAL_MODULES:
             return False
         if name not in self._manual_queue:
             self._manual_queue.append(name)
+        current = getattr(self, "_current_module", None)
+        if current and current != "evening_cup" and not getattr(self, "_draining", False):
+            self._module_abort.set()
         return True
 
     def _drain_manual_queue(self):
-        while self._manual_queue and self.running:
-            self.run_manual_module(self._manual_queue.popleft())
+        self._draining = True
+        try:
+            while self._manual_queue and self.running:
+                self.run_manual_module(self._manual_queue.popleft())
+        finally:
+            self._draining = False
 
     def run_manual_module(self, name):
         """Run one module once and return a one-line summary (also logged)."""

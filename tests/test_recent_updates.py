@@ -727,5 +727,43 @@ class BonusCardAccessTests(unittest.TestCase):
         self.assertIn('bonus_cards_off_date', settings)
 
 
+class ManualPreemptTests(unittest.TestCase):
+    def _bot(self):
+        import collections
+        import threading
+
+        bot = object.__new__(MangaMinerBot)
+        bot.running = True
+        bot.log = Mock()
+        bot.notifier = Mock()
+        bot._module_abort = threading.Event()
+        bot._heartbeat_lock = threading.Lock()
+        bot._manual_queue = collections.deque()
+        bot.manual_callback = None
+        bot.fatal_exit = Mock()
+        return bot
+
+    def test_manual_run_cuts_the_current_step_and_goes_first(self):
+        bot = self._bot()
+        order = []
+
+        def long_reading():
+            bot.request_manual_module('club')       # user clicks while reading
+            order.append('reading cut' if bot._module_abort.is_set() else 'reading kept')
+
+        bot._manual_step = lambda name: order.append('manual ' + name) or 'ok'
+        bot.refresh_live_panel = Mock()
+        bot._run_module('reading', long_reading, 60)
+        bot._run_module('ads', lambda: order.append('ads'), 60)
+        self.assertEqual(order, ['reading cut', 'manual club', 'ads'])
+
+    def test_live_cup_fight_is_never_cut(self):
+        bot = self._bot()
+        seen = []
+        bot._run_module('evening_cup', lambda: (bot.request_manual_module('club'),
+                                                seen.append(bot._module_abort.is_set())), 60)
+        self.assertEqual(seen, [False])
+
+
 if __name__ == '__main__':
     unittest.main()
