@@ -2356,6 +2356,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
         self.log(tr("log_tower_check"))
         self._tower_page_ok = False  # lets a manual run tell "no expedition" from "page did not load"
+        self._tower_claim_failed = self._tower_start_failed = False
         try:
             res = self.session.get("https://mangabuff.ru/tower", timeout=12)
             if res.status_code != 200:
@@ -2436,6 +2437,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         return None
                 else:
                     self.log(f"⚠️ Tower claim failed with status {claim_res.status_code}")
+                    self._tower_claim_failed = True
                     return None
 
             # 2. Start a new expedition if idle
@@ -2531,6 +2533,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             return duration_mins * 60
                     else:
                         self.log(f"⚠️ Tower start failed with status {start_res.status_code}")
+                        self._tower_start_failed = True
                         return None
                 else:
                     self.log("ℹ️ Отряд для Башни не выбран (выберите отряд на сайте mangabuff.ru/tower). Башня пропущена.")
@@ -3490,6 +3493,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 return f"отряд в Башне, вернётся через {f'{h} ч {m} мин' if h else f'{m} мин'}"
             if not getattr(self, "_tower_page_ok", True):
                 return ManualFailed("страница Башни не открылась — проверить не получилось. Запусти ещё раз позже")
+            if getattr(self, "_tower_claim_failed", False):
+                return ManualFailed("экспедиция закончилась, но забрать награду не получилось. Запусти ещё раз позже")
+            if getattr(self, "_tower_start_failed", False):
+                return ManualFailed("отправить отряд в Башню не получилось — сайт не принял. Запусти ещё раз позже")
             return "Башня проверена"
         if name == "reading":
             out = {"card_wait_sec": 45 * 60, "chapters_wait_sec": 0, "ch_read": 0,

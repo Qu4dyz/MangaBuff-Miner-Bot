@@ -495,6 +495,8 @@ class GuardedSession:
                 retry_kw = dict(kwargs)
                 retry_kw.setdefault("timeout", 20)
                 time.sleep(random.uniform(0.8, 1.6))
+                if self.should_abort and self.should_abort():
+                    raise RuntimeError("module aborted")  # Stop came during the pause: no replay
                 # Same hard deadline as normal requests — never block forever here.
                 resp2 = self._raw_request(method, url, **retry_kw)
                 if is_anti_bot_page(resp2) is None:

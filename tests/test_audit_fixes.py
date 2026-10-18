@@ -320,5 +320,31 @@ class PartialAnswerTests(unittest.TestCase):
         self.assertEqual(raw.request.call_count, 1)
 
 
+class TowerAndReplayTests(unittest.TestCase):
+    def test_failed_tower_claim_is_an_error(self):
+        b = bot()
+        b.upgrade_tower_headquarters = Mock()
+        b.csrf_token = "x"
+        html = '<html><div class="mbf-abyss-tower" data-expedition-complete="1" data-expedition-active="0"></div></html>'
+        b.session.get.return_value = SimpleNamespace(status_code=200, text=html)
+        b.session.post.return_value = SimpleNamespace(status_code=500, text="claim failed")
+        with patch("engine.DataManager.get_setting", return_value=True):
+            summary = b._manual_step("tower")
+        self.assertEqual(type(summary).__name__, "ManualFailed")
+
+    def test_stop_during_antibot_pause_cancels_the_replay(self):
+        import threading
+        from http_session import GuardedSession
+        cancelled = threading.Event()
+        raw = Mock()
+        raw.request.return_value = SimpleNamespace(status_code=200, headers={"content-type": "text/html"}, content=b"<html>",
+                                                   text="<html><title>DDoS-Guard</title>checking your browser before accessing</html>")
+        g = GuardedSession(raw, should_abort=cancelled.is_set)
+        with patch("http_session.try_refresh_ddos_guard", return_value=True),                 patch("http_session.time.sleep", side_effect=lambda s: cancelled.set()):
+            with self.assertRaises(RuntimeError):
+                g.post("https://mangabuff.ru/action", timeout=1)
+        self.assertEqual(raw.request.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
