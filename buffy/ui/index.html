@@ -904,6 +904,7 @@ function renderState(st) {
   $("#rank-s").textContent = setup.arena_no_deck ? "Пробуди 4 карты (первые 4 бесплатно) и собери колоду на сайте"
     : r.tier ? `${r.wins || 0} побед · ${r.losses || 0} поражений в ранге` : "Победы и поражения в текущем ранге";
 
+  curModule = restUntilOf(st) ? "" : (st.current_module || "");
   renderManual(st.manual);
   if (st.status === "stopped") $("#status-text").textContent = st.manual_busy ? "Выполняю модуль…" : STATUS.stopped;
   const restUntil = st.status === "running" && p.next_wake_at && new Date(p.next_wake_at) > Date.now() && p.next_action !== "Вечерний кубок"
@@ -1042,9 +1043,14 @@ function renderModules() {
   bindSwitches();
 }
 
-let lastManual = {};
+let lastManual = {}, curModule = "";
+function restUntilOf(st) {
+  const p = st.panel || {};
+  return st.status === "running" && p.next_wake_at && new Date(p.next_wake_at) > Date.now() && p.next_action !== "Вечерний кубок";
+}
 const RUN_TEXT = {
-  queued: (s) => status === "running" ? "⏳ В очереди — Buffy запустит сразу после текущего шага" : "⏳ Вхожу в аккаунт…",
+  queued: (s) => status !== "running" ? "⏳ Вхожу в аккаунт…"
+    : curModule ? `⏳ В очереди — сначала Buffy закончит: ${curModule}` : "⏳ В очереди — запущу через пару секунд",
   running: () => "⚙️ Работаю…",
   done: (s) => `✅ ${s.at}: ${s.summary}`,
   error: (s) => `⚠️ ${s.summary}`,

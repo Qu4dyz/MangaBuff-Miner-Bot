@@ -778,7 +778,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 "cards_str": cards_str,
             }
             state["panel"] = {
-                "next_action": next_action,
+                "next_action": next_action if next_action is not None else prev.get("next_action"),
                 "next_wait_sec": wait_sec,
                 "next_wake_at": wake_at.isoformat(),
                 # Keep the last known value when this snapshot doesn't carry one
@@ -3557,6 +3557,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 from datetime import datetime, timezone, timedelta
                 msk_today = datetime.now(timezone(timedelta(hours=3))).date()
                 self._touch_heartbeat()
+                # Awake now: the app must not keep showing "resting until" from the last sleep
+                self._persist_panel_state(next_action=None, next_wait_sec=0)
 
                 # One probe per backoff window — hammering check.js makes DDoS-Guard stricter.
                 self._wait_if_anti_bot_paused()

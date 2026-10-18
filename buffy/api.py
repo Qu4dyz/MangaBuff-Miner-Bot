@@ -24,7 +24,7 @@ from urllib.parse import quote, urlencode, urlsplit
 import requests
 
 from buffy import APP_NAME, REPO_URL, __version__
-from buffy.humanize import humanize
+from buffy.humanize import MODULES as MODULE_TITLES, humanize
 from data_management import DataManager
 from utils import normalize_proxy_url
 
@@ -396,6 +396,7 @@ class BuffyApi:
                 "losses": rank.get("losses_in_tier", 0),
             },
             "last_log_seq": last_seq,
+            "current_module": MODULE_TITLES.get(self._log_ctx.get("module") or "", ""),
             "manual": dict(self._manual),
             "manual_busy": self._manual_bot is not None,
         }
