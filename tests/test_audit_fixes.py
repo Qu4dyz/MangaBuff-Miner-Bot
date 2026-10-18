@@ -153,5 +153,25 @@ class RecheckTests(unittest.TestCase):
         self.assertFalse(api.check_login("a@b.c", "x")["ok"])
 
 
+class ThirdCheckTests(unittest.TestCase):
+    def _bot(self):
+        import collections, threading
+        b = bot()
+        b._module_abort, b._heartbeat_lock = threading.Event(), threading.Lock()
+        b._manual_queue, b.manual_callback, b.fatal_exit = collections.deque(), None, Mock()
+        b.running = True
+        b.refresh_live_panel = Mock()
+        return b
+
+    def test_stop_during_manual_run_cancels_the_next_module(self):
+        b = self._bot()
+        b._manual_queue.append("club")
+        b._manual_step = lambda name: b.stop() or "ok"   # user presses Stop mid-run
+        fn = Mock()
+        b._run_module("daily", fn, 60)
+        fn.assert_not_called()
+        b.refresh_live_panel.assert_not_called()          # no re-login after Stop
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -193,6 +193,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         # A manual run requested meanwhile goes first (and may have cut the previous step short)
         if self._manual_queue and not getattr(self, "_draining", False):
             self._drain_manual_queue()
+            if not self.running:
+                return  # Stop came while the manual run was going
         self._module_abort.clear()
         self._touch_heartbeat()
         self._current_module = name
@@ -3413,7 +3415,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if self.manual_callback:
             self.manual_callback(name, "done" if result.get("summary") else "error", summary)
         try:
-            self.refresh_live_panel()
+            if self.running:  # after Stop/Logout this could log the old account back in
+                self.refresh_live_panel()
         except Exception:
             pass
         return summary
@@ -3573,6 +3576,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if getattr(self, "_stop_requested", False):
             return  # Stop came before this thread started
         self.running = True
+        self._cup_fight_live = bool(DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_state.json')).get('active_fight'))
         self._touch_heartbeat()
         self._start_watchdog()
         self.log("🚀 MangaBuff Miner — Запуск автономного Smart Daemon (24/7)")
