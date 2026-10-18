@@ -2300,6 +2300,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         }
         best = None
         options = []
+        tried = []  # every previewed variant with its verdict, for the journal
         seen = set()
         count = 0
         deadline = time.monotonic() + 120
@@ -2340,8 +2341,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             if hours <= 0 or not all(math.isfinite(x) for x in (ratio, progress, low, high)):
                 return False
             chance = max(5, min(99, ratio * 85))  # same display estimate as site JS
+            label = f"{candidate['difficulty_type']} {int(hours)}ч {chance:.0f}% п/ч {progress / hours:.2f} кр/ч ~{(low + high) / (2 * hours):.0f}"
             if data.get("warning") or chance < min_chance or progress < 0 or low < 0 or high < low:
+                why = "предупреждение сайта" if data.get("warning") else f"шанс < {min_chance:.0f}%" if chance < min_chance else "странный прогноз"
+                tried.append(f"{label} — отброшен ({why})")
                 return True
+            tried.append(label)
             score = (progress / hours, (low + high) / (2 * hours), chance, -hours)
             options.append((score, dict(candidate), chance, data))
             best = pick()
@@ -2377,9 +2382,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 if count >= 12:
                     break
             if best is None:
-                self.log("⚠️ Башня: прогноз не нашёл безопасный вариант (шанс ≥70%, без предупреждений).")
+                self.log("⚠️ Башня: прогноз не нашёл безопасный вариант (шанс ≥70%, без предупреждений). Сравнил: " + "; ".join(tried))
                 return None
             score, chosen, chance, data = best
+            self.log("🔎 Башня, сравнил: " + "; ".join(tried))
             self.log(f"🔎 Башня: {chosen['difficulty_type']}, {chosen['duration_minutes']//60}ч, "
                      f"{chosen['route_type']}/{chosen['order_type']}; прогноз {chance:.0f}%, "
                      f"прогресс/ч {score[0]:.2f}, кристаллы/ч ~{score[1]:.0f}.")
