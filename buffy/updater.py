@@ -15,7 +15,7 @@ from buffy import __version__
 
 LATEST_URL = "https://api.github.com/repos/Qu4dyz/MangaBuff-Miner-Bot/releases/latest"
 SETUP_RE = re.compile(r"^Buffy-Setup-[\w.\-]+\.exe$", re.IGNORECASE)
-CHECK_EVERY_SEC = 6 * 3600
+CHECK_EVERY_SEC = 30 * 60  # GitHub allows 60 anonymous API calls/hour per IP; 2 is safe
 
 
 def parse_version(text) -> tuple:
