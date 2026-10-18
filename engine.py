@@ -3415,8 +3415,16 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if self.manual_callback:
             self.manual_callback(name, "running", "")
         result = {}
+        started = time.time()
         self._run_module(name, lambda: result.update(summary=self._manual_step(name)), limit)
         summary = result.get("summary") or "не получилось — подробности в журнале"
+        session = getattr(self, "session", None)
+        last_ok = getattr(session, "last_ok_at", None)
+        last_try = getattr(session, "_last_request_at", None)
+        if (isinstance(last_ok, (int, float)) and isinstance(last_try, (int, float))
+                and last_try >= started > last_ok and result.get("summary")):
+            # Nothing came back from the site during the run: the summary would be built from empty data
+            summary = ManualFailed("сайт не ответил — проверить не получилось. Запусти ещё раз позже")
         self.log(f"🟣 Ручной запуск «{title}»: {summary}")
         if self.manual_callback:
             ok = result.get("summary") and not isinstance(summary, ManualFailed)
@@ -3490,7 +3498,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.run_club_cycle()
             return "клуб проверен"
         if name == "seasonal":
-            live = self.run_seasonal_watch()
+            live = self.run_seasonal_watch(force=True)  # a click must really check, not skip by interval
             return "ивент идёт!" if live else "ивентов пока нет"
         raise ValueError(name)
 

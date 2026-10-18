@@ -467,7 +467,8 @@ class GuardedSession:
 
         reason = is_anti_bot_page(resp)
         if not reason:
-            self._mark_ok(method, url, resp)
+            if int(getattr(resp, "status_code", 0) or 0) < 500:  # a server error is not a recovery
+                self._mark_ok(method, url, resp)
             return resp
 
         now = time.time()
@@ -530,6 +531,8 @@ class GuardedSession:
             raise RuntimeError("module aborted")
         if not self._recovering:
             self._throttle()
+            if self.should_abort and self.should_abort():
+                raise RuntimeError("module aborted")  # Stop came during the spacing pause
         # During nested recovery, skip anti-bot recursion but keep the hard deadline.
         if self._recovering:
             resp = self._raw_request(method, url, **kwargs)

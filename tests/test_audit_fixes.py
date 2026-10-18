@@ -257,5 +257,41 @@ class ManualResultTests(unittest.TestCase):
         self.assertEqual(b.manual_callback.call_args.args[1], "error")
 
 
+class DeepCheckTests(unittest.TestCase):
+    def test_manual_run_with_no_site_answer_is_an_error(self):
+        import collections, threading, time as t
+        b = bot()
+        b._module_abort, b._heartbeat_lock = threading.Event(), threading.Lock()
+        b._manual_queue, b.fatal_exit, b.running = collections.deque(), Mock(), True
+        b.refresh_live_panel, b.manual_callback = Mock(), Mock()
+        b.session.last_ok_at = t.time() - 60
+
+        def step(name):
+            b.session._last_request_at = t.time()   # a request went out, nothing came back OK
+            return "Башня проверена"
+        b._manual_step = step
+        self.assertIn("сайт не ответил", b.run_manual_module("tower"))
+        self.assertEqual(b.manual_callback.call_args.args[1], "error")
+
+    def test_no_manual_run_while_bot_restarts(self):
+        from buffy.api import BuffyApi
+        api = BuffyApi()
+        api._status = "restarting"
+        with patch("buffy.api.DataManager.get_credentials", return_value=("a@b.c", "x")),                 patch("buffy.api.DataManager.get_setting", return_value=True):
+            self.assertFalse(api.run_module("reading")["ok"])
+
+    def test_stop_during_request_spacing_cancels_the_request(self):
+        import threading, time as t
+        from http_session import GuardedSession
+        cancelled = threading.Event()
+        raw = Mock()
+        g = GuardedSession(raw, should_abort=cancelled.is_set)
+        g._last_request_mono, g._last_request_at = t.monotonic(), t.time()
+        with patch("http_session.time.sleep", side_effect=lambda s: cancelled.set()):
+            with self.assertRaises(RuntimeError):
+                g.post("https://mangabuff.ru/mine/buy-strong-hit", timeout=1)
+        raw.request.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

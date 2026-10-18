@@ -266,6 +266,9 @@ class BuffyApi:
             return {"ok": False, "error": "Сначала войди в аккаунт"}
         if self._status == "stopping":
             return {"ok": False, "error": "Бот останавливается, попробуй через пару секунд"}
+        if self._status == "restarting":
+            # A one-off bot now would run beside the daemon that is about to restart
+            return {"ok": False, "error": "Бот перезапускается — попробуй через минуту"}
         bot = self._bot if self._status in ("running", "starting") else self._manual_bot
         if bot is not None and bot.running:
             bot.request_manual_module(name)
