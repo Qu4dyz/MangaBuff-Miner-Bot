@@ -346,5 +346,15 @@ class TowerAndReplayTests(unittest.TestCase):
         self.assertEqual(raw.request.call_count, 1)
 
 
+class EventCandyTests(unittest.TestCase):
+    def test_candy_dropped_by_reading_is_picked_up(self):
+        b = bot()
+        b.session.post.return_value = SimpleNamespace(status_code=200)
+        b._take_event_drop({"token": "abc", "type": "candy"}, {"X-CSRF-TOKEN": "t"})
+        url = b.session.post.call_args.args[0]
+        self.assertIn("/halloween/takeCandy", url)
+        self.assertEqual(b.session.post.call_args.kwargs["data"], {"token": "abc"})
+
+
 if __name__ == "__main__":
     unittest.main()

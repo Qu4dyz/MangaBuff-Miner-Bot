@@ -1598,6 +1598,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             # Parse drop responses
                             try:
                                 resp_data = post_res.json()
+                                if isinstance(resp_data, dict) and resp_data.get("token") and resp_data.get("type"):
+                                    self._take_event_drop(resp_data, headers)
                                 if isinstance(resp_data, dict) and resp_data.get("name"):
                                     card_name = resp_data.get("name")
                                     card_img = resp_data.get("image")
@@ -1735,6 +1737,19 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         except Exception as e:
             self.log(f"⚠️ read_manga_chapters error: {e}")
             return False
+
+    def _take_event_drop(self, drop, headers):
+        """Event candy/bag that a read chapter dropped: the site page sends its token to /halloween/takeCandy."""
+        try:
+            r = self.session.post("https://mangabuff.ru/halloween/takeCandy?r=822",
+                                  data={"token": drop["token"]}, headers=headers, timeout=10)
+            what = "мешок конфет" if drop.get("type") == "pumpkin" else "конфету"
+            if r.status_code == 200:
+                self.log(f"🍬 Ивент: подобрал {what} за чтение")
+            else:
+                self.log(f"⚠️ Ивент: не удалось подобрать {what} (HTTP {r.status_code})")
+        except Exception as e:
+            self.log(f"⚠️ Ивент: ошибка при сборе конфеты: {e}")
 
     def _fetch_latest_card_details(self, card_name=None):
         """Fetch the copy number and image URL of the newest card in user inventory."""
