@@ -718,7 +718,7 @@ class BonusCardAccessTests(unittest.TestCase):
         bot.log = Mock()
         bot.get_reading_stats = Mock(return_value={'chapters_read': 75, 'chapters_max': 75, 'cards_found': 0,
                                                    'cards_max': 10, 'card_ready': True, 'card_cooldown': ''})
-        bot.read_manga_chapters = Mock()
+        bot.read_manga_chapters = Mock(side_effect=lambda **_: setattr(bot, '_last_read_count', 10))
         out = {'card_wait_sec': 0, 'chapters_wait_sec': 0, 'ch_read': 0, 'ch_max': 75, 'cards_found': 0, 'cards_max': 10}
         with patch('engine.DataManager.get_setting', side_effect=lambda k, d=None: settings.get(k, d)),                 patch('engine.DataManager.set_setting', side_effect=settings.__setitem__):
             for _ in range(4):

@@ -190,7 +190,8 @@ class TelegramNotifier:
                     retry_after = 5
                 time.sleep(retry_after)
                 # Retry once
-                self._post(url, payload, timeout=7)
+                if self._post(url, payload, timeout=7).status_code == 200:
+                    return True, "OK"
                 return False, f"Rate limited, waited {retry_after}s"
             else:
                 return False, f"HTTP {response.status_code}: {response.text[:200]}"
@@ -224,7 +225,8 @@ class TelegramNotifier:
                 except Exception:
                     retry_after = 5
                 time.sleep(retry_after)
-                self._post(url, payload, files=files, timeout=15)
+                if self._post(url, payload, files=files, timeout=15).status_code == 200:
+                    return True, "OK"
                 return False, f"Rate limited, waited {retry_after}s"
             else:
                 return False, f"HTTP {response.status_code}: {response.text[:200]}"
@@ -280,7 +282,8 @@ class TelegramNotifier:
                 except Exception:
                     retry_after = 5
                 time.sleep(retry_after)
-                self._post(url, payload, files=files, timeout=30)
+                if self._post(url, payload, files=files, timeout=30).status_code == 200:
+                    return True, "OK"
                 return False, f"Rate limited, waited {retry_after}s"
             else:
                 return False, f"HTTP {response.status_code}: {response.text[:200]}"
@@ -506,6 +509,7 @@ class TelegramNotifier:
         return True, "OK" if wait else "Queued"
 
     def notify_trade_status(self, trade_id, user_name="Пользователь", status="canceled"):
+        user_name, status = escape(str(user_name)), escape(str(status))
         if status == "canceled":
             msg = (
                 f"❌ <b>Обмен #{trade_id} отменён</b>\n"
@@ -528,10 +532,10 @@ class TelegramNotifier:
     def notify_jackpot(self, card_rarity, card_title=None):
         msg = (
             "🔥 <b>ДЖЕКПОТ! ВЫПАЛА РЕДКАЯ КАРТА!</b> 🔥\n"
-            f"🌟 Редкость: <b>{card_rarity.upper()}</b>\n"
+            f"🌟 Редкость: <b>{escape(str(card_rarity).upper())}</b>\n"
         )
         if card_title:
-            msg += f"🃏 Карта: <b>{card_title}</b>\n"
+            msg += f"🃏 Карта: <b>{escape(str(card_title))}</b>\n"
         msg += "💾 Карта сохранена в <code>jackpot_cards.json</code> и защищена от расхода!"
         self.send_message(msg)
 
@@ -569,14 +573,14 @@ class TelegramNotifier:
         inventory_url = f"https://mangabuff.ru/users/{user_id}/cards?sort=new" if user_id else None
 
         msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
-        msg += f'🃏 Карта: <a href="{market_url}"><b>{card_name}</b></a>\n'
+        msg += f'🃏 Карта: <a href="{market_url}"><b>{escape(str(card_name))}</b></a>\n'
         if copy_info and copy_info.get("copy_number"):
             num = copy_info["copy_number"]
             title = copy_info.get("title", "")
             is_special = copy_info.get("is_special", False)
             formatted_num = f"#{num:06d}" if num < 1000000 else f"#{num}"
             special_fire = " 🔥" if is_special else ""
-            msg += f"🔢 <b>Экземпляр:</b> <code>{formatted_num}</code> (<b>{title}</b>{special_fire})\n"
+            msg += f"🔢 <b>Экземпляр:</b> <code>{formatted_num}</code> (<b>{escape(str(title))}</b>{special_fire})\n"
         if cards_today:
             msg += f"📦 Найдено сегодня: <b>{cards_today}/10</b>\n"
 
@@ -595,7 +599,7 @@ class TelegramNotifier:
 
     def notify_scroll_dropped(self, scroll_name, rank=None):
         msg = "📜 <b>Выпал свиток заточки за чтение!</b>\n"
-        msg += f"✨ Свиток: <b>{scroll_name}</b>"
+        msg += f"✨ Свиток: <b>{escape(str(scroll_name))}</b>"
         if rank:
             msg += f" (Ранг {rank})"
         self.send_message(msg, silent=True)

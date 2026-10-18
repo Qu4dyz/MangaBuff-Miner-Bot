@@ -38,6 +38,7 @@ class ClubAutomationMixin:
             return saved
 
         # Detect from /balance navigation
+        self._club_lookup_failed = False
         try:
             r = self.session.get("https://mangabuff.ru/balance", timeout=12)
             if r.status_code == 200:
@@ -52,7 +53,10 @@ class ClubAutomationMixin:
                             self._club_slug = slug
                             DataManager.set_setting("club_slug", slug)
                             return slug
+            else:
+                self._club_lookup_failed = True
         except Exception as e:
+            self._club_lookup_failed = True
             self.log(f"⚠️ Ошибка определения клуба: {e}")
 
         # Not in a club (or the page changed): skip, retry detection next cycle
@@ -67,6 +71,8 @@ class ClubAutomationMixin:
         if DataManager.get_setting("club_none_date") == today:
             return
         slug = self.get_club_slug()
+        if not slug and getattr(self, "_club_lookup_failed", False):
+            return  # /balance did not load: try again next cycle instead of skipping the day
         if not slug:
             DataManager.set_setting("club_none_date", today)
             self.log("ℹ️ Клуб не найден на /balance — вклады пропущены.")

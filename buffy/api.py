@@ -229,6 +229,9 @@ class BuffyApi:
             return {"ok": False, "error": "Нет данных для входа"}
         if self._status in ("running", "starting", "restarting"):
             return {"ok": True}
+        if self._status == "stopping":
+            # The old bot may still be finishing requests; a second one would share the account
+            return {"ok": False, "error": "Бот ещё останавливается — подожди пару секунд"}
         if self._manual_bot is not None:
             return {"ok": False, "error": "Дождись, пока закончится ручной запуск модуля"}
         self._want_running = True

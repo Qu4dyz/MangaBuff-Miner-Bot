@@ -827,6 +827,14 @@ function waitForApi() {
     if (window.pywebview && window.pywebview.api) return resolve(window.pywebview.api);
     let done = false;
     window.addEventListener("pywebviewready", () => { if (!done) { done = true; resolve(window.pywebview.api); } });
+    // Inside the app (WebView2) the bridge can be slow on a cold start: keep waiting, never fake it.
+    // The demo is only for opening index.html in a plain browser.
+    if (window.chrome && window.chrome.webview) {
+      setTimeout(() => { if (!done) document.body.insertAdjacentHTML("afterbegin",
+        '<div style="position:fixed;inset:0 0 auto 0;z-index:9999;padding:12px;background:#b42318;color:#fff;font:14px sans-serif;text-align:center">' +
+        "Buffy не может связаться со своим ядром. Закрой программу через трей и открой снова.</div>"); }, 20000);
+      return;
+    }
     setTimeout(() => { if (!done) { done = true; resolve(mockApi()); } }, 1200);
   });
 }

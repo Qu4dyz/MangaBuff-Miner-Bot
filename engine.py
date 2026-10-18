@@ -1291,6 +1291,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
     def read_manga_chapters(self, target_count=None):
         """Read manga chapters to farm bonus cards, sharpening scrolls, and 75-chapter daily quest."""
+        self._last_read_count = 0  # chapters the site accepted in this call
         if not DataManager.get_setting("reading_enabled", True):
             return
 
@@ -1573,6 +1574,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
                         if post_res.status_code == 200:
                             chapters_read_session += len(buffer)
+                            self._last_read_count = chapters_read_session
                             for b in buffer:
                                 if b["url"] not in read_history:
                                     history_order.append(b["url"])
@@ -3085,6 +3087,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         total_added = 0
         consecutive_errors = 0
         initial_hits = None
+        emptied = False
 
         # The mine page allows about one hit per second (tap animation + request); the global
         # 1.35-2.2 s spacing between requests made mining twice as slow as a person.
@@ -3119,8 +3122,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             prog = 1.0 - (hits_left / float(initial_hits))
                             self.update_progress(max(0.0, min(1.0, prog)))
 
-                            if hits_left <= 0:                           
+                            if hits_left <= 0:
                                 self.update_stats(energy=0, balance=ore)
+                                emptied = True
                                 break
 
                             time.sleep(random.uniform(0.30, 0.50))
@@ -3134,6 +3138,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         if response.status_code == 403:
                             self.log("⚡ Ore energy depleted (403). Moving to battles.")
                             self.update_stats(energy=0)
+                            emptied = True
                             break
                         elif response.status_code == 419:
                             self.log("♻️ Session expired (419). Auto-refreshing...")
@@ -3178,6 +3183,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
         # Check and purchase pickaxe upgrades with newly mined ore
         self.auto_upgrade_pickaxe()
+        return emptied
 
     def run(self):
         """Main execution flow: claim daily, Tower expedition, mine ore, auto-upgrade, and farm battles."""
@@ -3314,14 +3320,15 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         elif res_game.status_code in (401, 419):
             self.login_and_steal_keys()
 
-        if out["energy"] >= 15:
+        if out["energy"] > 0:
             self.log(f"⚡ Накопилась энергия ({out['energy']}). Запуск добычи руды...")
-            self._run_mining()
+            emptied = self._run_mining()
             if self._alive():
                 self.auto_upgrade_pickaxe()
-                self._energy_exhausted_date = msk_today
-            out["mined"] = True
-            out["energy"] = 0
+                if emptied:
+                    self._energy_exhausted_date = msk_today
+            out["mined"] = bool(emptied)
+            out["energy"] = 0 if emptied else out["energy"]
         elif res_game.status_code == 200 and hits_match is not None:
             self._energy_exhausted_date = msk_today
 
@@ -3524,7 +3531,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         today = str(self._msk_now().date())
                         dry = DataManager.get_setting("bonus_cards_dry") or {}
                         earlier = int(dry.get("chapters") or 0) if dry.get("date") == today else 0
-                        dry = {"date": today, "chapters": 0 if cards_found > before else earlier + 10}
+                        dry = {"date": today, "chapters": 0 if cards_found > before else earlier + getattr(self, "_last_read_count", 0)}
                         DataManager.set_setting("bonus_cards_dry", dry)
                         if dry["chapters"] >= 30:
                             DataManager.set_setting("bonus_cards_off_date", str(self._msk_now().date()))
@@ -3737,7 +3744,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     self._run_module("site_watch", self.run_site_watch, 3 * 60)
 
                 # 5. Mine wait: energy is once per day at 00:00:10 MSK!
-                mine_wait_sec = get_seconds_until_midnight_msk() if energy < 15 else 60
+                mine_wait_sec = get_seconds_until_midnight_msk() if energy <= 0 else 60
 
                 # 6. Ads wait (resets at midnight MSK if all 3 watched, else short retry)
                 ads_wait_sec = get_seconds_until_midnight_msk() if ads_cnt >= 3 else 120
@@ -3746,8 +3753,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     ("Шахта", mine_wait_sec),
                     ("Реклама", ads_wait_sec),
                     ('Арена', max(1, getattr(self, '_arena_next_check_at', time.time()) - time.time())),
-                    ('Клуб (вклады)', max(60, int(self.club_check_interval() - (time.time() - getattr(self, '_last_club_check_at', 0))))),
                 ]
+                if DataManager.get_setting("club_enabled", True):
+                    candidates.append(('Клуб (вклады)', max(60, int(self.club_check_interval() - (time.time() - getattr(self, '_last_club_check_at', 0))))))
 
 
                 if DataManager.get_setting('arena_cup_enabled',True):
@@ -3762,7 +3770,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 if tower_left_sec is not None:
                     candidates.append(("Башня", tower_left_sec))
 
-                if ch_read < ch_max:
+                if not DataManager.get_setting("reading_enabled", True):
+                    pass  # reading off: its zeroed counters must not wake the bot every few minutes
+                elif ch_read < ch_max:
                     if chapters_wait_sec <= 0:
                         chapters_wait_sec = random.randint(3 * 60, 5 * 60)
                     candidates.append(("Главы (до 75)", chapters_wait_sec))
