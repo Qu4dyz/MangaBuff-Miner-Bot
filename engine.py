@@ -2843,10 +2843,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
     def _find_active_claim_url(self):
         """Parse /balance HTML for the currently CLAIMABLE daily-reward button."""
+        self._balance_unavailable = True  # None below then means "could not look", not "nothing to claim"
         try:
             res = self.session.get("https://mangabuff.ru/balance", timeout=10)
             if res.status_code != 200:
                 return None
+            self._balance_unavailable = False
             soup = BeautifulSoup(res.text, "html.parser")
 
             meta = soup.find("meta", attrs={"name": "csrf-token"})
@@ -3439,8 +3441,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             else:
                 visit = "визит не засчитался — сайт не ответил"
             if not self._find_active_claim_url():
-                return (f"{visit}. Награды из календаря сейчас нет: она уже забрана, или календарь "
+                if getattr(self, "_balance_unavailable", False):
+                    return ManualFailed(f"{visit}; страница наград не открылась — проверить награду дня не получилось. "
+                                        "Запусти ещё раз позже")
+                text = (f"{visit}. Награды из календаря сейчас нет: она уже забрана, или календарь "
                         "ещё закрыт — он открывается с PRO, донатом от 300 ₽ или через 3 месяца при рейтинге от 300")
+                return ManualFailed(text) if visit.startswith("визит не") else text
             self.claim_daily_reward()
             if self.daily_reward_claimed and not visit.startswith("визит не"):
                 return f"{visit}, награда дня забрана"

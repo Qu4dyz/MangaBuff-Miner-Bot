@@ -231,6 +231,18 @@ class UserReviewTests(unittest.TestCase):
         self.assertTrue(api.is_running())
 
 
+class ManualDailyTests(unittest.TestCase):
+    def test_unreachable_rewards_page_is_not_reported_as_nothing_to_claim(self):
+        b = bot()
+        b.ping_daily_visit = Mock(return_value=True)
+        b.session.get.return_value = SimpleNamespace(status_code=500, text="")
+        b._msk_now = lambda: __import__("datetime").datetime(2026, 10, 18, 12)
+        with patch("engine.DataManager.get_setting", return_value=None):
+            summary = b._manual_step("daily")
+        self.assertEqual(type(summary).__name__, "ManualFailed")
+        self.assertIn("не открылась", summary)
+
+
 class ManualResultTests(unittest.TestCase):
     def test_failed_manual_run_is_reported_as_error(self):
         from engine import ManualFailed
