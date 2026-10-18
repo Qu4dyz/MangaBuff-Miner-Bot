@@ -356,5 +356,24 @@ class EventCandyTests(unittest.TestCase):
         self.assertEqual(b.session.post.call_args.kwargs["data"], {"token": "abc"})
 
 
+class EventReadingTests(unittest.TestCase):
+    def test_reads_for_candies_after_the_daily_quest_and_stops_when_dry(self):
+        import datetime as dt
+        settings = {"halloween_event_info": {"balance": 10}}
+        b = bot()
+        b._msk_now = lambda: dt.datetime(2026, 10, 18, 19)
+        b.get_reading_stats = Mock(return_value={"chapters_read": 75, "chapters_max": 75, "cards_found": 10,
+                                                 "cards_max": 10, "card_ready": False, "card_cooldown": ""})
+        b.read_manga_chapters = Mock()
+        out = {"card_wait_sec": 0, "chapters_wait_sec": 0, "ch_read": 0, "ch_max": 75, "cards_found": 0, "cards_max": 10}
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+            for _ in range(8):
+                o = dict(out)
+                b._reading_step(o)
+        self.assertEqual(b.read_manga_chapters.call_count, 6)   # no drops: gives up after 6 reads
+        self.assertTrue(b.read_manga_chapters.call_args.kwargs["for_event"])
+        self.assertNotIn("event_wait_sec", o)
+
+
 if __name__ == "__main__":
     unittest.main()

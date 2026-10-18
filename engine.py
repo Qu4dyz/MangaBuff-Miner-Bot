@@ -62,6 +62,14 @@ ARENA_BATCH_SECONDS = 12 * 60
 # ==========================================
 # BOT ENGINE
 # ==========================================
+EVENT_CANDY_DROPS = 35  # "до 35 раз в сутки, раз в 3 минуты" on /event/pack
+
+
+def event_candy_day(today):
+    day = DataManager.get_setting("halloween_candy_day") or {}
+    return day if day.get("date") == str(today) else {"date": str(today), "n": 0, "misses": 0}
+
+
 class ManualFailed(str):
     """A manual-run summary that reports a failure (shown as an error, not a green tick)."""
 
@@ -1297,7 +1305,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             pass
         return verified
 
-    def read_manga_chapters(self, target_count=None):
+    def read_manga_chapters(self, target_count=None, for_event=False):
         """Read manga chapters to farm bonus cards, sharpening scrolls, and 75-chapter daily quest."""
         self._last_read_count = 0  # chapters the site accepted in this call
         if not DataManager.get_setting("reading_enabled", True):
@@ -1313,7 +1321,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.log("⚠️ Статистика чтения недоступна — жду корректную страницу /balance.")
             return False
         initial_cards = stats["cards_found"]
-        if stats:
+        if stats and not for_event:  # event reading goes past the daily quest on purpose
             if stats["chapters_read"] >= stats["chapters_max"] and stats["cards_found"] >= stats["cards_max"]:
                 self.log(tr("log_reading_limit_reached", chapters=stats["chapters_read"], cards=stats["cards_found"]))
                 return
@@ -1332,7 +1340,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         remaining_today = max(0, stats["chapters_max"] - stats["chapters_read"]) if stats else 75
         if remaining_today > 0:
             target_count = min(target_count, remaining_today)
-        else:
+        elif not for_event:
             if stats and stats["cards_found"] >= stats["cards_max"]:
                 self.log(tr("log_reading_limit_reached", chapters=stats["chapters_read"], cards=stats["cards_found"]))
                 return
@@ -1738,6 +1746,15 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.log(f"⚠️ read_manga_chapters error: {e}")
             return False
 
+    def _event_candies_wanted(self):
+        """Keep reading for Halloween candies until today's drops are in, while the event page is live."""
+        info = DataManager.get_setting("halloween_event_info")
+        if not info or not DataManager.get_setting("halloween_event_enabled", True)                 or not DataManager.get_setting("reading_enabled", True):
+            return False
+        day = event_candy_day(self._msk_now().date())
+        # 6 reads in a row without a drop: the site gives none now, don't read for nothing
+        return day["n"] < EVENT_CANDY_DROPS and day.get("misses", 0) < 6
+
     def _take_event_drop(self, drop, headers):
         """Event candy/bag that a read chapter dropped: the site page sends its token to /halloween/takeCandy."""
         try:
@@ -1745,7 +1762,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                                   data={"token": drop["token"]}, headers=headers, timeout=10)
             what = "мешок конфет" if drop.get("type") == "pumpkin" else "конфету"
             if r.status_code == 200:
-                self.log(f"🍬 Ивент: подобрал {what} за чтение")
+                day = event_candy_day(self._msk_now().date())
+                day["n"] += 1
+                DataManager.set_setting("halloween_candy_day", day)
+                self.log(f"🍬 Ивент: подобрал {what} за чтение ({day['n']}/{EVENT_CANDY_DROPS} за сегодня)")
             else:
                 self.log(f"⚠️ Ивент: не удалось подобрать {what} (HTTP {r.status_code})")
         except Exception as e:
@@ -3625,6 +3645,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 chapters_wait_sec = random.randint(10 * 60, 15 * 60)
                 ch_read, ch_max = 0, 75
                 self.log("⚠️ Стата чтения недоступна — повтор через ~10–15 мин.")
+            if reading_stats and ch_read >= ch_max and cards_found >= cards_max and self._event_candies_wanted():
+                # Halloween: reading drops a candy at most every 3 min, up to 35 a day
+                before = event_candy_day(self._msk_now().date())["n"]
+                self.read_manga_chapters(target_count=2, for_event=True)
+                day = event_candy_day(self._msk_now().date())
+                day["misses"] = 0 if day["n"] > before else day.get("misses", 0) + 1
+                DataManager.set_setting("halloween_candy_day", day)
+                out["event_wait_sec"] = random.randint(190, 240)
         finally:
             out.update(card_wait_sec=card_wait_sec, chapters_wait_sec=chapters_wait_sec, ch_read=ch_read, ch_max=ch_max, cards_found=cards_found, cards_max=cards_max)
 
@@ -3788,6 +3816,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 ch_max = 75
                 cards_found = 0
                 cards_max = 10
+                event_wait_sec = None
                 if self.running and DataManager.get_setting("reading_enabled", True):
                     reading_out = {"card_wait_sec": card_wait_sec, "chapters_wait_sec": chapters_wait_sec, "ch_read": ch_read, "ch_max": ch_max, "cards_found": cards_found, "cards_max": cards_max}
 
@@ -3796,6 +3825,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
                     self._run_module("reading", _mod_reading, 20 * 60)
                     card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max = (reading_out["card_wait_sec"], reading_out["chapters_wait_sec"], reading_out["ch_read"], reading_out["ch_max"], reading_out["cards_found"], reading_out["cards_max"])
+                    event_wait_sec = reading_out.get("event_wait_sec")
                 # Clean up site notifications after reading (card drops, etc.) — skip if just polled.
                 if time.time() - self._last_notif_poll_at >= 8 * 60:
                     self._run_module(
@@ -3851,6 +3881,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         candidates.append(('Вечерний кубок',(cup_open-cup_now).total_seconds()))
                 if tower_left_sec is not None:
                     candidates.append(("Башня", tower_left_sec))
+                if event_wait_sec:
+                    candidates.append(("Конфеты за чтение", event_wait_sec))
 
                 if not DataManager.get_setting("reading_enabled", True):
                     pass  # reading off: its zeroed counters must not wake the bot every few minutes
