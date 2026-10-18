@@ -60,8 +60,15 @@ SETTINGS = {
 
 RESTART_DELAY_SEC = 30
 
+# A switched-off module skips its work, so "run now" on it would only pretend to run
+MANUAL_TOGGLES = {"arena": "battles_enabled", "reading": "reading_enabled", "tower": "tower_enabled",
+                  "ads": "ads_enabled", "club": "club_enabled", "seasonal": "seasonal_watch_enabled"}
+
 
 def _level(text: str) -> str:
+    # Things the person should do or know is missing read as warnings, whatever the emoji
+    if any(w in text for w in ("нет колоды", "не выпадают", "Башня пропущена", "Ты не состоишь в клубе")):
+        return "warn"
     if "Stopping" in text or "Остановка" in text:
         return "info"
     if any(m in text for m in ("❌", "🛑", "Traceback")):
@@ -247,6 +254,9 @@ class BuffyApi:
 
         if name not in MangaMinerBot.MANUAL_MODULES:
             return {"ok": False, "error": "Этот модуль нельзя запустить вручную"}
+        toggle = MANUAL_TOGGLES.get(name)
+        if toggle and not DataManager.get_setting(toggle, True):
+            return {"ok": False, "error": "Модуль выключен — сначала включи его переключатель"}
         email, password = DataManager.get_credentials()
         if not (email and password):
             return {"ok": False, "error": "Сначала войди в аккаунт"}
@@ -419,9 +429,9 @@ class BuffyApi:
             body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             if r.status_code == 200 and body.get("ok"):
                 return {"ok": True}
-            return {"ok": False, "error": body.get("description") or f"HTTP {r.status_code}"}
+            return {"ok": False, "error": _tg_error(body.get("description") or f"HTTP {r.status_code}")}
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": "Нет связи с Telegram. Проверь интернет и попробуй ещё раз."}
 
     def find_chat_id(self, token):
         """Read the chat id from the last message the user sent to their bot."""
@@ -431,14 +441,14 @@ class BuffyApi:
         try:
             r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=10).json()
             if not r.get("ok"):
-                return {"ok": False, "error": r.get("description") or "Токен не подошёл"}
+                return {"ok": False, "error": _tg_error(r.get("description") or "Unauthorized")}
             for upd in reversed(r.get("result") or []):
                 chat = (upd.get("message") or {}).get("chat") or {}
                 if chat.get("id"):
                     return {"ok": True, "chat_id": str(chat["id"])}
             return {"ok": False, "error": "Напиши своему боту любое сообщение и нажми ещё раз"}
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": "Нет связи с Telegram. Проверь интернет и попробуй ещё раз."}
 
     def test_proxy(self, proxy):
         raw = (proxy or "").strip()
@@ -508,6 +518,20 @@ class BuffyApi:
         if self._quit:
             threading.Thread(target=self._quit, daemon=True).start()
         return True
+
+
+def _tg_error(description):
+    """Telegram's English API errors in words a person can act on."""
+    text = str(description or "").lower()
+    if "unauthorized" in text or "not found" in text and "chat" not in text:
+        return "Токен не подошёл. Скопируй его из @BotFather ещё раз целиком."
+    if "chat not found" in text:
+        return "Чат не найден. Напиши своему боту любое сообщение и нажми «Найти Chat ID»."
+    if "blocked" in text:
+        return "Бот заблокирован в Telegram. Разблокируй его и попробуй снова."
+    if "too many requests" in text:
+        return "Telegram просит подождать минуту. Попробуй чуть позже."
+    return f"Telegram ответил ошибкой: {description}"
 
 
 ISSUE_URL_LIMIT = 7500  # GitHub refuses much longer prefilled URLs

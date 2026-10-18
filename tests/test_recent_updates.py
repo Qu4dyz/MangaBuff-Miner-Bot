@@ -765,5 +765,22 @@ class ManualPreemptTests(unittest.TestCase):
         self.assertEqual(seen, [False])
 
 
+class AppWordingTests(unittest.TestCase):
+    def test_telegram_errors_say_what_to_do(self):
+        from buffy.api import _tg_error
+
+        self.assertIn('Токен не подошёл', _tg_error('Unauthorized'))
+        self.assertIn('Найти Chat ID', _tg_error('Bad Request: chat not found'))
+        self.assertIn('Разблокируй', _tg_error('Forbidden: bot was blocked by the user'))
+
+    def test_switched_off_module_cannot_be_run_now(self):
+        from buffy.api import BuffyApi
+
+        with patch('buffy.api.DataManager.get_setting', side_effect=lambda k, d=None: False if k == 'club_enabled' else d),                 patch('buffy.api.DataManager.get_credentials', return_value=('a@b.c', 'x')):
+            result = BuffyApi().run_module('club')
+        self.assertFalse(result['ok'])
+        self.assertIn('выключен', result['error'])
+
+
 if __name__ == '__main__':
     unittest.main()
