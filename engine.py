@@ -377,6 +377,23 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self.auth_log_buffer.append(tr("log_session_valid"))
         return True
 
+    def _keep_logged_in(self, force=False):
+        """The site sometimes drops our session and then serves guest pages (empty stats, dashes in the app).
+        Check at most every 10 min (or when a page looked logged out) and log in again if needed."""
+        if time.time() - getattr(self, "_session_checked_at", 0) < (2 * 60 if force else 10 * 60):
+            return True
+        self._session_checked_at = time.time()
+        try:
+            res = self.session.get(CONFIG["urls"]["game"], timeout=10)
+        except Exception:
+            return True  # network trouble is not a logout
+        logged_out = res.status_code in (401, 419) or (
+            res.status_code == 200 and ("/login" in str(res.url).lower() or "auth-form" in res.text.lower()))
+        if not logged_out:
+            return True  # fine, or the site itself is down (5xx): logging in again would not help
+        self.log("♻️ Сайт сбросил вход в аккаунт — вхожу заново")
+        return self.login_and_steal_keys()
+
     def _relogin_after_419(self):
         """The site answered 419: our session or CSRF token expired. Log in again (at most once a minute)."""
         if time.time() - getattr(self, "_last_419_relogin", 0) < 60:
@@ -3613,6 +3630,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         card_wait_sec, chapters_wait_sec, ch_read, ch_max, cards_found, cards_max = (out["card_wait_sec"], out["chapters_wait_sec"], out["ch_read"], out["ch_max"], out["cards_found"], out["cards_max"])
         try:
             reading_stats = self.get_reading_stats()
+            if not reading_stats and self._keep_logged_in(force=True):
+                reading_stats = self.get_reading_stats()  # a dropped session looks like a page without stats
             out["stats_ok"] = bool(reading_stats)
             if not reading_stats:
                 self.log('⚠️ /balance недоступен или разметка изменилась — чтение отложено, cache только для панели.')
@@ -3777,6 +3796,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 last_ok = float(getattr(self.session, "last_ok_at", 0) or 0)
                 if last_ok and time.time() - last_ok > 40 * 60:
                     self.ensure_site_access()
+                self._keep_logged_in()
 
                 # 0. Login streak («Дней подряд») + monthly calendar reward
                 # 0. Evening Cup (19:00 - 22:00 MSK only)

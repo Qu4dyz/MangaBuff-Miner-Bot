@@ -554,5 +554,21 @@ class Expired419Tests(unittest.TestCase):
         self.assertEqual(raw.request.call_count, 2)
 
 
+class DroppedSessionTests(unittest.TestCase):
+    def check(self, response):
+        b = bot()
+        b.session.get.return_value = response
+        b.login_and_steal_keys = Mock(return_value=True)
+        b._keep_logged_in(force=True)
+        return b.login_and_steal_keys.call_count
+
+    def test_guest_page_triggers_a_new_login(self):
+        self.assertEqual(self.check(SimpleNamespace(status_code=200, url="https://mangabuff.ru/login", text="")), 1)
+
+    def test_site_outage_is_not_a_logout(self):
+        self.assertEqual(self.check(SimpleNamespace(status_code=500, url="https://mangabuff.ru/mine", text="")), 0)
+        self.assertEqual(self.check(SimpleNamespace(status_code=200, url="https://mangabuff.ru/mine", text="<html>")), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
