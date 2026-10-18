@@ -88,3 +88,18 @@ class EventPackTest(unittest.TestCase):
         with patch("seasonal.DataManager.set_setting"):
             self.assertTrue(bot.run_halloween_event()["claimed"])
         self.assertIn("/event/heat/claim", bot.session.post.call_args.args[0])
+
+
+class CauldronLockedTest(unittest.TestCase):
+    def test_hot_but_locked_cauldron_alerts_once_a_day_and_burns_nothing(self):
+        from seasonal import HalloweenEventMixin
+        html = '<b class="js-summer-heat-temp">100°</b><button class="js-summer-heat-take" type="button" disabled >x</button>'
+        settings = {}
+        h = HalloweenEventMixin()
+        h.log, h.notifier, h.session = Mock(), Mock(), Mock()
+        h.session.get.side_effect = lambda url, **kw: SimpleNamespace(status_code=200, text=html, json=lambda: {})
+        with patch("seasonal.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("seasonal.DataManager.set_setting", side_effect=settings.__setitem__):
+            h.run_halloween_event()
+            h.run_halloween_event()
+        h.notifier.notify_alert.assert_called_once()
+        h.session.post.assert_not_called()

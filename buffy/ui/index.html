@@ -405,7 +405,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
           <div class="card stat">
             <div class="k"><span class="ic">🔥</span>Котёл кошмаров</div>
             <div class="v" id="heat-v">—</div>
-            <div class="s">При 100° бот сам заберёт 5 🍬</div>
+            <div class="s" id="heat-s">При 100° бот сам заберёт 5 🍬</div>
           </div>
         </div>
 
@@ -920,6 +920,7 @@ function renderState(st) {
   $("#candy-v").textContent = hw && hw.balance != null ? fmt(hw.balance) : "—";
   $("#candy-s").textContent = hw ? `За чтение сегодня ${hw.reading_today} / 35` : "Появятся после первого запуска бота";
   $("#heat-v").textContent = hw && hw.temperature != null ? `${hw.temperature}°` : "—";
+  $("#heat-s").textContent = hw && hw.heat_taken ? "Угощение сегодня забрано ✅" : "При 100° бот сам заберёт 5 🍬";
   if (st.status !== status || !!st.manual_busy !== manualBusy) { manualBusy = !!st.manual_busy; renderStatus(st.status); }
   const c = st.cards, ch = st.chapters, p = st.panel, r = st.rank;
 

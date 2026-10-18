@@ -288,6 +288,19 @@ class HalloweenEventMixin:
             self.log("🍬 Котёл кошмаров: " + ("забрал 5 конфет" if info["claimed"] else f"не получилось забрать (HTTP {r.status_code})"))
             if info["claimed"]:
                 info["balance"] = _balance_after(r, info.get("balance"), 5)
+        today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 3600))  # MSK day: the cauldron resets at midnight
+        if info.get("claimed"):
+            DataManager.set_setting("halloween_heat_claimed_day", today)
+        elif ((info.get("temperature") or 0) >= 100 and not info["can_take"]
+              and DataManager.get_setting("halloween_heat_claimed_day") != today
+              and DataManager.get_setting("halloween_heat_locked_alert_day") != today):
+            # The site may want a burned card before it lets you take the treat: ask once a day, never burn
+            DataManager.set_setting("halloween_heat_locked_alert_day", today)
+            self.log("🔥 Котёл разогрет до 100°, но сайт не даёт забрать 5 🍬 — похоже, нужно сжечь карту")
+            self.notifier.notify_alert("котёл кошмаров", "Котёл разогрет до 100°, но сайт не даёт забрать 5 🍬. "
+                                       "Похоже, сначала нужно сжечь карту. Бот ничего не сжигает — решай сам.\n"
+                                       "<a href=\"https://mangabuff.ru/event/pack\">Открыть котёл</a>")
+        info["claimed_today"] = DataManager.get_setting("halloween_heat_claimed_day") == today
         reward = self._quest_reward_ready()
         if reward:
             msg = SiteWatchMixin._claim_halloween_reward(self)  # same claim as the owner-only watcher

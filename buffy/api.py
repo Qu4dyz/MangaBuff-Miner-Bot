@@ -549,7 +549,8 @@ def _halloween_state(today):
         return None
     day = DataManager.get_setting("halloween_candy_day") or {}
     return {"balance": info.get("balance"), "reading_today": day.get("n", 0) if day.get("date") == today else 0,
-            "temperature": info.get("temperature")}
+            "temperature": info.get("temperature"),
+            "heat_taken": DataManager.get_setting("halloween_heat_claimed_day") == today}
 
 
 def _tg_error(description):
