@@ -368,7 +368,8 @@ class BuffyApi:
                 pass
 
     def is_running(self):
-        return self._status in ("running", "starting", "restarting")
+        # A one-off module run counts too, so the tray offers to stop it instead of a start that is refused
+        return self._status in ("running", "starting", "restarting") or self._manual_bot is not None
 
     # ------------------------------------------------------------ state
     def get_state(self):
@@ -481,6 +482,14 @@ class BuffyApi:
                 timeout=12,
             )
             ms = int((time.time() - started) * 1000)
+            from http_session import is_anti_bot_page
+
+            block = is_anti_bot_page(r)
+            if block == "ddos_guard_geo":
+                return {"ok": False, "error": "Сайт не пускает с этого IP (блок по стране) — нужен прокси из другой страны"}
+            if block:
+                return {"ok": False, "error": "Связь с сайтом есть, но он показал страницу защиты от ботов. "
+                                              "Бот обычно проходит её сам — сохрани и запусти; если вход не удастся, попробуй другой прокси"}
             if r.status_code == 200:
                 return {"ok": True, "detail": f"MangaBuff доступен · {ms} мс"}
             return {"ok": False, "error": f"Сайт ответил кодом {r.status_code} (возможно, IP заблокирован)"}

@@ -3427,11 +3427,19 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         msk_today = datetime.now(timezone(timedelta(hours=3))).date()
         if name == "daily":
             self.ping_daily_visit()
+            if DataManager.get_setting("visit_ping_day") == str(msk_today):
+                visit = "визит засчитан"
+            elif self._msk_now().hour < 2:
+                visit = "визит сайт засчитывает только после 02:00 МСК — бот отметит его сам"
+            else:
+                visit = "визит не засчитался — сайт не ответил, бот попробует ещё раз сам"
             if not self._find_active_claim_url():
-                return ("визит засчитан. Награды из календаря сейчас нет: она уже забрана, или календарь "
+                return (f"{visit}. Награды из календаря сейчас нет: она уже забрана, или календарь "
                         "ещё закрыт — он открывается с PRO, донатом от 300 ₽ или через 3 месяца при рейтинге от 300")
             self.claim_daily_reward()
-            return "визит засчитан, награда дня забрана"
+            if self.daily_reward_claimed:
+                return f"{visit}, награда дня забрана"
+            return f"{visit}; награду дня забрать не получилось — бот попробует ещё раз сам"
         if name == "mining":
             out = {"energy": 0}
             self._mining_step(msk_today, out)

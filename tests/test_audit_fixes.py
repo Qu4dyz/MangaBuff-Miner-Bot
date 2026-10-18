@@ -202,5 +202,33 @@ class FourthCheckTests(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(d, "reading_state.json")))
 
 
+class UserReviewTests(unittest.TestCase):
+    def test_manual_daily_does_not_claim_a_failed_visit_and_reward(self):
+        settings = {}
+        b = bot()
+        b.ping_daily_visit = Mock(return_value=False)
+        b._find_active_claim_url = Mock(return_value="https://mangabuff.ru/balance/claim")
+        b.claim_daily_reward = Mock()
+        b.daily_reward_claimed = False
+        b._msk_now = lambda: __import__("datetime").datetime(2026, 10, 18, 12)
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)):
+            summary = b._manual_step("daily")
+        self.assertIn("не засчитался", summary)
+        self.assertIn("не получилось", summary)
+
+    def test_proxy_check_does_not_call_a_protection_page_success(self):
+        from buffy.api import BuffyApi
+        page = SimpleNamespace(status_code=200, headers={"content-type": "text/html"}, content=b"<html>",
+                               text="<html><title>DDoS-Guard</title>checking your browser before accessing</html>")
+        with patch("buffy.api.requests.get", return_value=page):
+            self.assertFalse(BuffyApi().test_proxy("")["ok"])
+
+    def test_tray_offers_stop_during_a_manual_run(self):
+        from buffy.api import BuffyApi
+        api = BuffyApi()
+        api._manual_bot = Mock()
+        self.assertTrue(api.is_running())
+
+
 if __name__ == "__main__":
     unittest.main()
