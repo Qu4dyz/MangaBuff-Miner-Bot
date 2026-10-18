@@ -30,7 +30,7 @@ import time
 from tg_notifier import get_notifier
 from arena import ArenaAutomationMixin, replay_from_html, save_observation
 from club import ClubAutomationMixin
-from seasonal import SeasonalWatchMixin, SiteWatchMixin
+from seasonal import HalloweenEventMixin, SeasonalWatchMixin, SiteWatchMixin
 
 
 ARENA_TIERS = [
@@ -66,7 +66,7 @@ class ManualFailed(str):
     """A manual-run summary that reports a failure (shown as an error, not a green tick)."""
 
 
-class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixin, SiteWatchMixin):
+class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixin, SiteWatchMixin, HalloweenEventMixin):
 
     def __init__(self, log_callback, progress_callback, stats_callback, proxy=None):
         self.log = log_callback       
@@ -3818,6 +3818,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # Owner-only watcher for new site features; off unless enabled in settings
                 if self.running and DataManager.get_setting("site_watch_enabled", False):
                     self._run_module("site_watch", self.run_site_watch, 3 * 60)
+                if (self.running and DataManager.get_setting("halloween_event_enabled", True)
+                        and time.time() - getattr(self, "_halloween_event_at", 0) >= 30 * 60):
+                    self._halloween_event_at = time.time()
+                    self._run_module("halloween_event", self.run_halloween_event, 2 * 60)
                 if self.running and DataManager.get_setting("halloween_watch_enabled", False):
                     self._run_module("halloween_watch", self.run_halloween_watch, 2 * 60)
 

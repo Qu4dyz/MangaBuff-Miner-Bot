@@ -243,3 +243,37 @@ def halloween_changes(prev: Dict, cur: Dict, milestones=(90, 95, 99)) -> List[st
     if new_keys and prev.get("keys"):
         out.append("🆕 В состоянии ивента появились поля: " + ", ".join(new_keys))
     return out
+
+
+def parse_event_pack(html: str) -> Dict:
+    """Candy balance, today's drops and cauldron state from /event/pack."""
+    def num(rx):
+        m = re.search(rx, html, re.S)
+        return int(re.sub(r"\D", "", m.group(1)) or 0) if m else None
+    take = re.search(r'<button[^>]*js-summer-heat-take[^>]*>', html)
+    return {
+        "balance": num(r'js-event-balance">\s*([\d\s]+)<'),
+        "today": num(r'Сегодня выпало</div>\s*<div class="event-page__stat-value">\s*([\d\s]+)<'),
+        "temperature": num(r'js-summer-heat-temp">\s*(\d+)°'),
+        "can_take": bool(take) and "disabled" not in take.group(0),
+    }
+
+
+class HalloweenEventMixin:
+    """Free Halloween rewards that need no choice: the cauldron treat. Spending candies stays manual."""
+
+    EVENT_PACK_URL = "https://mangabuff.ru/event/pack"
+
+    def run_halloween_event(self) -> Dict:
+        res = self.session.get(self.EVENT_PACK_URL, timeout=15)
+        if res.status_code != 200:
+            return {}
+        info = parse_event_pack(res.text)
+        if info["can_take"]:
+            m = re.search(r'<meta name="csrf-token" content="([^"]+)"', res.text)
+            r = self.session.post("https://mangabuff.ru/event/heat/claim", data={"_token": m.group(1) if m else ""},
+                                  timeout=15, headers={"X-Requested-With": "XMLHttpRequest", "Referer": self.EVENT_PACK_URL})
+            info["claimed"] = r.status_code == 200
+            self.log("🍬 Котёл кошмаров: " + ("забрал 5 конфет" if info["claimed"] else f"не получилось забрать (HTTP {r.status_code})"))
+        DataManager.set_setting("halloween_event_info", info)
+        return info

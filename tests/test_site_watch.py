@@ -69,3 +69,22 @@ class HalloweenWatchTest(unittest.TestCase):
         self.assertIn("/js/event-pack.js", text)
         bot.session.post.assert_called_once()
         bot.notifier.notify_alert.assert_called_once()
+
+
+class EventPackTest(unittest.TestCase):
+    HTML = ('<div class="event-page__stat-value js-event-balance"> 1 240 </div>'
+            '<div class="event-page__stat-label">Сегодня выпало</div> <div class="event-page__stat-value"> 12 </div>'
+            '<b class="js-summer-heat-temp">100°</b>'
+            '<button class="event-page__heat-btn js-summer-heat-take" type="button" > Забрать 5 🍬 </button>')
+
+    def test_page_is_read_and_ready_cauldron_claimed(self):
+        from seasonal import HalloweenEventMixin, parse_event_pack
+        self.assertEqual(parse_event_pack(self.HTML), {"balance": 1240, "today": 12, "temperature": 100, "can_take": True})
+        self.assertFalse(parse_event_pack(self.HTML.replace('type="button" >', 'type="button" disabled >'))["can_take"])
+        bot = HalloweenEventMixin()
+        bot.session, bot.log = Mock(), Mock()
+        bot.session.get.return_value = SimpleNamespace(status_code=200, text=self.HTML)
+        bot.session.post.return_value = SimpleNamespace(status_code=200)
+        with patch("seasonal.DataManager.set_setting"):
+            self.assertTrue(bot.run_halloween_event()["claimed"])
+        self.assertIn("/event/heat/claim", bot.session.post.call_args.args[0])
