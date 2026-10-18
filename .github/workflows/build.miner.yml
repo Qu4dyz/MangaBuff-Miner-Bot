@@ -35,9 +35,19 @@ jobs:
       shell: bash
       run: echo "version=$(python -c 'import buffy; print(buffy.__version__)')" >> "$GITHUB_OUTPUT"
 
+    # Libraries rarely change, so reuse their compiled objects: only our own modules get rebuilt
+    - name: Restore Nuitka Cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/nuitka-cache
+        key: nuitka-${{ hashFiles('requirements-desktop.txt') }}-${{ github.run_id }}
+        restore-keys: nuitka-${{ hashFiles('requirements-desktop.txt') }}-
+
     # Nuitka compiles to C instead of bundling the interpreter, which antivirus
     # heuristics flag far less often than PyInstaller-style packers.
     - name: Build Buffy (Nuitka)
+      env:
+        NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka-cache
       run: |
         python -m nuitka --standalone --assume-yes-for-downloads `
           --windows-console-mode=disable `
