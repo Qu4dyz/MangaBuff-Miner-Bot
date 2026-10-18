@@ -1,0 +1,36 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from seasonal import SiteWatchMixin
+
+
+class SiteWatchTest(unittest.TestCase):
+    def run_watch(self, settings, js):
+        pages = {"/": '<script src="/js/manga.js?id=1"></script><script src="/js/jquery.min.js"></script>'}
+        bot = SiteWatchMixin()
+        bot.session = Mock(get=lambda url, timeout: SimpleNamespace(
+            text=pages.get(url[len("https://mangabuff.ru"):], js if "/js/" in url else "")))
+        bot.notifier, bot.log = Mock(), Mock()
+        with patch("seasonal.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)), \
+                patch("seasonal.DataManager.set_setting", side_effect=settings.__setitem__):
+            return bot.run_site_watch(), bot
+
+    def test_first_run_is_baseline_then_new_endpoint_alerts(self):
+        settings = {}
+        new, bot = self.run_watch(settings, 'post("/achievements/diamond-fall")')
+        self.assertEqual(new, {})
+        bot.notifier.notify_alert.assert_not_called()
+        self.assertEqual(settings["site_watch_known"]["scripts"], ["/js/manga.js"])
+
+        settings["site_watch_last_at"] = 0
+        new, bot = self.run_watch(settings, '"/achievements/diamond-fall" "/achievements/red-ghost"')
+        self.assertEqual(new, {"achievements": ["/achievements/red-ghost"]})
+        bot.notifier.notify_alert.assert_called_once()
+
+        new, bot = self.run_watch(settings, '"/achievements/zzz"')  # within 6 h: skipped
+        self.assertEqual(new, {})
+
+
+if __name__ == "__main__":
+    unittest.main()

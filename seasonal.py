@@ -2,6 +2,7 @@
 """Watch for seasonal MangaBuff pages coming online and alert via Telegram."""
 from __future__ import annotations
 
+import re
 import time
 from typing import Dict, List, Tuple
 
@@ -113,3 +114,54 @@ class SeasonalWatchMixin:
             + ", ".join(newly_live)
         )
         return newly_live
+
+
+# Pages whose scripts are scanned for new site features (achievement easter eggs, event scripts).
+SITE_WATCH_PAGES = ("/", "/balance", "/battle", "/halloween/quest")
+SITE_WATCH_INTERVAL_SEC = 6 * 3600
+ACHIEVEMENT_RE = re.compile(r"/achievements/[\w-]+")
+
+
+def site_features(scripts: Dict[str, str]) -> Dict[str, List[str]]:
+    """Script names (without cache-busting query) and achievement endpoints found in them."""
+    return {
+        "scripts": sorted({name.split("?", 1)[0] for name in scripts}),
+        "achievements": sorted({hit for body in scripts.values() for hit in ACHIEVEMENT_RE.findall(body)}),
+    }
+
+
+class SiteWatchMixin:
+    """Owner-only: report new site scripts and achievement endpoints (off unless site_watch_enabled)."""
+
+    def run_site_watch(self) -> Dict[str, List[str]]:
+        now = time.time()
+        if now - float(DataManager.get_setting("site_watch_last_at", 0) or 0) < SITE_WATCH_INTERVAL_SEC:
+            return {}
+        DataManager.set_setting("site_watch_last_at", now)
+        scripts: Dict[str, str] = {}
+        for page in SITE_WATCH_PAGES:
+            try:
+                html = self.session.get("https://mangabuff.ru" + page, timeout=20).text
+            except Exception:
+                continue
+            for src in re.findall(r'<script[^>]+src="(/js/[^"]+)"', html):
+                if src not in scripts and not any(x in src for x in ("jquery", "libs.js")):
+                    try:
+                        scripts[src] = self.session.get("https://mangabuff.ru" + src, timeout=40).text
+                    except Exception:
+                        pass
+        if not scripts:
+            return {}
+        found = site_features(scripts)
+        known = DataManager.get_setting("site_watch_known") or {}
+        DataManager.set_setting("site_watch_known", {k: sorted(set(known.get(k, [])) | set(v)) for k, v in found.items()})
+        if not known:  # first run only records what exists today
+            return {}
+        new = {k: [x for x in v if x not in set(known.get(k, []))] for k, v in found.items()}
+        new = {k: v for k, v in new.items() if v}
+        if new:
+            lines = [f"🏆 Новая ачивка-пасхалка: <code>{a}</code>" for a in new.get("achievements", [])]
+            lines += [f"🧩 Новый скрипт: <code>{s}</code>" for s in new.get("scripts", [])]
+            self.notifier.notify_alert("на сайте появилось новое", "\n".join(lines))
+            self.log("🔭 На сайте новое: " + ", ".join(new.get("achievements", []) + new.get("scripts", [])))
+        return new

@@ -30,7 +30,7 @@ import time
 from tg_notifier import get_notifier
 from arena import ArenaAutomationMixin, replay_from_html, save_observation
 from club import ClubAutomationMixin
-from seasonal import SeasonalWatchMixin
+from seasonal import SeasonalWatchMixin, SiteWatchMixin
 
 
 ARENA_TIERS = [
@@ -62,7 +62,7 @@ ARENA_BATCH_SECONDS = 12 * 60
 # ==========================================
 # BOT ENGINE
 # ==========================================
-class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixin):
+class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixin, SiteWatchMixin):
 
     def __init__(self, log_callback, progress_callback, stats_callback, proxy=None):
         self.log = log_callback       
@@ -3732,6 +3732,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # 4.6. Seasonal pages watch (Halloween / event) — TG when they go live
                 if self.running and DataManager.get_setting("seasonal_watch_enabled", True):
                     self._run_module("seasonal", self.run_seasonal_watch, 2 * 60)
+                # Owner-only watcher for new site features; off unless enabled in settings
+                if self.running and DataManager.get_setting("site_watch_enabled", False):
+                    self._run_module("site_watch", self.run_site_watch, 3 * 60)
 
                 # 5. Mine wait: energy is once per day at 00:00:10 MSK!
                 mine_wait_sec = get_seconds_until_midnight_msk() if energy < 15 else 60
