@@ -782,5 +782,19 @@ class AppWordingTests(unittest.TestCase):
         self.assertIn('выключен', result['error'])
 
 
+class PcSleepTests(unittest.TestCase):
+    def test_wait_ends_at_once_when_the_clock_jumped_past_it(self):
+        import threading
+
+        bot = object.__new__(MangaMinerBot)
+        bot.running = True
+        bot._heartbeat_lock = threading.Lock()
+        clock = [1000.0]
+        with patch('engine.time.time', side_effect=lambda: clock[0]),                 patch('engine.time.sleep', side_effect=lambda s: clock.__setitem__(0, clock[0] + 8 * 3600)):
+            bot._sleep_alive(3600)        # the PC sleeps 8 h during the first second
+        self.assertGreaterEqual(clock[0], 1000 + 3600)
+        self.assertLess(clock[0], 1000 + 9 * 3600)  # one slice, not 3600 of them
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -3248,9 +3248,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             time.sleep(0.25)
 
     def _sleep_alive(self, seconds):
-        """Sleep in 1 s slices, keeping the watchdog fed and honoring stop()."""
-        end = time.monotonic() + seconds
-        while self.running and time.monotonic() < end:
+        """Sleep in 1 s slices, keeping the watchdog fed and honoring stop().
+
+        Wall-clock based so a PC that slept through the wait does not resume it.
+        """
+        end = time.time() + seconds
+        while self.running and time.time() < end:
             self._touch_heartbeat()
             time.sleep(1)
 
@@ -3830,8 +3833,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # Non-blocking sleep: checks self.running every 1 sec.
                 # Trades every 12 min (was 6) — fewer hits, fewer DDoS-Guard checks.
                 # Once ~45 min, a single homepage keepalive so cookies don't expire mid-sleep.
-                sleep_ticks = int(sleep_sec)
-                for tick in range(sleep_ticks):
+                # A wall-clock deadline, not a tick count: after the PC sleeps through the wait,
+                # the bot gets to work at once instead of sitting out the remaining ticks.
+                wake_at = time.time() + int(sleep_sec)
+                tick = -1
+                while time.time() < wake_at:
+                    tick += 1
                     if not self.running:
                         break
                     self._touch_heartbeat()
