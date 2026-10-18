@@ -395,6 +395,20 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
           </div>
         </div>
 
+        <div class="section-title">Хэллоуин</div>
+        <div class="grid stats">
+          <div class="card stat">
+            <div class="k"><span class="ic">🍬</span>Конфеты</div>
+            <div class="v" id="candy-v">—</div>
+            <div class="s" id="candy-s">Появятся после первого запуска бота</div>
+          </div>
+          <div class="card stat">
+            <div class="k"><span class="ic">🔥</span>Котёл кошмаров</div>
+            <div class="v" id="heat-v">—</div>
+            <div class="s">При 100° бот сам заберёт 5 🍬</div>
+          </div>
+        </div>
+
         <div class="section-title">Баланс и прогресс</div>
         <div class="grid stats">
           <div class="card stat">
@@ -903,6 +917,9 @@ function pct(a, b) { return a == null || !b ? 0 : Math.max(0, Math.min(100, (a /
 function renderState(st) {
   const hw = st.halloween, hwEl = $("#hw-candies");
   if (hwEl) hwEl.textContent = hw ? `🍬 ${hw.balance ?? 0} конфет · за чтение сегодня ${hw.reading_today}/35 · ` : "";
+  $("#candy-v").textContent = hw && hw.balance != null ? fmt(hw.balance) : "—";
+  $("#candy-s").textContent = hw ? `За чтение сегодня ${hw.reading_today} / 35` : "Появятся после первого запуска бота";
+  $("#heat-v").textContent = hw && hw.temperature != null ? `${hw.temperature}°` : "—";
   if (st.status !== status || !!st.manual_busy !== manualBusy) { manualBusy = !!st.manual_busy; renderStatus(st.status); }
   const c = st.cards, ch = st.chapters, p = st.panel, r = st.rank;
 
