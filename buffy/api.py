@@ -186,7 +186,6 @@ class BuffyApi:
             return {"ok": False, "error": "Введи почту и пароль"}
         if self._status in ("running", "starting"):
             return {"ok": False, "error": "Сначала останови бота"}
-        DataManager.set_credentials(email, password)
         try:
             from engine import MangaMinerBot
 
@@ -195,10 +194,13 @@ class BuffyApi:
                 progress_callback=lambda *_: None,
                 stats_callback=lambda **_: None,
             )
+            # Try the new login first; a typo must not overwrite a working one
+            bot.email, bot.password = email, password
             ok = bot.login_and_steal_keys()
             for line in bot.auth_log_buffer:
                 _file_log().info("[login] " + str(line))
             if ok:
+                DataManager.set_credentials(email, password)
                 self._log(f"✅ Вход выполнен: {email}")
                 return {"ok": True}
             if getattr(bot, "login_rejected", False):
@@ -386,7 +388,8 @@ class BuffyApi:
                 "diamonds_total": panel.get("diamonds_total"),
                 "updated_at": panel.get("updated_at"),
             },
-            "setup": {"arena_no_deck": bool(DataManager.get_setting("arena_no_deck")),
+            "setup": {"bonus_cards_off": DataManager.get_setting("bonus_cards_off_date") == today,
+                      "arena_no_deck": bool(DataManager.get_setting("arena_no_deck")),
                       "tower_no_squad": bool(DataManager.get_setting("tower_no_squad"))},
             "rank": {
                 "tier": rank.get("current_tier"),

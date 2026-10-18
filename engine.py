@@ -3289,7 +3289,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     f"Попытка {attempt}, следующая через ~{wait_min} мин.\n"
                     "Проверь логин/пароль в user_data.json или прокси.",
                 )
-            self._sleep_alive(wait_min * 60 + random.randint(10, 60))
+            wait_sec = wait_min * 60 + random.randint(10, 60)
+            self._persist_panel_state(next_action="Повторный вход в аккаунт", next_wait_sec=wait_sec)
+            self._sleep_alive(wait_sec)
         return False
 
     def _mining_step(self, msk_today, out):
@@ -3514,9 +3516,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         ch_max = int(fresh_r.get("chapters_max") or ch_max)
                         before = cards_found
                         cards_found = int(fresh_r.get("cards_found") or cards_found)
-                        # "Ready" but nothing drops: accounts without access (e.g. no VIP) never get them
-                        self._card_dry_chapters = 0 if cards_found > before else getattr(self, "_card_dry_chapters", 0) + 10
-                        if self._card_dry_chapters >= 30:
+                        # "Ready" but nothing drops: accounts without access (e.g. no VIP) never get them.
+                        # Counted in settings so restarts of the app don't reset it.
+                        today = str(self._msk_now().date())
+                        dry = DataManager.get_setting("bonus_cards_dry") or {}
+                        earlier = int(dry.get("chapters") or 0) if dry.get("date") == today else 0
+                        dry = {"date": today, "chapters": 0 if cards_found > before else earlier + 10}
+                        DataManager.set_setting("bonus_cards_dry", dry)
+                        if dry["chapters"] >= 30:
                             DataManager.set_setting("bonus_cards_off_date", str(self._msk_now().date()))
                             self.log("🃏 Бонусные карты не выпадают — похоже, аккаунту они пока недоступны "
                                      "(у новых аккаунтов сайт ставит дополнительные условия). "
@@ -3546,6 +3553,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self._touch_heartbeat()
         self._start_watchdog()
         self.log("🚀 MangaBuff Miner — Запуск автономного Smart Daemon (24/7)")
+        self._persist_panel_state(next_action=None, next_wait_sec=0)
 
         # Validate session at start (waits and retries instead of exiting on failure)
         if not self._authorize_with_backoff():

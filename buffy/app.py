@@ -18,8 +18,14 @@ def resource_path(*parts):
     return os.path.join(root, *parts)
 
 
+SHOW_EVENT = "Local\\BuffyShowWindow"
+
+
 def _single_instance():
-    """Two copies would run two daemons on one account — allow only one."""
+    """Two copies would run two daemons on one account — allow only one.
+
+    A second launch asks the running copy to show its window instead.
+    """
     if sys.platform != "win32":
         return True
     import ctypes
@@ -28,10 +34,34 @@ def _single_instance():
     kernel32.CreateMutexW(None, False, "Global\\BuffyMangaBuffApp")
     already = kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
     if already:
-        ctypes.windll.user32.MessageBoxW(
-            None, "Buffy уже запущен — ищи его иконку возле часов.", APP_NAME, 0x40
-        )
+        event = kernel32.OpenEventW(0x0002, False, SHOW_EVENT)  # EVENT_MODIFY_STATE
+        if event:
+            kernel32.SetEvent(event)
+            kernel32.CloseHandle(event)
+        else:
+            ctypes.windll.user32.MessageBoxW(
+                None, "Buffy уже запущен — ищи его иконку возле часов.", APP_NAME, 0x40
+            )
     return not already
+
+
+def _listen_for_show(show):
+    """Bring the window back when another launch of Buffy signals it."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    event = kernel32.CreateEventW(None, False, False, SHOW_EVENT)
+
+    def wait():
+        while kernel32.WaitForSingleObject(event, 0xFFFFFFFF) == 0:
+            try:
+                show()
+            except Exception:
+                pass
+
+    threading.Thread(target=wait, name="buffy-show", daemon=True).start()
 
 
 class Tray:
@@ -127,10 +157,12 @@ def run(start_minimized=False):
         window.destroy()
 
     tray = Tray(api, show, quit_app)
+    _listen_for_show(show)
     api._on_status_change = tray.refresh
     # The installer replaces our files, so quit as soon as it is running
     api._updater = Updater(
-        auto_enabled=lambda: DataManager.get_setting("app_auto_update", True),
+        # Never restart into an update during the evening cup (19-22 MSK): it would drop a live fight
+        auto_enabled=lambda: DataManager.get_setting("app_auto_update", True) and not _cup_hours(),
         on_install=quit_app,
     )
 
@@ -165,6 +197,12 @@ def run(start_minimized=False):
     # Window closed for good
     api.stop()
     tray.stop()
+
+
+def _cup_hours():
+    from datetime import datetime, timedelta, timezone
+
+    return 19 <= datetime.now(timezone(timedelta(hours=3))).hour < 22
 
 
 def _window_size(webview):

@@ -580,6 +580,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
       <p class="lead">Если свернуть в трей, бот продолжит работать — иконка Buffy будет возле часов. Если выйти полностью, бот остановится.</p>
       <label class="check"><input type="checkbox" id="close-remember"> Запомнить выбор <span class="muted">(можно поменять в Настройках)</span></label>
       <div class="wiz-nav">
+        <button class="btn ghost" id="close-cancel">Отмена</button>
         <button class="btn ghost" id="close-quit">Выйти полностью</button>
         <button class="btn primary" id="close-tray">Свернуть в трей</button>
       </div>
@@ -878,7 +879,8 @@ function renderState(st) {
 
   $("#cards-v").innerHTML = c.found == null ? "—" : `${c.found}<small> / ${c.max}</small>`;
   $("#cards-bar").style.width = pct(c.found, c.max) + "%";
-  $("#cards-s").textContent = c.found >= c.max ? "Все карты на сегодня собраны 🎉"
+  $("#cards-s").textContent = (st.setup || {}).bonus_cards_off ? "Сайт пока не выдаёт карты этому аккаунту"
+    : c.found >= c.max ? "Все карты на сегодня собраны 🎉"
     : c.ready ? "Карта готова к дропу" : c.cooldown ? `Следующая через ${c.cooldown}` : "Карты за чтение глав";
 
   $("#ch-v").innerHTML = ch.read == null ? "—" : `${ch.read}<small> / ${ch.max}</small>`;
@@ -1177,6 +1179,7 @@ async function closeAs(action) {
 }
 $("#close-tray").addEventListener("click", () => closeAs("tray"));
 $("#close-quit").addEventListener("click", () => closeAs("quit"));
+$("#close-cancel").addEventListener("click", () => $("#close-ask").classList.remove("show"));
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   ["#close-ask", "#report"].forEach((id) => $(id).classList.remove("show"));
