@@ -41,7 +41,9 @@ class ClubAutomationMixin:
         self._club_lookup_failed = False
         try:
             r = self.session.get("https://mangabuff.ru/balance", timeout=12)
-            if r.status_code == 200:
+            # A login page (expired session) says nothing about club membership
+            logged_out = "/login" in str(getattr(r, "url", "")) or 'name="password"' in r.text
+            if r.status_code == 200 and not logged_out:
                 soup = BeautifulSoup(r.text, "html.parser")
                 for a in soup.find_all("a", href=True):
                     href = a["href"]

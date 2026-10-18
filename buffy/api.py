@@ -191,8 +191,8 @@ class BuffyApi:
         password = password or ""  # spaces may be part of a password
         if not email or not password:
             return {"ok": False, "error": "Введи почту и пароль"}
-        if self._status in ("running", "starting"):
-            return {"ok": False, "error": "Сначала останови бота"}
+        if self._status in ("running", "starting", "restarting", "stopping") or self._manual_bot is not None:
+            return {"ok": False, "error": "Сначала останови бота и дождись конца ручного запуска"}
         try:
             from engine import MangaMinerBot
 
@@ -288,6 +288,7 @@ class BuffyApi:
                 if not ((bot.validate_session() and bot._validate_session_with_server()) or bot.login_and_steal_keys()):
                     for queued in list(bot._manual_queue):
                         self._on_manual(queued, "error", "не удалось войти в аккаунт — проверь почту и пароль")
+                    bot._manual_queue.clear()  # keep the error on screen, finally must not reset it to idle
                     return
                 bot.auth_log_buffer.clear()
                 bot.ensure_site_access()
@@ -322,6 +323,10 @@ class BuffyApi:
         self._started_at = time.time()
 
         def _run():
+            if not self._want_running:
+                if self._bot is bot:
+                    self._set_status("stopped")
+                return
             self._set_status("running")
             try:
                 bot.run_daemon()

@@ -188,6 +188,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         Cooperative abort via _module_abort; if still stuck after grace → process exit
         (systemd restarts the service). Session stays on the main thread.
         """
+        if not self.running:
+            return  # stopped: no new step, even one already scheduled in this cycle
         # A manual run requested meanwhile goes first (and may have cut the previous step short)
         if self._manual_queue and not getattr(self, "_draining", False):
             self._drain_manual_queue()
@@ -2990,6 +2992,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self.check_and_claim_quests()
 
     def stop(self):
+        self._stop_requested = True  # run_daemon must not switch running back on after this
         self.running = False
         # Abort the current module too, so Stop doesn't wait for a whole cup fight
         self._module_abort.set()
@@ -3136,6 +3139,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
                     else:
                         if response.status_code == 403:
+                            if is_anti_bot_page(response):
+                                self.log("🛡️ Шахта ответила страницей защиты (403) — попробую позже.")
+                                break
                             self.log("⚡ Ore energy depleted (403). Moving to battles.")
                             self.update_stats(energy=0)
                             emptied = True
@@ -3182,7 +3188,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.notifier.notify_mining_summary(clicks, total_added, self.current_balance)
 
         # Check and purchase pickaxe upgrades with newly mined ore
-        self.auto_upgrade_pickaxe()
+        if self._alive():
+            self.auto_upgrade_pickaxe()
         return emptied
 
     def run(self):
@@ -3385,6 +3392,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         return True
 
     def _drain_manual_queue(self):
+        if getattr(self, "_cup_fight_live", False):
+            return  # a manual step could take minutes and lose the fight on the turn timer
         self._draining = True
         try:
             while self._manual_queue and self.running:
@@ -3425,6 +3434,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self._mining_step(msk_today, out)
             if out.get("mined"):
                 return f"руда добыта, на балансе {int(self.current_balance or 0):,}".replace(",", " ")
+            if out.get("energy"):
+                return f"добыть не получилось, энергии осталось {out['energy']} — бот попробует ещё раз через несколько минут"
             return (f"энергии шахты {out['energy']} — копать нечего. "
                     "Энергия появляется раз в день, после полуночи МСК")
         if name == "arena":
@@ -3559,6 +3570,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
     def run_daemon(self):
         """Smart event-driven scheduler daemon. Runs 24/7, sleeping until the earliest event."""
+        if getattr(self, "_stop_requested", False):
+            return  # Stop came before this thread started
         self.running = True
         self._touch_heartbeat()
         self._start_watchdog()
@@ -3612,6 +3625,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # 0. Evening Cup (19:00 - 22:00 MSK only)
                 cup_busy = [False]
                 cup_now_h = self._msk_now().hour
+                if not (19 <= cup_now_h < 22 and DataManager.get_setting('arena_cup_enabled', True)):
+                    self._cup_fight_live = False
                 if 19 <= cup_now_h < 22 and DataManager.get_setting('arena_cup_enabled', True):
                     def _mod_cup():
                         try:
@@ -3619,11 +3634,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         finally:
                             cup_busy[0] = cup_busy[0] or bool(DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_state.json')).get('active_fight'))
                     self._run_module('evening_cup', _mod_cup, 5 * 60)
+                    self._cup_fight_live = bool(cup_busy[0])
                     if cup_busy[0]:
                         wait = min(30, max(1, getattr(self, '_cup_next_check_at', 0) - time.time()))
                         self._persist_panel_state(next_action="Вечерний кубок", next_wait_sec=wait)
                         self._sleep_alive(wait)
-                        self._drain_manual_queue()
                         continue
 
 

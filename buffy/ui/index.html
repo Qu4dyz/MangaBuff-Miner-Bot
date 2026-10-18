@@ -826,12 +826,15 @@ function waitForApi() {
   return new Promise((resolve) => {
     if (window.pywebview && window.pywebview.api) return resolve(window.pywebview.api);
     let done = false;
-    window.addEventListener("pywebviewready", () => { if (!done) { done = true; resolve(window.pywebview.api); } });
+    window.addEventListener("pywebviewready", () => {
+      document.getElementById("no-core")?.remove();
+      if (!done) { done = true; resolve(window.pywebview.api); }
+    });
     // Inside the app (WebView2) the bridge can be slow on a cold start: keep waiting, never fake it.
     // The demo is only for opening index.html in a plain browser.
     if (window.chrome && window.chrome.webview) {
       setTimeout(() => { if (!done) document.body.insertAdjacentHTML("afterbegin",
-        '<div style="position:fixed;inset:0 0 auto 0;z-index:9999;padding:12px;background:#b42318;color:#fff;font:14px sans-serif;text-align:center">' +
+        '<div id="no-core" style="position:fixed;inset:0 0 auto 0;z-index:9999;padding:12px;background:#b42318;color:#fff;font:14px sans-serif;text-align:center">' +
         "Buffy не может связаться со своим ядром. Закрой программу через трей и открой снова.</div>"); }, 20000);
       return;
     }
@@ -1143,8 +1146,9 @@ async function restartForProxy(msg) {
   setMsg($("#proxy-msg"), msg + " Перезапускаю бота, чтобы применить…", true);
   await api.stop();
   for (let i = 0; i < 60 && (await api.get_state()).status !== "stopped"; i++) await new Promise((r) => setTimeout(r, 500));
-  await api.start();
-  setMsg($("#proxy-msg"), msg + " Бот перезапущен.", true);
+  const r = await api.start();
+  if (r && r.ok === false) setMsg($("#proxy-msg"), msg + " Бот ещё не остановился — нажми «Запустить» через минуту.", false);
+  else setMsg($("#proxy-msg"), msg + " Бот перезапущен.", true);
 }
 $("#proxy-save").addEventListener("click", async () => {
   await api.set_setting("proxy", $("#proxy").value.trim());

@@ -94,5 +94,64 @@ class DryReadingTests(unittest.TestCase):
         self.assertNotIn('bonus_cards_off_date', settings)
 
 
+class RecheckTests(unittest.TestCase):
+    def test_manual_runs_wait_for_a_live_cup_fight(self):
+        import collections
+        b = bot()
+        b._manual_queue = collections.deque(["reading"])
+        b.running, b._cup_fight_live = True, True
+        b.run_manual_module = Mock()
+        b._drain_manual_queue()
+        b.run_manual_module.assert_not_called()
+
+    def test_nothing_runs_after_stop(self):
+        import threading
+        b = bot()
+        b._module_abort = threading.Event()
+        b.running = True
+        b.stop()
+        fn = Mock()
+        b._run_module("mining", fn, 60)
+        fn.assert_not_called()
+        b.run_daemon()  # Stop before the thread started: returns at once
+        self.assertFalse(b.running)
+
+    def test_anti_bot_403_is_not_an_empty_mine(self):
+        import threading
+        b = bot()
+        b._module_abort, b.running = threading.Event(), True
+        del b._alive
+        b.API_URL = "https://mangabuff.ru/mine/hit"
+        b.session.min_request_interval = b.session.max_request_jitter = 0
+        b.update_stats = b.update_progress = Mock()
+        b.session.post.return_value = SimpleNamespace(
+            status_code=403, text="<html><title>DDoS-Guard</title>check.js</html>", headers={}, url="https://mangabuff.ru/mine/hit")
+        with patch("engine.is_anti_bot_page", return_value="ddos_guard"):
+            self.assertFalse(b._run_mining())
+
+    def test_login_page_is_not_no_club(self):
+        settings = {}
+        b = bot()
+        b.session.get.return_value = SimpleNamespace(status_code=200, url="https://mangabuff.ru/login",
+                                                     text='<input name="password">')
+        with patch("club.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("club.DataManager.set_setting", side_effect=settings.__setitem__):
+            b.run_club_cycle()
+        self.assertNotIn("club_none_date", settings)
+
+    def test_reset_right_after_midnight_is_today(self):
+        from datetime import datetime, timedelta, timezone
+        from utils import get_seconds_until_midnight_msk
+        fake = datetime(2026, 10, 18, 0, 0, 5, tzinfo=timezone(timedelta(hours=3)))
+        with patch("datetime.datetime") as dt:
+            dt.now.return_value = fake
+            self.assertEqual(get_seconds_until_midnight_msk(), 60)  # 5 s, floored to 60
+
+    def test_account_cannot_change_during_manual_run(self):
+        from buffy.api import BuffyApi
+        api = BuffyApi()
+        api._manual_bot = Mock()
+        self.assertFalse(api.check_login("a@b.c", "x")["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()

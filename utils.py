@@ -100,7 +100,9 @@ def get_seconds_until_midnight_msk():
     from datetime import datetime, timezone, timedelta
     msk_offset = timezone(timedelta(hours=3))
     now_msk = datetime.now(msk_offset)
-    next_reset = (now_msk + timedelta(days=1)).replace(hour=0, minute=0, second=10, microsecond=0)
+    next_reset = now_msk.replace(hour=0, minute=0, second=10, microsecond=0)
+    if next_reset <= now_msk:
+        next_reset += timedelta(days=1)
     diff = (next_reset - now_msk).total_seconds()
     return max(60, int(diff))
 
