@@ -1244,7 +1244,7 @@ CUP_KNOWN = {
 }
 
 
-def choose_action(state, side, taunt_ids=(), hit_history=None, allow_secret=True):
+def choose_action_legacy(state, side, taunt_ids=(), hit_history=None, allow_secret=True):
     """Conservative legal one-step policy, not a full battle simulator."""
     other = 'defender' if side == 'attacker' else 'attacker'
     alive = lambda c: c.get('alive', True) and c.get('is_alive', True) and float(c.get('hp', 0)) > 0
@@ -1297,6 +1297,15 @@ def choose_action(state, side, taunt_ids=(), hit_history=None, allow_secret=True
             bait = min(own, key=lambda c: (float(c['hp']) / max(1.0, float(c.get('max_hp', 0))), int(c['card_user_id'])))
             return ('tactic', {'kind': 'secret', 'secret_type': 'trap', 'card_user_id': int(bait['card_user_id'])})
     return ('attack', {'from_card_user_id': int(attacker['card_user_id']), 'target_card_user_id': int(target['card_user_id'])})
+
+
+def choose_action(state, side, taunt_ids=(), hit_history=None, allow_secret=True):
+    baseline = choose_action_legacy(state, side, taunt_ids, hit_history, allow_secret)
+    from cup_tactics import choose
+    try:
+        return choose(state, side, baseline, hit_history, set(taunt_ids), DEFAULT_RULES)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return baseline
 
 
 class ManualArenaController:
@@ -1525,8 +1534,10 @@ class ManualArenaController:
                           for c in self.state.get('final', {}).get(s, [])] for s in ('attacker', 'defender')}
                 item = {'id': self.fight_id, 'observed_at': time.time(), 'own_side': side,
                       'is_win': self.state.get('winner_user_id') == uid, 'cards': cards, 'source': 'manual_opponent_cards'}
+                from combat_replay import capture_cup_trace
                 archived = dict(item, decisions=self.decisions[-300:], taunts=sorted(taunts),
-                                page_blocks=getattr(self, '_page_blocks', {}))
+                                page_blocks=getattr(self, '_page_blocks', {}),
+                                policy_version='cup-tactics-v2', **capture_cup_trace(self.state))
                 battle_store.record(battle_store.db_path(str(history_path.parent)), archived, 'cup')
                 history = [h for h in history if h.get('id') != self.fight_id] + [item]
                 temporary = history_path.with_suffix('.tmp')
@@ -1556,7 +1567,7 @@ class ManualArenaController:
                                        allow_secret=not self.secret_disabled)
                 if action:
                     kind, payload = action
-                    self.decisions.append({'state': self.state, 'kind': kind, 'payload': payload})
+                    self.decisions.append({'state': self.state, 'kind': kind, 'payload': payload, 'policy_version': 'cup-tactics-v2'})
                     self.pending = {'fight_id': self.fight_id, 'revision': revision, 'kind': kind, 'payload': payload}
                     self.save()
                     context = 'fight=' + self.fight_id + ' turn=' + str(self.state.get('turn')) + ' revision=' + str(revision) + ' kind=' + kind + ' cards=' + str(payload)
