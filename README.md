@@ -42,6 +42,7 @@ Don't want to touch Python? Grab **Buffy-Setup.exe** (or the portable zip) from 
 * **Daily Bonus Card Farming:** Sequentially processes manga chapters with natural randomized delays (10–18s) to collect up to 10 daily bonus cards and sharpening scrolls.
 * **Daily Quest Integration:** Automatically completes the 75-chapter daily quest milestone.
 * **State Tracking:** Tracks read history in `reading_state.json` and avoids wasteful requests once daily card drops are exhausted.
+* **Reading Recovery:** Below the daily cap, counts only progress confirmed by `/balance`. After two batches without progress, tries another manga; after two stalled titles, pauses and saves the next title for the following cycle. Failed submissions do not skip chapters. Local history tracks submitted chapters and does not replace the site's daily counter.
 
 ### ⛏️ Mining, Quests & Daily Routine
 * **Ore Mining & Auto-Upgrades:** Sends mining hits (`/mine/hit`), purchases pickaxe upgrades and Strong Hit as soon as sufficient ore is collected.

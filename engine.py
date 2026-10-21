@@ -1348,7 +1348,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
     def read_manga_chapters(self, target_count=None, for_event=False):
         """Read manga chapters to farm bonus cards, sharpening scrolls, and 75-chapter daily quest."""
-        self._last_read_count = 0  # chapters the site accepted in this call
+        # Below the daily cap count only growth confirmed by /balance.
+        # At the cap it cannot grow; retain submitted reads for card/event pacing.
+        self._last_read_count = 0
         if not DataManager.get_setting("reading_enabled", True):
             return
 
@@ -1395,6 +1397,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         progress_map = state.get("progress", {})
 
         manga_list = self.get_popular_manga_slugs()
+        if not manga_list:
+            self.log("⚠️ Нет доступных тайтлов для чтения — повторю позже.")
+            return False
         current_manga = state.get("current_manga", "elised")
         if current_manga in manga_list:
             manga_idx = manga_list.index(current_manga)
@@ -1409,6 +1414,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
         try:
             attempts = 0
+            stalled_titles = 0
             while chapters_read_session < target_count and self._alive() and attempts < len(manga_list):
                 self._touch_heartbeat()
                 current_slug = manga_list[manga_idx % len(manga_list)]
@@ -1516,6 +1522,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
                 skip_bad = 0
                 stale_site_batches = 0
+                title_stalled = False
                 site_chapters_before = (stats or {}).get("chapters_read")
                 for vol, ch, ch_url in unread_chapters:
                     if chapters_read_session >= target_count or not self._alive():
@@ -1536,6 +1543,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             self.log(f"⚠️ Слишком много HTTP-ошибок глав в «{current_slug}», переключаюсь.")
                             break
                         continue
+
+                    if re.search(r"window\.isAuth\s*=\s*(?:0|false)\s*;", ch_res.text):
+                        self.log("⚠️ Глава открылась как гостю — чтение приостановлено до восстановления входа.")
+                        return False
 
                     m_ch = re.search(r"window\.current_chapter\s*=\s*({[^;]+});", ch_res.text)
                     if not m_ch:
@@ -1587,7 +1598,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     })
 
                     # Batch submit (every 1-2 chapters)
-                    if len(buffer) >= 2 or (chapters_read_session + len(buffer)) >= target_count:
+                    if (len(buffer) >= 2 or (chapters_read_session + len(buffer)) >= target_count
+                            or ch_url == unread_chapters[-1][2]):
                         payload = {}
                         for bi, b_item in enumerate(buffer):
                             payload[f"items[{bi}][manga_id]"] = b_item["manga_id"]
@@ -1610,8 +1622,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             )
                         except Exception as e:
                             self.log(f"⚠️ addHistory fail: {e}")
-                            buffer.clear()
-                            continue
+                            # An ambiguous response is not permission to skip ahead.
+                            return False
 
                         # Handle rate limit (429) backoff — do NOT count as read
                         if post_res.status_code == 429:
@@ -1630,8 +1642,34 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             return False
 
                         if post_res.status_code == 200:
-                            chapters_read_session += len(buffer)
+                            # The reader accepts empty/text responses when no reward
+                            # drops. Reject HTML/login pages and explicit API errors;
+                            # /balance below verifies actual daily credit separately.
+                            body = post_res.text.strip()
+                            if body.startswith("<"):
+                                self.log("⚠️ addHistory вернул HTML вместо ответа API — повторю позже.")
+                                return False
+                            try:
+                                resp_data = json.loads(body) if body else None
+                            except (ValueError, TypeError):
+                                resp_data = None
+                            if (resp_data is False or (isinstance(resp_data, dict) and
+                                    (resp_data.get("success") is False or resp_data.get("error")
+                                     or resp_data.get("status") == "error"))):
+                                self.log("⚠️ Сайт отклонил запись истории — прогресс не изменён, повторю позже.")
+                                return False
+
+                            live = self.get_reading_stats()
+                            credited = 0
+                            if live:
+                                if site_chapters_before >= stats["chapters_max"]:
+                                    credited = len(buffer)
+                                else:
+                                    credited = min(len(buffer), max(0, live["chapters_read"] - site_chapters_before))
+                            chapters_read_session += credited
                             self._last_read_count = chapters_read_session
+                            # Keep the submitted cursor even for re-reads; otherwise
+                            # accounts with missing local history retry the same chapters.
                             for b in buffer:
                                 if b["url"] not in read_history:
                                     history_order.append(b["url"])
@@ -1646,7 +1684,6 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
                             # Parse drop responses
                             try:
-                                resp_data = post_res.json()
                                 if isinstance(resp_data, dict) and resp_data.get("token") and resp_data.get("type"):
                                     self._take_event_drop(resp_data, headers)
                                 if isinstance(resp_data, dict) and resp_data.get("name"):
@@ -1730,7 +1767,6 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
                             # Process the addHistory reward first: a capped chapter
                             # counter cannot tell us whether the card roll succeeded.
-                            live = self.get_reading_stats()
                             if not live:
                                 self.log("⚠️ Статистика после чтения недоступна — продолжу в следующем цикле.")
                                 buffer.clear()
@@ -1746,24 +1782,37 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             elif site_chapters_before is not None and now_ch <= site_chapters_before:
                                 stale_site_batches += 1
                                 if stale_site_batches >= 2:
-                                    self.log("🛑 Сайт не засчитывает новые главы до лимита — продолжу в следующем цикле.")
+                                    self.log(
+                                        f"📖 «{current_slug}»: две пачки без роста счётчика "
+                                        f"({now_ch}/{now_cap}); возможно, главы уже прочитаны. Беру другой тайтл."
+                                    )
+                                    title_stalled = True
                                     buffer.clear()
-                                    return False
+                                    break
                             else:
                                 stale_site_batches = 0
                             site_chapters_before = now_ch
 
-                            self.log(tr("log_reading_batch", count=chapters_read_session, current=chapters_read_session, total=target_count))
+                            if credited:
+                                self.log(tr("log_reading_batch", count=chapters_read_session, current=chapters_read_session, total=target_count))
+                            else:
+                                self.log(f"📖 История отправлена, но счётчик глав пока не вырос ({now_ch}/{now_cap}).")
 
                         else:
                             self.log(f"⚠️ Ошибка отправки истории (HTTP {post_res.status_code})")
+                            return False
                         buffer.clear()
 
-                if skip_bad >= 25:
+                if chapters_read_session < target_count and self._alive():
                     manga_idx = (manga_idx + 1) % len(manga_list)
                     state["current_manga"] = manga_list[manga_idx]
                     state["manga_idx"] = manga_idx
                     DataManager.save_reading_state(state)
+                if title_stalled or stale_site_batches:
+                    stalled_titles += 1
+                    if stalled_titles >= 2:
+                        self.log("🛑 На двух тайтлах нет роста счётчика. Чтение приостановлено; следующий цикл начну с другого тайтла.")
+                        return False
 
             state["current_manga"] = manga_list[manga_idx % len(manga_list)]
             state["manga_idx"] = manga_idx
