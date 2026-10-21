@@ -16,6 +16,7 @@ build/
 geckodriver.log
 chromedriver.log
 *.log
+reports/
 
 MangaBuffMiner.exe
 main.dist/

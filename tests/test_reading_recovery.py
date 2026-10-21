@@ -33,6 +33,7 @@ class ReadingRecoveryTests(unittest.TestCase):
         self.bot.session.post.side_effect = self.post
         settings = {'reading_delay_min': 0, 'reading_delay_max': 0}
         for p in (
+            patch('engine.DataManager.get_credentials', return_value=('', '')),
             patch('engine.DataManager.get_setting', side_effect=lambda k, d=None: settings.get(k, d)),
             patch('engine.DataManager.load_reading_state', side_effect=lambda: copy.deepcopy(self.state)),
             patch('engine.DataManager.save_reading_state', side_effect=self.save),
@@ -204,6 +205,17 @@ class ReadingRecoveryTests(unittest.TestCase):
         self.assertEqual(self.bot._last_read_count, 0)
         self.assertEqual(self.submitted, ['elised', 'elised'])
         self.assertEqual(self.state['current_manga'], 'elised')
+
+    def test_reading_diagnostics_link_response_to_counter_without_token(self):
+        self.counting_slugs.add('elised')
+        self.bot.read_manga_chapters(target_count=2)
+        messages = [c.args[0] for c in self.bot.log.call_args_list]
+        responses = [json.loads(m.split('reading_response ', 1)[1]) for m in messages if 'reading_response ' in m]
+        credits = [json.loads(m.split('reading_credit ', 1)[1]) for m in messages if 'reading_credit ' in m]
+        self.assertEqual(responses[0]['run'], credits[0]['run'])
+        self.assertEqual(responses[0]['batch'], credits[0]['batch'])
+        self.assertEqual((credits[0]['before'], credits[0]['after']), (62, 64))
+        self.assertNotIn('X-CSRF-TOKEN', '\n'.join(messages))
 
 
 if __name__ == '__main__':

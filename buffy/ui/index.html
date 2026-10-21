@@ -524,7 +524,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 
       <!-- ================= LOG ================= -->
       <section class="page" id="page-log">
-        <div class="row" style="margin-bottom:12px">
+        <div class="row" style="margin-bottom:12px;flex-wrap:wrap">
           <div class="chips" id="log-chips">
             <button class="chip active" data-filter="all">Все</button>
             <button class="chip" data-filter="important">Важное</button>
@@ -532,6 +532,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
           </div>
           <div class="spacer" style="flex:1"></div>
           <button class="btn small ghost" id="log-clear">Очистить</button>
+          <button class="btn small ghost" id="log-export">Сохранить полный лог</button>
           <button class="btn small" data-report>Сообщить о проблеме</button>
         </div>
         <div class="log" id="full-log"><div class="empty">Журнал пуст</div></div>
@@ -609,9 +610,9 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
   <div class="wizard">
     <div class="card">
       <h2>Сообщить о проблеме</h2>
-      <p class="lead">Опиши своими словами, что пошло не так. Технический журнал Buffy приложится сам — почта, пароль, токены и прокси в нём скрыты.</p>
+      <p class="lead">Опиши, что пошло не так. Buffy сохранит полный технический отчёт в файл, скрыв почту, пароль, токены и прокси.</p>
       <textarea class="input" id="rep-text" rows="5" placeholder="Например: арена перестала проводить бои после обновления"></textarea>
-      <p class="hint" style="margin:10px 0 0">Откроется GitHub с готовым сообщением — останется нажать «Create». Нужен аккаунт GitHub.</p>
+      <p class="hint" style="margin:10px 0 0">Откроются папка с Buffy-diagnostic.txt и GitHub. Перетащи файл в текст сообщения и нажми «Create». Вставленный в сообщение журнал сокращён; файл содержит весь сохранённый лог. Нужен аккаунт GitHub.</p>
       <div class="wiz-nav">
         <button class="btn ghost" id="rep-cancel">Отмена</button>
         <button class="btn primary" id="rep-send">Открыть GitHub</button>
@@ -831,6 +832,7 @@ function mockApi() {
     find_chat_id: async () => { await wait(600); return { ok: true, chat_id: "713822262" }; },
     test_proxy: async () => { await wait(800); return { ok: true, detail: "MangaBuff доступен · 184 мс" }; },
     open_url: async () => true, open_data_dir: async () => true, report_problem: async () => ({ ok: true }),
+    export_logs: async () => ({ ok: true, path: "reports/Buffy-diagnostic.txt" }),
     hide_window: async () => true, quit_app: async () => true,
     run_module: async (n) => { manual[n] = { state: "running", summary: "" };
       setTimeout(() => manual[n] = { state: "done", at: "21:40", summary: "главы 55/75, бонусные карты 6/10. Следующая карта примерно через 28 мин" }, 2500);
@@ -1204,13 +1206,28 @@ $$("[data-report]").forEach((b) => b.addEventListener("click", () => {
   setTimeout(() => $("#rep-text").focus(), 50);
 }));
 $("#rep-cancel").addEventListener("click", () => $("#report").classList.remove("show"));
+$("#log-export").addEventListener("click", async () => {
+  const button = $("#log-export");
+  button.disabled = true;
+  try {
+    const result = await api.export_logs();
+    toast(result.ok ? (result.warning || "Полный лог сохранён в Buffy-diagnostic.txt. Папка открыта.") : result.error, result.ok ? "ok" : "err");
+  } catch (_) { toast("Не удалось сохранить отчёт. Попробуй ещё раз.", "err"); }
+  finally { button.disabled = false; }
+});
 $("#rep-send").addEventListener("click", async () => {
   const text = $("#rep-text").value.trim();
   if (!text) { toast("Напиши пару слов о проблеме", "err"); $("#rep-text").focus(); return; }
-  await api.report_problem(text);
-  $("#report").classList.remove("show");
-  $("#rep-text").value = "";
-  toast("Открыл GitHub — проверь текст и нажми «Create»", "ok");
+  const button = $("#rep-send");
+  button.disabled = true;
+  try {
+    const result = await api.report_problem(text);
+    if (!result.ok) { toast(result.error, "err"); return; }
+    $("#report").classList.remove("show");
+    $("#rep-text").value = "";
+    toast(result.warning || "Прикрепи Buffy-diagnostic.txt из открывшейся папки к сообщению на GitHub.", "ok");
+  } catch (_) { toast("Не удалось подготовить сообщение. Описание сохранено — попробуй ещё раз.", "err"); }
+  finally { button.disabled = false; }
 });
 
 /* Segmented choices (string settings) */

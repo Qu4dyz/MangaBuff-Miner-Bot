@@ -43,6 +43,7 @@ Don't want to touch Python? Grab **Buffy-Setup.exe** (or the portable zip) from 
 * **Daily Quest Integration:** Automatically completes the 75-chapter daily quest milestone.
 * **State Tracking:** Tracks read history in `reading_state.json` and avoids wasteful requests once daily card drops are exhausted.
 * **Reading Recovery:** Below the daily cap, counts only progress confirmed by `/balance`. After two batches without progress, tries another manga; after two stalled titles, pauses and saves the next title for the following cycle. Failed submissions do not skip chapters. Local history tracks submitted chapters and does not replace the site's daily counter.
+* **Diagnostics:** In Buffy, use **Журнал → Сохранить полный лог** to export `%APPDATA%\Buffy\reports\Buffy-diagnostic.txt`. The report includes both retained log files and the current session buffer with secrets masked; exports replace the same file. Problem reports open its folder and ask you to attach it on GitHub, where the inline preview is shortened. Reading diagnostics include HTTP status, safe error fields and before/after daily counters, without cookies, reward tokens or full HTML pages. Older logs beyond file rotation are unavailable.
 
 ### ⛏️ Mining, Quests & Daily Routine
 * **Ore Mining & Auto-Upgrades:** Sends mining hits (`/mine/hit`), purchases pickaxe upgrades and Strong Hit as soon as sufficient ore is collected.

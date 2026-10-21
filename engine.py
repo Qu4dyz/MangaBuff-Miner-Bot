@@ -4,6 +4,8 @@ from bs4 import BeautifulSoup
 from config import CONFIG, TARGET_RARITIES, BASE_DIR
 import re
 import json
+import uuid
+from diagnostics import mask_secrets, reading_response_details
 from utils import (
     parse_smart_number,
     safe_cookies_to_dict,
@@ -1411,6 +1413,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         cards_gained_session = 0
         scrolls_gained_session = 0
         buffer = []
+        reading_run = uuid.uuid4().hex[:12]
+        reading_batch = 0
 
         try:
             attempts = 0
@@ -1614,6 +1618,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         }
 
                         try:
+                            reading_batch += 1
+                            request_started = time.monotonic()
                             post_res = self.session.post(
                                 "https://mangabuff.ru/addHistory?r=702",
                                 data=payload,
@@ -1621,9 +1627,17 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                                 timeout=10
                             )
                         except Exception as e:
-                            self.log(f"⚠️ addHistory fail: {e}")
+                            self.log(f"⚠️ addHistory fail run={reading_run} batch={reading_batch}: {mask_secrets(str(e))}")
                             # An ambiguous response is not permission to skip ahead.
                             return False
+
+                        secrets = (*DataManager.get_credentials(), DataManager.get_setting('proxy', ''))
+                        self.log('🔎 reading_response ' + json.dumps({
+                            'run': reading_run, 'batch': reading_batch,
+                            'chapters': [{'manga': b['slug'], 'vol': b['vol'], 'ch': b['ch']} for b in buffer],
+                            'elapsed_ms': round((time.monotonic() - request_started) * 1000),
+                            'response': reading_response_details(post_res, secrets),
+                        }, ensure_ascii=False))
 
                         # Handle rate limit (429) backoff — do NOT count as read
                         if post_res.status_code == 429:
@@ -1668,6 +1682,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                                     credited = min(len(buffer), max(0, live["chapters_read"] - site_chapters_before))
                             chapters_read_session += credited
                             self._last_read_count = chapters_read_session
+                            self.log('🔎 reading_credit ' + json.dumps({
+                                'run': reading_run, 'batch': reading_batch,
+                                'before': site_chapters_before,
+                                'after': live['chapters_read'] if live else None,
+                                'cap': stats['chapters_max'], 'counted': credited,
+                                'count_mode': 'submitted_at_cap' if site_chapters_before >= stats['chapters_max'] else 'daily_delta',
+                            }, ensure_ascii=False))
                             # Keep the submitted cursor even for re-reads; otherwise
                             # accounts with missing local history retry the same chapters.
                             for b in buffer:

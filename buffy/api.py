@@ -26,6 +26,8 @@ import requests
 from buffy import APP_NAME, REPO_URL, __version__
 from buffy.humanize import MODULES as MODULE_TITLES, humanize
 from data_management import DataManager
+from diagnostics import mask_secrets
+from buffy.diagnostics import save_report
 from utils import normalize_proxy_url
 
 MSK = timezone(timedelta(hours=3))
@@ -102,7 +104,7 @@ class BuffyApi:
 
     # ------------------------------------------------------------------ logs
     def _log(self, message):
-        raw = str(message)
+        raw = mask_secrets(str(message))
         ts = time.strftime("%H:%M:%S")
         _file_log().info(raw)
         with self._log_lock:
@@ -132,15 +134,43 @@ class BuffyApi:
         return True
 
     def report_problem(self, description):
-        """Open a prefilled GitHub issue: the user's words plus the technical log, secrets masked."""
+        """Save full diagnostics before opening the issue editor with a short preview."""
+        result = self.export_logs(description)
+        if not result['ok']:
+            return result
         with self._log_lock:
             raw = list(self._raw)
+        url = build_issue_url(description, raw, self._report_secrets(), status=self._status,
+                              report_name=os.path.basename(result['path']))
+        webbrowser.open(url)
+        return result
+
+    def _report_secrets(self):
         email, password = DataManager.get_credentials()
         settings = DataManager.load_json(_data_file())
-        secrets = [email, password, settings.get("tg_token"), settings.get("tg_chat_id"), settings.get("proxy")]
-        url = build_issue_url(description, raw, secrets, status=self._status)
-        webbrowser.open(url)
-        return {"ok": True}
+        return [email, password, settings.get('tg_token'), settings.get('tg_chat_id'), settings.get('proxy')]
+
+    def _save_report(self, description):
+        with self._log_lock:
+            raw = list(self._raw)
+        return save_report(os.path.dirname(os.path.abspath(_data_file())), description, raw,
+                           self._report_secrets(), self._status, _file_log())
+
+    def _reveal_report(self, path):
+        if sys.platform == 'win32':
+            subprocess.Popen(['explorer.exe', '/select,', os.path.normpath(path)])
+
+    def export_logs(self, description=''):
+        try:
+            path = self._save_report(description)
+        except OSError:
+            return {'ok': False, 'error': 'Не удалось сохранить отчёт. Проверь свободное место и доступ к папке Buffy.'}
+        result = {'ok': True, 'path': path}
+        try:
+            self._reveal_report(path)
+        except OSError:
+            result['warning'] = 'Не удалось открыть папку. Отчёт сохранён: ' + path
+        return result
 
     # -------------------------------------------------------------- settings
     def get_settings(self):
@@ -569,36 +599,17 @@ def _tg_error(description):
 
 ISSUE_URL_LIMIT = 7500  # GitHub refuses much longer prefilled URLs
 
-_SECRET_PATTERNS = [
-    (re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{30,}\b"), "<tg-token>"),
-    (re.compile(r"(\w+://)[^\s/:@]+:[^\s/@]+@"), r"\1<user>:<pass>@"),
-    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "<email>"),
-    (re.compile(r"(?i)(token|csrf|cookie|session|password|passwd|secret)([\"']?\s*[:=]\s*[\"']?)[^\s,;\"'&]+"),
-     r"\1\2<hidden>"),
-    (re.compile(r"\b[A-Za-z0-9+/_-]{40,}={0,2}"), "<hidden>"),
-]
-
-
-def mask_secrets(text, secrets=()):
-    for value in secrets:
-        value = str(value or "").strip()
-        if len(value) >= 4:
-            text = text.replace(value, "<hidden>")
-    for rx, repl in _SECRET_PATTERNS:
-        text = rx.sub(repl, text)
-    return text
-
-
-def build_issue_url(description, raw_lines, secrets=(), status=""):
+def build_issue_url(description, raw_lines, secrets=(), status="", report_name=''):
     from config import IS_FROZEN
 
-    desc = mask_secrets((description or "").strip() or "(без описания)", secrets)
+    desc = mask_secrets((description or "").strip() or "(без описания)", secrets)[:350]
     title = desc.splitlines()[0][:80]
     head = (
         f"**Что случилось**\n{desc}\n\n"
         f"**Система**\nBuffy {__version__} · {platform.platform()} · "
         f"{'exe' if IS_FROZEN else 'python'} · бот: {status}\n\n"
-        "<details><summary>Журнал (заполнен автоматически)</summary>\n\n```\n"
+        + (f'**Полный журнал:** прикрепи файл `{report_name}` из открывшейся папки.\n\n' if report_name else '')
+        + "<details><summary>Сокращённый журнал (полный — в файле отчёта)</summary>\n\n```\n"
     )
     tail = "\n```\n</details>\n"
     lines = [mask_secrets(line, secrets)[:400] for line in raw_lines]
