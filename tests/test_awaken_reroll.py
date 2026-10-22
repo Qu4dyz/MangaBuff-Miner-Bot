@@ -15,7 +15,7 @@ class FakeSite(AwakenRerollMixin):
 
     def __init__(self, cards, energy, deck=(CID, 2, 3, 4), hour=12, sticky_awake=False):
         self.cards, self.energy, self.deck, self.hour = cards, energy, list(deck), hour
-        self.sticky_awake = sticky_awake
+        self.sticky_awake, self.terse = sticky_awake, False
         self.state, self.calls, self.saved_decks = {}, [], []
         self.log, self.notifier = Mock(), Mock()
         self.settings = {}
@@ -69,10 +69,16 @@ class FakeSite(AwakenRerollMixin):
         if url.endswith('/awaken'):
             self.calls.append('awaken')
             c = self.cards[data['card_user_id']]
-            assert not c['awake'], 'awakening an awakened card'
+            if c['awake']:
+                raise ValueError('Arena API HTTP 422: card is already awakened')
             self.energy -= 1
             c['awake'], c['stats'] = True, c['rolls'].pop(0)
-            return {'success': True}
+            if self.terse:
+                return {'success': True}
+            a, h, cr = c['stats']
+            return {'success': True, 'free_left': 0, 'awakening_energy': str(self.energy),
+                    'card': {'card_user_id': data['card_user_id'], 'attack': a, 'health': h, 'crit_chance': cr,
+                             'seal': {'id': 14, 'name': 'Печать уворота'}}}
         raise AssertionError(url)
 
     def _arena_post(self, url, data):
@@ -163,8 +169,19 @@ class AwakenRerollTests(unittest.TestCase):
         site = FakeSite({CID: card(True, (90, 800, 10), [(200, 1500, 30)])}, energy=5, sticky_awake=True)
         with self.assertRaises(ValueError):
             site.run(GOAL)
-        self.assertEqual(site.energy, 5)
-        self.assertNotIn('awaken', site.calls)
+        self.assertEqual(site.energy, 5)  # the site refused to awaken a still awakened card
+
+    def test_two_requests_per_roll(self):
+        site = FakeSite({CID: card(True, (90, 800, 10), [(100, 900, 5), (110, 950, 5), (160, 1300, 9)])}, energy=10)
+        site.run(GOAL)
+        rolls = site.calls[site.calls.index('unawaken'):]
+        self.assertEqual(rolls, ['unawaken', 'awaken'] * 3)  # no collection reads between rolls
+
+    def test_terse_answer_falls_back_to_the_collection(self):
+        site = FakeSite({CID: card(True, (90, 800, 10), [(100, 900, 5), (160, 1300, 9)])}, energy=10)
+        site.terse = True
+        self.assertEqual(site.run(GOAL), 2)
+        self.assertEqual(site.settings['cards'][0]['status'], 'reached')
 
     def test_stop_in_the_app_ends_the_series(self):
         site = FakeSite({CID: card(True, (90, 800, 10), [(100, 900, 5)] * 5)}, energy=10)

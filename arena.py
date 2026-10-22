@@ -1739,6 +1739,27 @@ def reroll_odds(samples, goal):
     return sum(reroll_meets(c, goal) for c in rolls) / len(rolls)
 
 
+def reroll_card_from_response(response, cid):
+    """Stats of the awakened card from the site answer, or None to fall back to the collection."""
+    api = response.get('card') if isinstance(response, dict) else None
+    if not isinstance(api, dict) or str(api.get('card_user_id')) != str(cid):
+        return None
+    try:
+        parsed = parse_roll_card(canonical_card(api))
+    except ValueError:
+        return None
+    return {'id': cid, 'battle_attack': parsed['attack'], 'battle_health': parsed['health'],
+            'battle_crit_chance': parsed['crit_chance'], 'battle_seal_id': canonical_card(api).get('battle_seal_id')}
+
+
+def reroll_energy_left(response):
+    """Awakenings left after this one, or None when the answer does not say (then the page is read)."""
+    try:
+        return int(response['awakening_energy']) + int(response.get('free_left') or 0)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class AwakenRerollMixin:
     """Awaken the chosen cards again and again until each one's stats reach the user's minimums.
 
@@ -1812,7 +1833,7 @@ class AwakenRerollMixin:
             self._reroll_update(cid, status='missing')
             self.log(f"⚠️ Перебор пробуждения: карта «{item['name']}» #{cid} не найдена в коллекции — пропускаю.")
             return 0, False
-        rolls = 0
+        rolls, energy, awaken_url = 0, None, None
         while rolls < budget and self._alive():
             goal = self._reroll_still_wanted(cid)
             if goal is None:
@@ -1823,7 +1844,8 @@ class AwakenRerollMixin:
                 self.notifier.notify_alert('перебор пробуждения',
                                            f"«{item['name']}» выбила {stats_text(card)}. Цель достигнута, карта оставлена.")
                 return rolls, False
-            awaken_url, energy = self._reroll_energy()
+            if energy is None:
+                awaken_url, energy = self._reroll_energy()
             if energy <= 0:  # checked before unawakening: never leave a card plain
                 return rolls, True
             if card is not None:
@@ -1831,20 +1853,21 @@ class AwakenRerollMixin:
                 self.management_save({'reroll_pending': 'unawaken'})
                 # Pairs, not {'card_user_ids[]': [cid]}: curl_cffi urlencodes a dict without doseq and sends "[cid]" (HTTP 422)
                 self.management_post(unawaken_url, [('card_user_ids[]', cid), ('confirmed', 1)], mutation=True)
-                if self._reroll_card(route, item, -1) is None:
-                    raise ValueError('Unawakening not confirmed by the collection')
+                # No collection check here: if unawakening silently failed, the site refuses to
+                # awaken an awakened card and the series stops on that error
             self.management_save({'reroll_pending': 'awaken'})
-            self.management_post(awaken_url, {'card_user_id': cid}, mutation=True)
-            card = self._reroll_card(route, item, 1)
+            response = self.management_post(awaken_url, {'card_user_id': cid}, mutation=True)
+            # The answer carries the new stats and the energy left: two requests per roll instead of six
+            card = reroll_card_from_response(response, cid) or self._reroll_card(route, item, 1)
             if card is None:
                 raise ValueError('Awakening not confirmed by the collection')
+            energy = reroll_energy_left(response)
             self.management_save({'reroll_pending': None})
             rolls += 1
             done = int(item.get('attempts') or 0) + 1
             item = self._reroll_update(cid, attempts=done, status='running',
                                        history=(item.get('history') or [])[-29:] + [card_stats(card)]) or item
             self.log(f"🎲 Перебор пробуждения «{item['name']}» #{done}: {stats_text(card)}")
-            time.sleep(5)  # the site answers 429 to fast series
         return rolls, rolls >= budget
 
     def run_awaken_reroll(self, max_rolls=20):
