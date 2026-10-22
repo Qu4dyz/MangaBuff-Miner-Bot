@@ -1,5 +1,12 @@
 # Changelog
 
+## 11.0.12 — 2026-10-22
+
+### Fixed
+
+- "Report a problem" opens the GitHub issue even when the diagnostic file cannot be saved; the issue then carries the short log only.
+- A title that gave real chapter progress and then hit one stale batch at its end no longer counts toward the two-stalled-titles stop.
+
 ## 11.0.11 — 2026-10-21
 
 ### Fixed
