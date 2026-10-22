@@ -5,6 +5,7 @@
 ### Added
 
 - Sign-in through VK, Discord, Yandex or Google in Buffy's wizard. Buffy keeps the cookies of MangaBuff's own sign-in window; when the session dies it signs in again in a hidden window and shows it only if the provider asks for input.
+- The account card shows your MangaBuff nickname, avatar and profile cover (animated ones play) instead of the email or provider label.
 
 ### Changed
 

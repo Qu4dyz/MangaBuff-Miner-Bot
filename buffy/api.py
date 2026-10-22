@@ -206,6 +206,8 @@ class BuffyApi:
             "repo": REPO_URL,
             "email": email or "",
             "has_credentials": DataManager.has_login(),
+            "login_method": DataManager.get_setting("login_method"),
+            "profile": DataManager.get_setting("account_profile"),
             "onboarded": bool(settings.get("app_onboarded")) and DataManager.has_login(),
             "settings": settings,
             "data_dir": os.path.dirname(_data_file()),
@@ -240,6 +242,7 @@ class BuffyApi:
             if ok:
                 DataManager.switch_account(email)
                 DataManager.set_credentials(email, password)
+                threading.Thread(target=bot.refresh_profile, daemon=True).start()
                 self._log(f"✅ Вход выполнен: {email}")
                 return {"ok": True}
             if getattr(bot, "login_rejected", False):
@@ -276,6 +279,7 @@ class BuffyApi:
         DataManager.switch_account(label)
         DataManager.set_credentials(label, None, login_method="social")
         DataManager.set_setting("login_provider", provider)
+        threading.Thread(target=bot.refresh_profile, daemon=True).start()
         self._log(f"✅ Вход выполнен: {label}")
         return {"ok": True}
 
@@ -492,6 +496,7 @@ class BuffyApi:
             last_seq = self._log_seq
         return {
             "status": self._status,
+            "profile": DataManager.get_setting("account_profile"),
             "uptime_sec": int(time.time() - self._started_at) if self._started_at else 0,
             "now_msk": datetime.now(MSK).isoformat(),
             "cards": {

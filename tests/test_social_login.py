@@ -162,6 +162,43 @@ class SocialLoginApiTests(unittest.TestCase):
         self.assertFalse(result["ok"])
 
 
+PROFILE = '''<div class="profile__background" style="background-image: url('/img/covers/54.jpg')">
+<video preload="metadata" class="profile__cover" autoplay="true" muted="muted" loop="true">
+ <source src="/img/covers/54.mp4" type="video/mp4"> </video>
+<a href="javascript:void(0)" class="profile__avatar"> <img src="/img/avatars/x150/558.gif" class="my-avatar" alt="Аватар"> </a>
+<div class="profile__name" data-name="Tom &amp; Jerry">Tom &amp; Jerry</div>'''
+
+
+class RefreshProfileTests(unittest.TestCase):
+    def setUp(self):
+        self.bot = object.__new__(MangaMinerBot)
+        self.bot.user_id = None
+        self.bot.session = Mock()
+
+    def test_reads_name_animated_avatar_and_cover(self):
+        self.bot.session.get.side_effect = [page(), page(text=PROFILE)]
+        with patch("engine.DataManager.set_setting") as save:
+            profile = self.bot.refresh_profile()
+        self.assertEqual(self.bot.session.get.call_args.args[0], "https://mangabuff.ru/users/4242")
+        self.assertEqual(profile, {
+            "id": "4242", "name": "Tom & Jerry",
+            "avatar": "https://mangabuff.ru/img/avatars/x150/558.gif",
+            "cover": "https://mangabuff.ru/img/covers/54.jpg",
+            "cover_video": "https://mangabuff.ru/img/covers/54.mp4",
+        })
+        save.assert_called_once_with("account_profile", profile)
+
+    def test_unreadable_profile_keeps_old_one_and_never_raises(self):
+        self.bot.user_id = "4242"
+        for reply in (page(status=500, text=""), page(text="<html>guest</html>")):
+            self.bot.session.get.side_effect = [reply]
+            with patch("engine.DataManager.set_setting") as save:
+                self.assertIsNone(self.bot.refresh_profile())
+            save.assert_not_called()
+        self.bot.session.get.side_effect = OSError("offline")
+        self.assertIsNone(self.bot.refresh_profile())
+
+
 class HasLoginTests(unittest.TestCase):
     def check(self, email, password, method):
         data = {"email": email, "password": password, "login_method": method}

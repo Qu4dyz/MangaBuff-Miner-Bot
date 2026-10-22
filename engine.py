@@ -5,6 +5,8 @@ from config import CONFIG, TARGET_RARITIES, BASE_DIR
 import re
 import json
 import uuid
+from html import unescape
+from urllib.parse import urljoin
 from diagnostics import mask_secrets, reading_response_details
 from utils import (
     parse_smart_number,
@@ -422,6 +424,35 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.user_id = user.group(1)
         self._persist_session_cookies()
         return True
+
+    def refresh_profile(self):
+        """Save nickname, avatar and cover from the site profile for Buffy's account card (cosmetic: never raises)."""
+        try:
+            if not self.user_id:
+                found = re.search(r"/users/(\d+)", self.session.get("https://mangabuff.ru/balance", timeout=10).text)
+                if not found:
+                    return None
+                self.user_id = found.group(1)
+            res = self.session.get(f"https://mangabuff.ru/users/{self.user_id}", timeout=15)
+            name = re.search(r'class="profile__name" data-name="([^"]*)"', res.text) if res.status_code == 200 else None
+            if not name:
+                return None
+
+            def media(pattern):
+                found = re.search(pattern, res.text)
+                return urljoin("https://mangabuff.ru/", found.group(1)) if found else None
+
+            profile = {
+                "id": self.user_id,
+                "name": unescape(name.group(1)),
+                "avatar": media(r'class="profile__avatar">\s*<img src="([^"]+)"'),  # often an animated gif
+                "cover": media(r"class=\"profile__background\" style=\"background-image: url\('([^']+)'\)"),
+                "cover_video": media(r'class="profile__cover"[^>]*>\s*<source src="([^"]+)"'),
+            }
+            DataManager.set_setting("account_profile", profile)
+            return profile
+        except Exception:
+            return None
 
     def use_cookies(self, cookies, user_agent=None):
         load_cookies_into(self.session, cookies)
@@ -3886,6 +3917,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
 
         # Warm / refresh DDoS-Guard cookies up front (proxy required on VPS)
         self.ensure_site_access()
+        self.refresh_profile()
 
         # Fill the stats panel now instead of after the first full cycle
         try:
