@@ -52,6 +52,8 @@ Every module can be turned on or off, and most can be started by hand right away
 | 🏛️ | **Club** | Contributes crystals and tells you when the club needs your card |
 | 📺 | **Ads** | Three ads a day for +21 💎, nothing to watch yourself |
 | 🎃 | **Events** | Collects holiday rewards, such as Halloween candies |
+| ✨ | **Awakening reroll** | Awakens chosen cards again and again until ATK, HP and CR reach your minimums |
+| 🔮 | **Seal reforge** | Reforges the seal of chosen cards until a wanted one comes up, keeping ATK, HP and CR |
 
 <details>
 <summary><b>📖 More on chapter reading</b></summary>
@@ -81,6 +83,10 @@ When the squad returns, Buffy claims diamonds and crystals and sends it on the b
 </details>
 
 ---
+
+## ✨ Awakening: stat reroll and seal reforge
+
+A separate «Пробуждение» page in Buffy. **Stat reroll:** pick one or several cards (tiles with art, rank, copy number and stats), set minimum ATK, HP and CR with sliders; the bot awakens, checks, unawakens for free and tries again, using only awakening energy from fights. Every roll is shown with its seal; «Stop and keep» keeps the roll on screen (3 s hold before the next one); cards go back into the deck and Tower squad; it waits during the evening cup and notifies you on Windows and Telegram. **Seal reforge:** pick awakened cards and acceptable seals; the bot reforges (500 essence each) within your essence limit, with a hint per seal on how often opponents use it and whether it wins more than deck strength predicts.
 
 ## 🔐 Signing in
 

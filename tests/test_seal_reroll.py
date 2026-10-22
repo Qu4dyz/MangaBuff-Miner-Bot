@@ -116,3 +116,16 @@ class SealRerollTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SealWaitsForStatsTests(unittest.TestCase):
+    def test_card_in_an_unfinished_stats_reroll_is_not_reforged(self):
+        forge = FakeForge(seal=2, rolls=[14])
+        stats = {'active': True, 'cards': [{'card_user_id': CID, 'status': 'running'}]}
+        settings = {'seal_reroll': {'active': True, 'seals': [14], 'max_essence': 0, 'spent': 0,
+                                    'cards': [{'card_user_id': CID, 'name': 'Цунаде'}]}, 'awaken_reroll': stats}
+        with patch('arena.DataManager.get_setting', side_effect=lambda k, d=None: settings.get(k, d)), \
+                patch('arena.DataManager.set_setting', side_effect=settings.__setitem__), patch('arena.time.sleep'):
+            self.assertEqual(forge.run_seal_reroll(), 0)
+        self.assertNotIn('seal', forge.calls)
+        self.assertEqual(settings['seal_reroll']['cards'][0].get('status'), None)  # waits, not «missing»

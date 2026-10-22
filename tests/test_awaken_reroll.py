@@ -301,3 +301,46 @@ class KeepAsIsTests(unittest.TestCase):
                 patch('buffy.api.DataManager.set_setting', side_effect=store.__setitem__):
             api.reroll_keep(CID2)  # nothing rolled yet: stays in the queue
         self.assertEqual(store['awaken_reroll']['cards'][1]['status'], 'waiting')
+
+
+class ReviewFixTests(unittest.TestCase):
+    def test_card_on_a_later_page_is_found(self):
+        site = FakeSite({}, energy=0)
+        pages = {1: {'data': [{'id': 1, 'in_trade': 0}], 'next_page_url': '/p2'},
+                 2: {'data': [{'id': CID, 'in_trade': 0, 'battle_attack': 1}], 'next_page_url': None}}
+        site.management_post = lambda url, data, mutation=False, before_send=None: pages[data['page']]
+        self.assertEqual(site._reroll_card('/cards-filter/1', {'name': 'Девушка', 'card_user_id': CID}, 1)['id'], CID)
+        self.assertIsNone(site._reroll_card('/cards-filter/1', {'name': 'Девушка', 'card_user_id': 999}, 1))
+
+    def test_cached_collection_gets_the_latest_roll(self):
+        site = FakeSite({CID: card(True, (90, 800, 10), [(100, 900, 5)])}, energy=1)
+        site.state['inventory'] = [{'id': CID, 'battle_attack': 90, 'battle_health': 800, 'battle_crit_chance': 10}]
+        site.run(GOAL)
+        self.assertEqual(site.state['inventory'][0]['battle_attack'], 100)
+
+    def test_tower_squad_comes_back_after_a_reroll(self):
+        from engine import rerolled_out_of_squad
+        goal = {'awaken_reroll': {'cards': [{'card_user_id': CID}]}}
+        with patch('engine.DataManager.get_setting', side_effect=lambda k, d=None: goal.get(k, d)):
+            self.assertTrue(rerolled_out_of_squad([2, 3, 4], [2, 3, 4, CID]))       # only the rerolled card is gone
+            self.assertFalse(rerolled_out_of_squad([2, 3, 4], [2, 3, 4, 5]))        # the person changed the squad
+            self.assertFalse(rerolled_out_of_squad([2, 3, 9], [2, 3, 4, CID]))      # a new card on the site wins
+            self.assertFalse(rerolled_out_of_squad([2, 3, 4, CID], [2, 3, 4, CID]))  # nothing missing
+
+
+class RefusedCardTests(unittest.TestCase):
+    def test_site_refusal_skips_the_card_and_goes_on(self):
+        site = FakeSite({CID: card(True, (90, 800, 10), [(170, 1300, 9)]),
+                         CID2: card(False, (0, 0, 0), [(170, 1300, 9)])}, energy=5, deck=(2, 3, 4, 5))
+        real = site.management_post
+
+        def post(url, data, mutation=False, before_send=None):
+            if url.endswith('/unawaken'):
+                raise ValueError('Arena API HTTP 422: Карта заблокирована')
+            return real(url, data, mutation, before_send)
+        site.management_post = post
+        self.assertEqual(site.run(GOAL, ids=(CID, CID2)), 1)
+        first, second = site.settings['cards']
+        self.assertEqual((first['status'], first['reason']), ('refused', 'Карта заблокирована'))
+        self.assertEqual(second['status'], 'reached')
+        self.assertTrue(site.cards[CID]['awake'])  # never left plain

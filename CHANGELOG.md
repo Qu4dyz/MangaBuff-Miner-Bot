@@ -4,6 +4,7 @@
 
 ### Added
 
+- Awakening reroll safety: «Оставить как есть» per card, a paused series shows paused cards, a card the site refuses to unawaken is skipped with the reason, a popular name is searched across result pages, a rerolled card returns to the Tower squad, and the card list shows the latest roll.
 - Seal reforge on the Awakening page: pick awakened cards and the seals you want; the bot reforges (500 essence each) until one of them comes up, keeps attack, HP and crit untouched and never spends past your essence limit. Each seal shows how often opponents use it and whether it wins more than deck strength predicts (from 3.5k arena and cup fights).
 - Reroll page: stats and seals are labelled, a finished card gets a green badge plus Windows and Telegram notifications, minimums are edited right in the running card, finished cards can be rerolled again with new minimums, and your awakened cards are listed instantly with a filter.
 - Awakening reroll (its own «Пробуждение» page): pick one or several cards from tiles with their art, rank, copy number and stats, set shared minimum ATK, HP and crit with sliders; it starts right away (even with the bot stopped) and asks in its own dialog before discarding current stats; the bot awakens it, frees it again when the stats fall short (unawakening is free) and repeats with energy from arena fights until the card meets every minimum. It shows the odds from your own awakened cards, puts the card back into the active deck, waits during the evening cup and never buys energy.

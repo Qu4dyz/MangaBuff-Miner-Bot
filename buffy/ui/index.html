@@ -1205,6 +1205,7 @@ function rollChip(r, goal) {
 }
 const REROLL_STATUS = {
   waiting: ["wait", "ждёт очереди"], running: ["run", "перебирается"], reached: ["done", "готово"], missing: ["miss", "не найдена"],
+  refused: ["miss", "сайт не разрешил"],
 };
 function cardState(c, goal) {
   if (c.status === "reached" && c.kept) return ["done", "оставлена"];
@@ -1212,7 +1213,7 @@ function cardState(c, goal) {
   return REROLL_STATUS[c.status] || REROLL_STATUS.waiting;
 }
 function keepButton(c, kind) {
-  return ["reached", "missing"].includes(c.status) || !(c.history || []).length ? ""
+  return ["reached", "missing", "refused"].includes(c.status) || !(c.history || []).length ? ""
     : `<button class="btn small ghost keep-btn" data-keep="${c.card_user_id}" data-kind="${kind}" title="Карта остаётся с последним броском и выходит из перебора">Оставить как есть</button>`;
 }
 document.addEventListener("click", async (e) => {
@@ -1232,7 +1233,7 @@ function renderReroll(goal) {
   if (!has) return;
   notifyRerollChanges(goal);
   if (!show) return;
-  const cards = goal.cards, left = cards.filter((c) => !["reached", "missing"].includes(c.status)).length;
+  const cards = goal.cards, left = cards.filter((c) => !["reached", "missing", "refused"].includes(c.status)).length;
   const state = goal.active ? "run" : left ? "pause" : "done";
   $("#reroll-title").textContent = { run: "Идёт перебор", pause: "Перебор на паузе", done: "Перебор завершён" }[state];
   $("#reroll-badge").className = "reroll-badge " + state;
@@ -1248,6 +1249,7 @@ function renderReroll(goal) {
     return `<div class="reroll-item ${cls}"><img src="${esc(c.image || "")}" alt="" loading="lazy"><div class="grow">`
       + `<div class="reroll-item-head"><b>${esc(c.name)}</b><span class="reroll-state ${cls}">${text}</span></div>`
       + `<small>${c.manga ? esc(c.manga) + " · " : ""}ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · попыток: ${c.attempts || 0}</small>`
+      + (c.reason ? `<small style="display:block;color:var(--error)">${esc(c.reason)}</small>` : "")
       + (now ? `<div class="reroll-stats">${statsHtml(now)}${keepButton(c, "stats")}</div>` : "")
       + ((c.history || []).length ? `<div class="reroll-rolls"><em>Последние броски:</em>${c.history.slice(-8).map((r) => rollChip(r, goal)).join("")}</div>` : "")
       + `</div></div>`;
@@ -1440,7 +1442,7 @@ function renderSeal(goal) {
   });
   sealStatuses = now;
   if (!show) return;
-  const left = goal.cards.filter((c) => !["reached", "missing"].includes(c.status)).length;
+  const left = goal.cards.filter((c) => !["reached", "missing", "refused"].includes(c.status)).length;
   const state = goal.active ? "run" : left ? "pause" : "done";
   $("#seal-title").textContent = { run: "Идёт перековка", pause: "Перековка на паузе", done: "Перековка завершена" }[state];
   $("#seal-badge").className = "reroll-badge " + state;

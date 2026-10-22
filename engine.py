@@ -75,6 +75,15 @@ def event_candy_day(today):
     return day if day.get("date") == str(today) else {"date": str(today), "n": 0, "misses": 0}
 
 
+def rerolled_out_of_squad(page_ids, saved_ids):
+    """The site's squad lacks cards that only the awakening reroll removed (unawakening drops them)."""
+    missing = set(saved_ids) - set(page_ids)
+    if not missing or not set(page_ids) <= set(saved_ids):
+        return False
+    rerolled = {int(c["card_user_id"]) for c in (DataManager.get_setting("awaken_reroll") or {}).get("cards") or []}
+    return missing <= rerolled
+
+
 def tower_downtime_hours(now_msk, hours, cup=True):
     """Expected wait after the squad returns until the bot sends it again.
 
@@ -2738,10 +2747,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         if cid and str(cid).isdigit() and int(cid) not in card_ids:
                             card_ids.append(int(cid))
 
+                saved_squad = [int(x) for x in DataManager.get_setting("tower_squad") or [] if str(x).isdigit()][:4]
                 if not card_ids:
-                    saved_squad = DataManager.get_setting("tower_squad")
-                    if isinstance(saved_squad, list) and len(saved_squad) > 0:
-                        card_ids = [int(x) for x in saved_squad if str(x).isdigit()][:4]
+                    card_ids = saved_squad
+                elif rerolled_out_of_squad(card_ids, saved_squad):
+                    card_ids = saved_squad  # the awakening reroll took a card out of the squad on the site
 
                 if card_ids:
                     DataManager.set_setting("tower_squad", card_ids)
@@ -3750,7 +3760,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if name == "seals":
             rolls = self.run_seal_reroll(max_rolls=40)
             goal = DataManager.get_setting("seal_reroll") or {}
-            left = [c for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing")]
+            left = [c for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing", "refused")]
             if not left:
                 return f"перековок: {rolls}, все выбранные карты получили нужную печать"
             return f"перековок: {rolls}; продолжу позже" if rolls else \
@@ -3758,7 +3768,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if name == "awaken":
             rolls = self.run_awaken_reroll(max_rolls=40)
             goal = DataManager.get_setting("awaken_reroll") or {}
-            left = [c["name"] for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing")]
+            left = [c["name"] for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing", "refused")]
             if not left:
                 return f"бросков: {rolls}, все выбранные карты готовы"
             return f"бросков: {rolls}; продолжу, когда бои накопят энергию" if rolls else                 ManualFailed("энергии пробуждения нет — бот продолжит, когда бои её накопят")

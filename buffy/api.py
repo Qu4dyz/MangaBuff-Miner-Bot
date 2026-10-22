@@ -531,7 +531,7 @@ class BuffyApi:
         DataManager.set_setting("awaken_reroll", {**current, **mins, "cards": cards})
         self._log(f"🎲 Перебор пробуждения: новые минимумы — атака {mins['min_attack']}, HP {mins['min_health']}, "
                   f"крит {mins['min_crit']}%.")
-        left = any(c.get("status") not in ("reached", "missing") for c in cards)
+        left = any(c.get("status") not in ("reached", "missing", "refused") for c in cards)
         if left and not current.get("active"):
             self.reroll_resume()
             return {"ok": True, "resumed": True}
@@ -550,7 +550,7 @@ class BuffyApi:
                 c = dict(c, status="reached", kept=True,
                          result={"seal": last} if kind == "seal" else last)
             cards.append(c)
-        left = any(c.get("status") not in ("reached", "missing") for c in cards)
+        left = any(c.get("status") not in ("reached", "missing", "refused") for c in cards)
         DataManager.set_setting(key, {**goal, "cards": cards, "active": bool(goal.get("active") and left)})
         return {"ok": True}
 

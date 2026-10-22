@@ -1719,7 +1719,7 @@ def inventory_from_api_card(card, original):
 
 
 REROLL_SETTING = 'awaken_reroll'  # {active, min_attack, min_health, min_crit, cards: [{card_user_id, name, status, ...}]}
-REROLL_DONE = ('reached', 'missing')
+REROLL_DONE = ('reached', 'missing', 'refused')
 # Seal names and short effects as the site shows them (data-battle-seals-json)
 SEAL_INFO = {
     1: ('Печать двойного удара', '30% шанс повторной атаки', 'rare'),
@@ -1800,15 +1800,20 @@ class AwakenRerollMixin:
     fights refill. The collection is the only truth: after every request the card is looked up
     again, so a crash between request and answer never spends energy twice."""
 
-    def _reroll_card(self, route, item, awake):
-        data = self.management_post(route, {'search': item['name'], 'is_battle': awake, 'per_page': 70, 'page': 1})
-        rows = data.get('data')
-        if not isinstance(rows, list):
-            raise ValueError('Inventory shape changed')
-        found = [c for c in rows if int(c['id']) == int(item['card_user_id'])]
-        if found and int(found[0].get('in_trade') or 0):
-            raise ValueError('Card is in a trade')
-        return found[0] if found else None
+    def _reroll_card(self, route, item, awake, max_pages=10):
+        for page in range(1, max_pages + 1):
+            data = self.management_post(route, {'search': item['name'], 'is_battle': awake, 'per_page': 70, 'page': page})
+            rows = data.get('data')
+            if not isinstance(rows, list):
+                raise ValueError('Inventory shape changed')
+            found = [c for c in rows if int(c['id']) == int(item['card_user_id'])]
+            if found:
+                if int(found[0].get('in_trade') or 0):
+                    raise ValueError('Card is in a trade')
+                return found[0]
+            if not data.get('next_page_url'):
+                return None
+        return None
 
     def _reroll_energy(self):
         _, root = self.management_page('/battle/awakening', '.battle-awakening')
@@ -1818,6 +1823,16 @@ class AwakenRerollMixin:
         left = count('[data-awakening-free-left]') + count('[data-awakening-energy]')
         note_awaken_energy(left)
         return root['data-awakening-url'], left
+
+    def _reroll_refresh_cache(self, cid, card):
+        """Put the latest roll into the cached collection the app lists cards from."""
+        cards = self.management_state().get('inventory') or []
+        for c in cards:
+            if int(c['id']) == int(cid):
+                c.update({k: card[k] for k in ('battle_attack', 'battle_health', 'battle_crit_chance', 'battle_seal_id')
+                          if card.get(k) is not None})
+                self.management_save({'inventory': cards})
+                return
 
     def _reroll_update(self, cid, **values):
         """Change one card in what is stored now: «Стоп» or a new list chosen in the app must not be overwritten."""
@@ -1901,6 +1916,15 @@ class AwakenRerollMixin:
                 except SendCancelled:  # «Остановить» came during the request spacing: the card stays as it is
                     self.management_save({'reroll_pending': None})
                     return rolls, True
+                except ValueError as e:
+                    if 'HTTP 422' not in str(e):
+                        raise
+                    # The site refuses this card (locked, in a squad it guards, ...): skip it, go on with the rest
+                    self.management_save({'reroll_pending': None})
+                    reason = str(e).split(':', 1)[-1].strip() or 'сайт отказал'
+                    self._reroll_update(cid, status='refused', reason=reason[:160])
+                    self.log(f"⚠️ Перебор пробуждения: сайт не даёт снять пробуждение с «{item['name']}» ({reason}) — пропускаю.")
+                    return rolls, False
                 # No collection check here: if unawakening silently failed, the site refuses to
                 # awaken an awakened card and the series stops on that error
             self.management_save({'reroll_pending': 'awaken'})
@@ -1951,6 +1975,12 @@ class AwakenRerollMixin:
                 self._reroll_restore_deck()
             except Exception as e:  # must not hide the error that got us here
                 self.log(f'⚠️ Перебор пробуждения: колоду проверю в следующем цикле ({e}).')
+            for c in (DataManager.get_setting(REROLL_SETTING) or {}).get('cards') or []:
+                last = c.get('result') or (c.get('history') or [None])[-1]
+                if last:
+                    self._reroll_refresh_cache(c['card_user_id'], {
+                        'battle_attack': last['attack'], 'battle_health': last['health'],
+                        'battle_crit_chance': last['crit'], 'battle_seal_id': last.get('seal')})
 
 
 # Seal meta from 3555 arena and cup fights (Oct 2026): share of opponent cards with the seal, and how much
@@ -2010,6 +2040,10 @@ class SealRerollMixin:
             if item.get('status') in REROLL_DONE:
                 continue
             cid = int(item['card_user_id'])
+            stats_goal = DataManager.get_setting(REROLL_SETTING) or {}
+            if stats_goal.get('active') and any(int(c['card_user_id']) == cid and c.get('status') not in REROLL_DONE
+                                                for c in stats_goal.get('cards') or []):
+                continue  # finishes the stats reroll first; the seal is reforged afterwards
             try:
                 card = self.management_post(card_url, {'card_user_id': cid}).get('card') or {}
             except ValueError:
@@ -2051,6 +2085,14 @@ class SealRerollMixin:
                 except SendCancelled:
                     self.management_save({'seal_pending': None})
                     return rolls
+                except ValueError as e:
+                    if 'HTTP 422' not in str(e):
+                        raise
+                    self.management_save({'seal_pending': None})
+                    reason = str(e).split(':', 1)[-1].strip() or 'сайт отказал'
+                    self._seal_update(cid, status='refused', reason=reason[:160])
+                    self.log(f"⚠️ Перековка печати: сайт не даёт перековать «{item['name']}» ({reason}) — пропускаю.")
+                    break
                 new = response.get('card') or {}
                 if str(new.get('card_user_id')) != str(cid):
                     raise ValueError('Seal reforge answered for another card')
