@@ -270,6 +270,20 @@ def _balance_after(res, old, gained):
     return old + gained if isinstance(old, int) else old
 
 
+def sync_candy_day(info: Dict) -> None:
+    """Take the site's "Сегодня выпало" when it is ahead of our own count: drops from reading on the
+    phone or before a restart count too. Our count decides whether to keep reading for candies."""
+    site = info.get("today")
+    if site is None:
+        return
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 3600))  # MSK day, as event_candy_day
+    day = DataManager.get_setting("halloween_candy_day") or {}
+    if day.get("date") != today:
+        day = {"date": today, "n": 0, "misses": 0}
+    if site > day.get("n", 0):
+        DataManager.set_setting("halloween_candy_day", {**day, "n": site})
+
+
 class HalloweenEventMixin:
     """Free Halloween rewards that need no choice: the cauldron treat. Spending candies stays manual."""
 
@@ -288,12 +302,14 @@ class HalloweenEventMixin:
         if info.get("balance") is not None:  # not the event page (event over, logged out): keep what we had
             DataManager.set_setting("halloween_event_info",
                                     {**(DataManager.get_setting("halloween_event_info") or {}), **info})
+            sync_candy_day(info)
 
     def run_halloween_event(self) -> Dict:
         res = self.session.get(self.EVENT_PACK_URL, timeout=15)
         if res.status_code != 200:
             return {}
         info = parse_event_pack(res.text)
+        sync_candy_day(info)
         if info["can_take"]:
             m = re.search(r'<meta name="csrf-token" content="([^"]+)"', res.text)
             r = self.session.post("https://mangabuff.ru/event/heat/claim", data={"_token": m.group(1) if m else ""},

@@ -97,13 +97,28 @@ class EventPackTest(unittest.TestCase):
         bot.session.get.return_value = SimpleNamespace(status_code=200, text=self.HTML)
         with patch("seasonal.DataManager.get_setting", side_effect=lambda k, d=None: {"x": 1} if k == "halloween_event_info" else d),                 patch("seasonal.DataManager.set_setting") as save:
             bot.refresh_halloween_info()
-        save.assert_called_once_with("halloween_event_info",
-                                     {"x": 1, "balance": 1240, "today": 12, "temperature": 100, "can_take": True})
+        save.assert_any_call("halloween_event_info",
+                             {"x": 1, "balance": 1240, "today": 12, "temperature": 100, "can_take": True})
+        # The site counted 12 drops today (phone, before a restart): our counter catches up
+        self.assertEqual(save.call_args.args[0], "halloween_candy_day")
+        self.assertEqual(save.call_args.args[1]["n"], 12)
         bot.session.post.assert_not_called()
         bot.session.get.return_value = SimpleNamespace(status_code=200, text="<html>no event</html>")
         with patch("seasonal.DataManager.set_setting") as save:
             bot.refresh_halloween_info()
         save.assert_not_called()
+
+
+    def test_candy_counter_never_goes_back(self):
+        import time
+        from seasonal import sync_candy_day
+        today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 3 * 3600))
+        with patch("seasonal.DataManager.get_setting", return_value={"date": today, "n": 20, "misses": 1}),                 patch("seasonal.DataManager.set_setting") as save:
+            sync_candy_day({"today": 12})
+            sync_candy_day({"today": None})
+            save.assert_not_called()
+            sync_candy_day({"today": 35})
+        save.assert_called_once_with("halloween_candy_day", {"date": today, "n": 35, "misses": 1})
 
 
 class CauldronLockedTest(unittest.TestCase):

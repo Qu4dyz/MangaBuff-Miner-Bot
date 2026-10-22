@@ -11,6 +11,7 @@
 ### Changed
 
 - Halloween candies and cauldron heat show up seconds after the bot starts instead of after its first full cycle (up to an hour).
+- «За чтение сегодня» follows the site's own daily candy count, so drops from reading on the phone or before a restart count too, and the bot stops reading for candies once the site's 35 are in.
 - The Russian README is now the main one (`README.md`), the English one moved to `README.en.md`. Both start with the download, social sign-in, data and problem-report sections; `.env` names now match the code (`MANGA_LOGIN`/`MANGA_PASSWORD`).
 
 ## 11.0.12 — 2026-10-22
