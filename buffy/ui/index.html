@@ -179,6 +179,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 .reroll-stats .plain { font-size: 12px; color: var(--faint); }
 .reroll-rolls em { font-style: normal; font-size: 12px; color: var(--faint); align-self: center; margin-right: 2px; }
 .reroll-run-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.keep-btn { margin-left: auto; padding: 4px 10px; font-size: 12px; }
 .reroll-badge { font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 99px; background: var(--surface-3); }
 .reroll-badge.run { color: var(--warn); }
 .reroll-badge.done { color: #06281a; background: var(--success); }
@@ -1018,6 +1019,7 @@ function mockApi() {
       { id: 2, name: "Ведьма", rank: "H", copy: 941, awake: false,
         image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }; },
     reroll_start: async () => ({ ok: true }), reroll_stop: async () => ({ ok: true }),
+    reroll_keep: async () => ({ ok: true }),
     reroll_resume: async () => ({ ok: true }), reroll_goal: async () => ({ goal: null, energy: null }),
     seal_odds: async (s) => ({ odds: Math.min(0.9, s.length * 0.07) }), seal_state: async () => ({ goal: null, essence: null }),
     seal_essence: async () => ({ ok: true, left: 5200, at: Date.now() / 1000 }),
@@ -1204,6 +1206,22 @@ function rollChip(r, goal) {
 const REROLL_STATUS = {
   waiting: ["wait", "ждёт очереди"], running: ["run", "перебирается"], reached: ["done", "готово"], missing: ["miss", "не найдена"],
 };
+function cardState(c, goal) {
+  if (c.status === "reached" && c.kept) return ["done", "оставлена"];
+  if (!goal.active && ["running", "waiting"].includes(c.status)) return ["wait", c.status === "running" ? "на паузе" : "ждёт"];
+  return REROLL_STATUS[c.status] || REROLL_STATUS.waiting;
+}
+function keepButton(c, kind) {
+  return ["reached", "missing"].includes(c.status) || !(c.history || []).length ? ""
+    : `<button class="btn small ghost keep-btn" data-keep="${c.card_user_id}" data-kind="${kind}" title="Карта остаётся с последним броском и выходит из перебора">Оставить как есть</button>`;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest(".keep-btn");
+  if (!b) return;
+  b.disabled = true;
+  const r = await api.reroll_keep(+b.dataset.keep, b.dataset.kind);
+  toast(r.ok ? "Карта оставлена с последним броском" : r.error, r.ok ? "ok" : "err");
+});
 function renderReroll(goal) {
   const has = !!(goal && (goal.cards || []).length);
   const show = has && !rerollShowForm;
@@ -1225,12 +1243,12 @@ function renderReroll(goal) {
   $("#reroll-edit").hidden = rerollEdit;
   $("#reroll-edit").textContent = left ? "Изменить минимумы" : "Перебрать снова с другими минимумами";
   $("#reroll-list").innerHTML = cards.map((c) => {
-    const [cls, text] = REROLL_STATUS[c.status] || REROLL_STATUS.waiting;
+    const [cls, text] = cardState(c, goal);
     const now = c.status === "reached" ? c.result : (c.history || []).slice(-1)[0];
     return `<div class="reroll-item ${cls}"><img src="${esc(c.image || "")}" alt="" loading="lazy"><div class="grow">`
       + `<div class="reroll-item-head"><b>${esc(c.name)}</b><span class="reroll-state ${cls}">${text}</span></div>`
       + `<small>${c.manga ? esc(c.manga) + " · " : ""}ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · попыток: ${c.attempts || 0}</small>`
-      + (now ? `<div class="reroll-stats">${statsHtml(now)}</div>` : "")
+      + (now ? `<div class="reroll-stats">${statsHtml(now)}${keepButton(c, "stats")}</div>` : "")
       + ((c.history || []).length ? `<div class="reroll-rolls"><em>Последние броски:</em>${c.history.slice(-8).map((r) => rollChip(r, goal)).join("")}</div>` : "")
       + `</div></div>`;
   }).join("");
@@ -1432,12 +1450,12 @@ function renderSeal(goal) {
   $("#seal-stop").hidden = !goal.active;
   $("#seal-resume").hidden = goal.active || !left;
   $("#seal-list").innerHTML = goal.cards.map((c) => {
-    const [cls, text] = REROLL_STATUS[c.status] || REROLL_STATUS.waiting;
+    const [cls, text] = cardState(c, goal);
     const cur = c.status === "reached" ? c.result.seal : (c.history || []).slice(-1)[0] ?? c.seal;
     return `<div class="reroll-item ${cls}"><img src="${esc(c.image || "")}" alt="" loading="lazy"><div class="grow">`
       + `<div class="reroll-item-head"><b>${esc(c.name)}</b><span class="reroll-state ${cls}">${text}</span></div>`
       + `<small>${c.manga ? esc(c.manga) + " · " : ""}ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · перековок: ${c.attempts || 0}</small>`
-      + (cur ? `<div class="reroll-stats"><span class="rs seal">${esc(sealName(cur))}</span></div>` : "")
+      + (cur ? `<div class="reroll-stats"><span class="rs seal">${esc(sealName(cur))}</span>${keepButton(c, "seal")}</div>` : "")
       + ((c.history || []).length ? `<div class="reroll-rolls"><em>Выпадало:</em>${c.history.slice(-10).map((s) =>
         `<span class="${(goal.seals || []).includes(s) ? "hit" : ""}">${esc(sealShort(s))}</span>`).join("")}</div>` : "")
       + `</div></div>`;

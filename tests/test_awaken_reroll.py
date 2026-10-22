@@ -280,3 +280,24 @@ class RerollAgainTests(unittest.TestCase):
         site.run(GOAL)
         name, stats = site.on_reroll_reached.call_args.args
         self.assertIn('ATK 160', stats)
+
+
+class KeepAsIsTests(unittest.TestCase):
+    def test_keep_takes_the_last_roll_and_leaves_the_queue(self):
+        from buffy.api import BuffyApi
+        api = BuffyApi()
+        last = {'attack': 202, 'health': 980, 'crit': 23, 'seal': 4}
+        store = {'awaken_reroll': {'active': True, 'min_attack': 170, 'min_health': 1000, 'min_crit': 0, 'cards': [
+            {'card_user_id': CID, 'name': 'Акено', 'status': 'running', 'history': [{'attack': 135, 'health': 770, 'crit': 16}, last]},
+            {'card_user_id': CID2, 'name': 'B', 'status': 'waiting', 'history': []}]}}
+        with patch('buffy.api.DataManager.get_setting', side_effect=lambda k, d=None: store.get(k, d)), \
+                patch('buffy.api.DataManager.set_setting', side_effect=store.__setitem__):
+            self.assertTrue(api.reroll_keep(CID)['ok'])
+        goal = store['awaken_reroll']
+        self.assertEqual(goal['cards'][0]['status'], 'reached')
+        self.assertEqual(goal['cards'][0]['result'], last)
+        self.assertTrue(goal['active'])  # the other card still goes on
+        with patch('buffy.api.DataManager.get_setting', side_effect=lambda k, d=None: store.get(k, d)), \
+                patch('buffy.api.DataManager.set_setting', side_effect=store.__setitem__):
+            api.reroll_keep(CID2)  # nothing rolled yet: stays in the queue
+        self.assertEqual(store['awaken_reroll']['cards'][1]['status'], 'waiting')

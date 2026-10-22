@@ -537,6 +537,23 @@ class BuffyApi:
             return {"ok": True, "resumed": True}
         return {"ok": True, "resumed": bool(current.get("active"))}
 
+    def reroll_keep(self, card_user_id, kind="stats"):
+        """«Оставить как есть»: the card keeps its last roll and leaves the queue."""
+        key = "seal_reroll" if kind == "seal" else "awaken_reroll"
+        goal = DataManager.get_setting(key)
+        if not goal:
+            return {"ok": False, "error": "Перебор не найден"}
+        cards = []
+        for c in goal.get("cards") or []:
+            if int(c["card_user_id"]) == int(card_user_id) and c.get("history"):
+                last = c["history"][-1]
+                c = dict(c, status="reached", kept=True,
+                         result={"seal": last} if kind == "seal" else last)
+            cards.append(c)
+        left = any(c.get("status") not in ("reached", "missing") for c in cards)
+        DataManager.set_setting(key, {**goal, "cards": cards, "active": bool(goal.get("active") and left)})
+        return {"ok": True}
+
     def reroll_stop(self):
         goal = DataManager.get_setting("awaken_reroll")
         if goal:
