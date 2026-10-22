@@ -1749,7 +1749,7 @@ def card_stats(card):
 def stats_text(card):
     s = card_stats(card)
     seal = SEAL_INFO.get(s['seal'], ('',))[0]
-    return f"атака {s['attack']}, HP {s['health']}, крит {s['crit']}%" + (f", {seal.lower()}" if seal else '')
+    return f"ATK {s['attack']}, HP {s['health']}, CR {s['crit']}%" + (f", {seal.lower()}" if seal else '')
 
 
 def reroll_meets(card, goal):

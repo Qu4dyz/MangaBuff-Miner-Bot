@@ -565,9 +565,9 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
           <div class="card" id="reroll-mins-card" style="margin-top:18px">
             <h3 id="reroll-mins-title">2. Какие статы оставить</h3>
             <p class="lead">Бот оставит первый бросок, где каждый стат не ниже выбранного. Печать выпадает случайно — её потом можно перековать отдельно.</p>
-            <div class="reroll-slider"><label for="reroll-a-r">Атака</label><input type="range" id="reroll-a-r" min="60" max="220" step="1" value="130"><input class="input" id="reroll-a" type="number" min="0" value="130"></div>
+            <div class="reroll-slider"><label for="reroll-a-r" title="Атака">ATK</label><input type="range" id="reroll-a-r" min="60" max="220" step="1" value="130"><input class="input" id="reroll-a" type="number" min="0" value="130"></div>
             <div class="reroll-slider"><label for="reroll-h-r">HP</label><input type="range" id="reroll-h-r" min="500" max="1800" step="10" value="1100"><input class="input" id="reroll-h" type="number" min="0" value="1100"></div>
-            <div class="reroll-slider"><label for="reroll-c-r">Крит, %</label><input type="range" id="reroll-c-r" min="0" max="35" step="1" value="0"><input class="input" id="reroll-c" type="number" min="0" value="0"></div>
+            <div class="reroll-slider"><label for="reroll-c-r" title="Шанс крита">CR, %</label><input type="range" id="reroll-c-r" min="0" max="35" step="1" value="0"><input class="input" id="reroll-c" type="number" min="0" value="0"></div>
             <p class="reroll-odds" id="reroll-odds"></p>
             <p class="hint">Если карта стоит в колоде, бот вернёт её туда после перебора. Из отряда Башни снятие пробуждения её убирает — отряд придётся выбрать заново. Во время вечернего кубка перебор ждёт.</p>
             <div class="row" style="margin-top:12px"><button class="btn primary" id="reroll-start">Запустить перебор</button><button class="btn ghost" id="reroll-edit-cancel" hidden>Отмена</button></div>
@@ -576,7 +576,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
         </div>
 
         <h2 class="section-title" style="margin:28px 0 12px">🔮 Перековка печати</h2>
-        <div class="reroll-energy"><span>💠 Эссенция: <b id="seal-essence">—</b></span><small class="muted">одна перековка — 500, статы карты не меняются</small></div>
+        <div class="reroll-energy"><span>💠 Эссенция: <b id="seal-essence">—</b></span><small class="muted">одна перековка — 500, ATK, HP и CR карты не меняются</small></div>
         <div class="card" id="seal-run" hidden>
           <div class="reroll-run-head"><h3 id="seal-title"></h3><span class="reroll-badge" id="seal-badge"></span></div>
           <p class="lead" id="seal-target"></p>
@@ -591,7 +591,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
         <div id="seal-form">
           <div class="card">
             <h3>1. Каким картам менять печать</h3>
-            <p class="lead">Только пробуждённые карты. Бот перековывает печать, пока не выпадет одна из выбранных, и не трогает атаку, HP и крит.</p>
+            <p class="lead">Только пробуждённые карты. Бот перековывает печать, пока не выпадет одна из выбранных, и не трогает ATK, HP и CR.</p>
             <input class="input" id="seal-q" placeholder="Фильтр по имени карты или тайтлу" spellcheck="false">
             <div class="reroll-grid" id="seal-results"></div>
             <p class="hint" style="margin:10px 0 0"><b id="seal-picked" style="color:var(--text)"></b></p>
@@ -1192,14 +1192,14 @@ const sealShort = (id) => sealName(id).replace(/^Печать\s+/i, "");
 function statsHtml(c) {
   if (!c || c.attack == null) return `<span class="plain">не пробуждена</span>`;
   const seal = sealName(c.seal);
-  return `<span class="rs"><i>Атака</i> ${c.attack}</span><span class="rs"><i>HP</i> ${c.health}</span>`
-    + `<span class="rs"><i>Крит</i> ${c.crit}%</span>`
+  return `<span class="rs"><i>ATK</i> ${c.attack}</span><span class="rs"><i>HP</i> ${c.health}</span>`
+    + `<span class="rs"><i>CR</i> ${c.crit}%</span>`
     + (seal ? `<span class="rs seal" title="${esc((SEALS[c.seal] || {}).short || "")}">${esc(seal)}</span>` : "");
 }
 const meets = (r, g) => r.attack >= (+g.min_attack || 0) && r.health >= (+g.min_health || 0) && r.crit >= (+g.min_crit || 0);
 function rollChip(r, goal) {
-  const title = `Атака ${r.attack}, HP ${r.health}, крит ${r.crit}%${r.seal ? ", " + sealName(r.seal) : ""}`;
-  return `<span class="${meets(r, goal) ? "hit" : ""}" title="${esc(title)}">${r.attack} · ${r.health} · ${r.crit}%${r.seal ? " · " + esc(sealShort(r.seal)) : ""}</span>`;
+  const title = `ATK ${r.attack}, HP ${r.health}, CR ${r.crit}%${r.seal ? ", " + sealName(r.seal) : ""}`;
+  return `<span class="${meets(r, goal) ? "hit" : ""}" title="${esc(title)}">ATK ${r.attack} · HP ${r.health} · CR ${r.crit}%${r.seal ? " · " + esc(sealShort(r.seal)) : ""}</span>`;
 }
 const REROLL_STATUS = {
   waiting: ["wait", "ждёт очереди"], running: ["run", "перебирается"], reached: ["done", "готово"], missing: ["miss", "не найдена"],
@@ -1219,7 +1219,7 @@ function renderReroll(goal) {
   $("#reroll-title").textContent = { run: "Идёт перебор", pause: "Перебор на паузе", done: "Перебор завершён" }[state];
   $("#reroll-badge").className = "reroll-badge " + state;
   $("#reroll-badge").textContent = { run: "⏳ идёт", pause: "⏸ пауза", done: "✅ все карты готовы" }[state];
-  $("#reroll-target").textContent = `Оставить, если: атака ≥ ${goal.min_attack} · HP ≥ ${goal.min_health} · крит ≥ ${goal.min_crit}%`;
+  $("#reroll-target").textContent = `Оставить, если: ATK ≥ ${goal.min_attack} · HP ≥ ${goal.min_health} · CR ≥ ${goal.min_crit}%`;
   $("#reroll-stop").hidden = !goal.active;
   $("#reroll-resume").hidden = goal.active || !left;
   $("#reroll-edit").hidden = rerollEdit;
@@ -1240,7 +1240,7 @@ function notifyRerollChanges(goal) {
   const now = Object.fromEntries(goal.cards.map((c) => [c.card_user_id, c.status]));
   if (rerollStatuses) goal.cards.forEach((c) => {
     if (c.status === "reached" && rerollStatuses[c.card_user_id] !== "reached")
-      toast(`🎉 «${c.name}» готова: атака ${c.result.attack}, HP ${c.result.health}, крит ${c.result.crit}%${c.result.seal ? ", " + sealName(c.result.seal) : ""}`, "ok");
+      toast(`🎉 «${c.name}» готова: ATK ${c.result.attack}, HP ${c.result.health}, CR ${c.result.crit}%${c.result.seal ? ", " + sealName(c.result.seal) : ""}`, "ok");
   });
   rerollStatuses = now;
 }

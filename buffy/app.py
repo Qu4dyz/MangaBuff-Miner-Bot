@@ -137,7 +137,7 @@ def run(start_minimized=False):
     window = webview.create_window(
         APP_NAME,
         # A new address per version: WebView2 must never serve the previous release's cached page
-        url=resource_path("buffy", "ui", "index.html") + f"?v={__version__}",
+        url=resource_path("buffy", "ui", "index.html") + f"?v={_ui_stamp()}",
         js_api=api,
         width=width,
         height=height,
@@ -238,15 +238,28 @@ def _storage_dir():
     return path
 
 
+def _ui_stamp():
+    """Version plus a fingerprint of index.html: a changed page never comes from WebView2's cache,
+    even when the version number stays the same (test builds, hotfixes)."""
+    import hashlib
+
+    try:
+        with open(resource_path("buffy", "ui", "index.html"), "rb") as page:
+            return f"{__version__}-{hashlib.sha1(page.read()).hexdigest()[:10]}"
+    except OSError:
+        return __version__
+
+
 def _drop_stale_ui_cache(path):
-    """WebView2 keeps serving the old index.html after an update: clear its page cache once per version."""
-    if DataManager.get_setting("app_ui_version") == __version__:
+    """WebView2 keeps serving the old index.html after an update: clear its page cache once per page change."""
+    stamp = _ui_stamp()
+    if DataManager.get_setting("app_ui_version") == stamp:
         return
     import shutil
 
     for sub in ("Cache", "Code Cache"):
         shutil.rmtree(os.path.join(path, "EBWebView", "Default", sub), ignore_errors=True)
-    DataManager.set_setting("app_ui_version", __version__)
+    DataManager.set_setting("app_ui_version", stamp)
 
 
 if __name__ == "__main__":

@@ -279,4 +279,4 @@ class RerollAgainTests(unittest.TestCase):
         site.on_reroll_reached = Mock()
         site.run(GOAL)
         name, stats = site.on_reroll_reached.call_args.args
-        self.assertIn('атака 160', stats)
+        self.assertIn('ATK 160', stats)
