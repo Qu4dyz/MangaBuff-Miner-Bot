@@ -18,6 +18,10 @@
 - «За чтение сегодня» follows the site's own daily candy count, so drops from reading on the phone or before a restart count too, and the bot stops reading for candies once the site's 35 are in.
 - The Russian README is now the main one (`README.md`), the English one moved to `README.en.md`. Both start with the download, social sign-in, data and problem-report sections; `.env` names now match the code (`MANGA_LOGIN`/`MANGA_PASSWORD`).
 
+### Fixed
+
+- Settings could be lost on Windows: a write landing while another thread was reading the file was dropped silently, and a read that failed at that moment let the next write replace the whole file with a single key. Reads and replaces now retry briefly and never write over a file they could not read.
+
 ## 11.0.12 — 2026-10-22
 
 ### Fixed

@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import tempfile
 import threading
 import time
@@ -10,6 +11,41 @@ from path import DATA_FILE, SESSION_FILE, READING_STATE_FILE
 # the bot thread at once, so serialise writes to avoid losing one of them.
 _WRITE_LOCK = threading.RLock()
 
+# On Windows a file another thread (get_setting) or an antivirus has open for a moment cannot be
+# read for update or replaced: retry briefly instead of failing (or, worse, writing over it).
+_RETRIES, _PAUSE = 40, 0.025
+
+
+def _read_for_update(filename):
+    for attempt in range(_RETRIES):
+        if not os.path.exists(filename):
+            return {}
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {}  # a corrupt file is rewritten, as before
+        except PermissionError:
+            if attempt == _RETRIES - 1:
+                raise
+            time.sleep(_PAUSE)
+    return {}
+
+
+def _replace_with_retry(temp_name, filename):
+    for attempt in range(_RETRIES):
+        try:
+            os.replace(temp_name, filename)
+            return
+        except PermissionError:
+            if attempt == _RETRIES - 1:
+                try:
+                    os.remove(temp_name)
+                except OSError:
+                    pass
+                raise
+            time.sleep(_PAUSE)
+
 
 # ==========================================
 # DATA MANAGEMENT
@@ -17,12 +53,9 @@ _WRITE_LOCK = threading.RLock()
 class DataManager:
     @staticmethod
     def load_json(filename):
-        if not os.path.exists(filename):
-            return {}
         try:
-            with open(filename, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
+            return _read_for_update(filename)
+        except OSError:
             return {}
 
     @staticmethod
@@ -34,21 +67,21 @@ class DataManager:
     @staticmethod
     def _save_json_locked(filename, data, drop=()):
         try:
-            current = DataManager.load_json(filename)
+            # Not load_json: its {} on a briefly locked file would overwrite every other setting
+            current = _read_for_update(filename)
             current.update(data)
             for key in drop:
                 current.pop(key, None)
             dir_name = os.path.dirname(os.path.abspath(filename))
             os.makedirs(dir_name, exist_ok=True)
-            
+
             # Atomic write via temp file
             with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, encoding="utf-8") as tf:
                 json.dump(current, tf, indent=4, ensure_ascii=False)
                 temp_name = tf.name
-                
-            os.replace(temp_name, filename)
-        except OSError:
-            pass
+            _replace_with_retry(temp_name, filename)
+        except OSError as e:
+            logging.getLogger("buffy").warning("settings not saved to %s: %s", filename, e)
 
     @staticmethod
     def get_credentials():
