@@ -27,16 +27,31 @@ jobs:
         repo="${{ github.repository }}"
         # Tags stay visible when the release list does not: the highest vX.Y.Z is the version
         version=$(gh api "repos/$repo/tags" --paginate --jq '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-        releases=$(gh api "repos/$repo/releases" --paginate --jq 'length' | awk '{s+=$1} END {print s+0}')
-        total=$(gh api "repos/$repo/releases" --paginate --jq '[.[].assets[].download_count] | add // 0' | awk '{s+=$1} END {print s+0}')
         mkdir -p out
         git clone -q --depth 1 -b badges "https://github.com/$repo.git" prev 2>/dev/null || true
         badge() { printf '{"schemaVersion":1,"label":"%s","message":"%s","color":"8b5cf6"}\n' "$1" "$2"; }
         if [ -n "$version" ]; then badge version "$version" > out/version.json
         elif [ -f prev/version.json ]; then cp prev/version.json out/; fi
-        # During a GitHub outage the release list comes back empty: keep the last good count
-        if [ "$releases" -gt 0 ]; then badge downloads "$total" > out/downloads.json
-        elif [ -f prev/downloads.json ]; then cp prev/downloads.json out/; fi
+        # Downloads only grow: never publish less than before (GitHub may list nothing during an outage)
+        total=$(python3 - "$repo" <<'PY'
+        import json, os, sys, urllib.request
+        repo, total, page, seen = sys.argv[1], 0, 1, 0
+        while True:
+            req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}",
+                                         headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"]})
+            rows = json.load(urllib.request.urlopen(req))
+            if not rows:
+                break
+            seen += len(rows)
+            total += sum(a["download_count"] for r in rows for a in r["assets"])
+            page += 1
+        print(f"releases {seen}, downloads {total}", file=sys.stderr)
+        print(total)
+        PY
+        )
+        before=$(python3 -c "import json;print(json.load(open('prev/downloads.json'))['message'])" 2>/dev/null || echo 0)
+        [ "$total" -lt "$before" ] && total=$before
+        badge downloads "$total" > out/downloads.json
         cat out/*.json
 
     - name: Publish to the badges branch
