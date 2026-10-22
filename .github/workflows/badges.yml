@@ -21,12 +21,16 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
+        releases=$(gh api "repos/${{ github.repository }}/releases" --paginate --jq 'length' | awk '{s+=$1} END {print s+0}')
         total=$(gh api "repos/${{ github.repository }}/releases" --paginate --jq '[.[].assets[].download_count] | add // 0' | awk '{s+=$1} END {print s+0}')
+        # During a GitHub outage the list comes back empty: keep the last good number
+        if [ "$releases" -eq 0 ]; then echo "GitHub listed no releases; badge left as is"; echo "skip=1" >> "$GITHUB_ENV"; exit 0; fi
         mkdir -p out
         printf '{"schemaVersion":1,"label":"downloads","message":"%s","color":"8b5cf6"}\n' "$total" > out/downloads.json
         cat out/downloads.json
 
     - name: Publish to the badges branch
+      if: env.skip != '1'
       run: |
         cd out
         git init -q -b badges

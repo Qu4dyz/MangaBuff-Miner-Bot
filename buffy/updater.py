@@ -13,7 +13,8 @@ import requests
 
 from buffy import __version__
 
-LATEST_URL = "https://api.github.com/repos/Qu4dyz/MangaBuff-Miner-Bot/releases/latest"
+REPO_API = "https://api.github.com/repos/Qu4dyz/MangaBuff-Miner-Bot"
+LATEST_URL = REPO_API + "/releases/latest"
 SETUP_RE = re.compile(r"^Buffy-Setup-[\w.\-]+\.exe$", re.IGNORECASE)
 CHECK_EVERY_SEC = 30 * 60  # GitHub allows 60 anonymous API calls/hour per IP; 2 is safe
 
@@ -29,13 +30,29 @@ def is_newer(remote, local=__version__) -> bool:
     return bool(remote_v) and remote_v > local_v
 
 
+def _get(url, timeout):
+    return requests.get(url, timeout=timeout, headers={"Accept": "application/vnd.github+json"})
+
+
 def fetch_latest(timeout=15):
     """Latest release info, or None when GitHub is unreachable or has no installer."""
-    resp = requests.get(LATEST_URL, timeout=timeout, headers={"Accept": "application/vnd.github+json"})
-    if resp.status_code == 404:  # no releases published yet
-        return None
+    resp = _get(LATEST_URL, timeout)
+    if resp.status_code == 404:
+        # GitHub sometimes lists no releases to logged-out users while each release is still there
+        # (an outage on 22 Oct 2026): ask for the newest tag's release directly
+        tags = _get(REPO_API + "/tags?per_page=30", timeout)
+        if tags.status_code != 200:
+            return None
+        names = [t.get("name") for t in tags.json() or [] if parse_version(t.get("name"))]
+        if not names:
+            return None
+        resp = _get(REPO_API + "/releases/tags/" + max(names, key=parse_version), timeout)
+        if resp.status_code == 404:  # no releases published yet
+            return None
     resp.raise_for_status()
     data = resp.json()
+    if data.get("draft") or data.get("prerelease"):
+        return None
     for asset in data.get("assets") or []:
         if SETUP_RE.match(asset.get("name") or ""):
             return {
