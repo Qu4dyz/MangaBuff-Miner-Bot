@@ -394,6 +394,31 @@ class BuffyApi:
         started = self.run_module("awaken")
         return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
 
+    def reroll_resume(self):
+        """Go on with the same cards and minimums after «Остановить»."""
+        goal = DataManager.get_setting("awaken_reroll")
+        if not goal or not goal.get("cards"):
+            return {"ok": False, "error": "Нечего продолжать — начни новый перебор"}
+        DataManager.set_setting("awaken_reroll", {**goal, "active": True})
+        started = self.run_module("awaken")
+        return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
+
+    def reroll_set_mins(self, goal):
+        """New minimums for the cards already chosen; a card that now passes is kept on the next check."""
+        current = DataManager.get_setting("awaken_reroll")
+        if not current:
+            return {"ok": False, "error": "Перебор не найден"}
+        try:
+            mins = {k: max(0, int(float((goal or {}).get(k) or 0))) for k in ("min_attack", "min_health", "min_crit")}
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Укажи числа"}
+        if not any(mins.values()):
+            return {"ok": False, "error": "Укажи хотя бы один минимум"}
+        DataManager.set_setting("awaken_reroll", {**current, **mins})
+        self._log(f"🎲 Перебор пробуждения: новые минимумы ATK {mins['min_attack']}, HP {mins['min_health']}, "
+                  f"крит {mins['min_crit']}%.")
+        return {"ok": True}
+
     def reroll_stop(self):
         goal = DataManager.get_setting("awaken_reroll")
         if goal:

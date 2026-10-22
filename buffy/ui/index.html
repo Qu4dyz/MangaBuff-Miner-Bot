@@ -509,10 +509,15 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
           <h3 id="reroll-title"></h3>
           <p class="lead" id="reroll-target"></p>
           <div class="reroll-list" id="reroll-list"></div>
-          <div class="row"><button class="btn" id="reroll-stop">Остановить</button><button class="btn ghost" id="reroll-new">Новый перебор</button></div>
+          <div class="row" style="flex-wrap:wrap">
+            <button class="btn" id="reroll-stop">Остановить</button>
+            <button class="btn primary" id="reroll-resume">Продолжить</button>
+            <button class="btn" id="reroll-edit">Изменить минимумы</button>
+            <button class="btn ghost" id="reroll-new">Новый перебор</button>
+          </div>
         </div>
         <div id="reroll-form">
-          <div class="card">
+          <div class="card" id="reroll-pick-card">
             <h3>1. Какие карты пробуждать</h3>
             <p class="lead">Бот пробуждает карту, смотрит статы и, если они ниже твоих минимумов, бесплатно снимает пробуждение и пробует снова. Тратит только энергию пробуждения, которая копится с боёв.</p>
             <div class="row"><input class="input" id="reroll-q" placeholder="Название карты, например Цунаде" spellcheck="false"><button class="btn" id="reroll-find">Найти</button></div>
@@ -520,14 +525,14 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
             <p class="hint" style="margin:10px 0 0">Можно выбрать несколько карт — бот переберёт их по очереди с одними минимумами. <b id="reroll-picked" style="color:var(--text)"></b></p>
           </div>
           <div class="card" style="margin-top:18px">
-            <h3>2. Какие статы оставить</h3>
+            <h3 id="reroll-mins-title">2. Какие статы оставить</h3>
             <p class="lead">Бот оставит первый бросок, где каждый стат не ниже выбранного.</p>
             <div class="reroll-slider"><label for="reroll-a-r">ATK</label><input type="range" id="reroll-a-r" min="60" max="220" step="1" value="130"><input class="input" id="reroll-a" type="number" min="0" value="130"></div>
             <div class="reroll-slider"><label for="reroll-h-r">HP</label><input type="range" id="reroll-h-r" min="500" max="1800" step="10" value="1100"><input class="input" id="reroll-h" type="number" min="0" value="1100"></div>
             <div class="reroll-slider"><label for="reroll-c-r">Крит, %</label><input type="range" id="reroll-c-r" min="0" max="35" step="1" value="0"><input class="input" id="reroll-c" type="number" min="0" value="0"></div>
             <p class="reroll-odds" id="reroll-odds"></p>
             <p class="hint">Если карта стоит в колоде, бот вернёт её туда после перебора. Из отряда Башни снятие пробуждения её убирает — отряд придётся выбрать заново. Во время вечернего кубка перебор ждёт.</p>
-            <div class="row" style="margin-top:12px"><button class="btn primary" id="reroll-start">Запустить перебор</button></div>
+            <div class="row" style="margin-top:12px"><button class="btn primary" id="reroll-start">Запустить перебор</button><button class="btn ghost" id="reroll-edit-cancel" hidden>Отмена</button></div>
             <div class="msg" id="reroll-msg"></div>
           </div>
         </div>
@@ -942,6 +947,7 @@ function mockApi() {
       { id: 2, name: "Ведьма", rank: "H", copy: 941, awake: false,
         image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }; },
     reroll_start: async () => ({ ok: true }), reroll_stop: async () => ({ ok: true }),
+    reroll_resume: async () => ({ ok: true }), reroll_set_mins: async () => ({ ok: true }),
     check_login: async (e, p) => { await wait(900); return p.length > 3 ? { ok: true } : { ok: false, error: "Сайт не принял почту или пароль" }; },
     finish_onboarding: async () => { onboarded = true; return true; },
     start: async () => { status = "starting"; setTimeout(() => status = "running", 800); return { ok: true }; },
@@ -1091,7 +1097,7 @@ function renderProfile(p) {
 
 /* Awakening reroll: several cards, shared minimums */
 const rerollPicks = new Map();  // card_user_id -> card from the search
-let rerollShowForm = false, lastReroll = null, rerollFound = [];
+let rerollShowForm = false, rerollEdit = false, lastReroll = null, rerollFound = [];
 const rerollMins = () => ({ min_attack: $("#reroll-a").value, min_health: $("#reroll-h").value, min_crit: $("#reroll-c").value });
 const statLine = (c) => `${c.attack} / ${c.health} / ${c.crit}%`;
 function rollChip(r, goal) {
@@ -1105,15 +1111,21 @@ const REROLL_STATUS = {
   missing: () => "не найдена в коллекции",
 };
 function renderReroll(goal) {
-  const show = !!(goal && (goal.cards || []).length) && !rerollShowForm;
+  const show = !!(goal && (goal.cards || []).length) && !rerollShowForm && !rerollEdit;
   $("#reroll-run").hidden = !show;
   $("#reroll-form").hidden = show;
+  $("#reroll-pick-card").hidden = rerollEdit;
+  $("#reroll-edit-cancel").hidden = !rerollEdit;
+  $("#reroll-mins-title").textContent = rerollEdit ? "Новые минимумы" : "2. Какие статы оставить";
+  $("#reroll-start").textContent = rerollEdit ? "Сохранить минимумы" : "Запустить перебор";
   if (!show) return;
   const cards = goal.cards, left = cards.filter((c) => !["reached", "missing"].includes(c.status)).length;
   $("#reroll-title").textContent = goal.active ? "Идёт перебор" : left ? "Перебор остановлен" : "Перебор завершён";
   $("#reroll-target").textContent = `Минимумы: ATK ${goal.min_attack} · HP ${goal.min_health} · крит ${goal.min_crit}%`
     + (goal.active ? " · бот продолжает, пока бои копят энергию" : "");
   $("#reroll-stop").hidden = !goal.active;
+  $("#reroll-resume").hidden = goal.active || !left;
+  $("#reroll-edit").hidden = !left;
   $("#reroll-list").innerHTML = cards.map((c) => `<div class="reroll-item">`
     + `<img src="${esc(c.image || "")}" alt="" loading="lazy"><div><b>${esc(c.name)}</b>`
     + `<small>Ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · ${(REROLL_STATUS[c.status] || REROLL_STATUS.waiting)(c)}</small>`
@@ -1163,6 +1175,13 @@ async function startReroll() {
   toast(r.warning || (r.queued ? "Перебор начнётся, как только бот закончит текущий шаг" : "Перебор запущен"), r.warning ? "err" : "ok");
 }
 $("#reroll-start").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  if (rerollEdit) {
+    const r = await api.reroll_set_mins(rerollMins());
+    if (!r.ok) { setMsg($("#reroll-msg"), r.error, false); return; }
+    rerollEdit = false; setMsg($("#reroll-msg"), "", true); renderReroll(lastReroll);
+    toast("Минимумы сохранены", "ok");
+    return;
+  }
   if (!rerollPicks.size) { setMsg($("#reroll-msg"), "Найди и выбери хотя бы одну карту", false); return; }
   const mins = rerollMins();
   const losing = [...rerollPicks.values()].filter((c) => c.awake
@@ -1175,7 +1194,20 @@ $("#reroll-start").addEventListener("click", (e) => busy(e.currentTarget, async 
 $("#reroll-confirm-ok").addEventListener("click", startReroll);
 $("#reroll-confirm-cancel").addEventListener("click", () => $("#reroll-confirm").classList.remove("show"));
 $("#reroll-stop").addEventListener("click", async () => { await api.reroll_stop(); toast("Перебор остановлен", "ok"); });
-$("#reroll-new").addEventListener("click", () => { rerollShowForm = true; renderReroll(lastReroll); });
+$("#reroll-new").addEventListener("click", () => { rerollShowForm = true; rerollEdit = false; renderReroll(lastReroll); });
+$("#reroll-resume").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  const r = await api.reroll_resume();
+  toast(r.ok ? (r.warning || (r.queued ? "Перебор продолжится, как только бот закончит текущий шаг" : "Перебор продолжен")) : r.error,
+    r.ok && !r.warning ? "ok" : "err");
+}));
+$("#reroll-edit").addEventListener("click", () => {
+  const g = lastReroll || {};
+  [["a", g.min_attack], ["h", g.min_health], ["c", g.min_crit]].forEach(([k, v]) => {
+    $(`#reroll-${k}`).value = v ?? 0; $(`#reroll-${k}-r`).value = v ?? 0;
+  });
+  rerollEdit = true; renderReroll(lastReroll); updateRerollOdds();
+});
+$("#reroll-edit-cancel").addEventListener("click", () => { rerollEdit = false; setMsg($("#reroll-msg"), "", true); renderReroll(lastReroll); });
 
 function renderState(st) {
   if ("profile" in st) renderProfile(st.profile);

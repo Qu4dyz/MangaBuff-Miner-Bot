@@ -207,3 +207,31 @@ class AwakenRerollTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RerollApiTests(unittest.TestCase):
+    def setUp(self):
+        from buffy.api import BuffyApi
+        self.api = BuffyApi()
+        self.store = {'awaken_reroll': {'active': False, 'min_attack': 156, 'min_health': 1100, 'min_crit': 0,
+                                        'cards': [{'card_user_id': CID, 'name': 'Девушка', 'status': 'running', 'attempts': 6}]}}
+        for p in (patch('buffy.api.DataManager.get_setting', side_effect=lambda k, d=None: self.store.get(k, d)),
+                  patch('buffy.api.DataManager.set_setting', side_effect=self.store.__setitem__),
+                  patch.object(self.api, '_log')):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_resume_keeps_cards_and_progress_and_starts_now(self):
+        with patch.object(self.api, 'run_module', return_value={'ok': True, 'queued': False}) as run:
+            self.assertTrue(self.api.reroll_resume()['ok'])
+        run.assert_called_once_with('awaken')
+        goal = self.store['awaken_reroll']
+        self.assertTrue(goal['active'])
+        self.assertEqual(goal['cards'][0]['attempts'], 6)
+
+    def test_lowering_minimums_keeps_the_cards(self):
+        self.assertTrue(self.api.reroll_set_mins({'min_attack': '120', 'min_health': 900, 'min_crit': ''})['ok'])
+        goal = self.store['awaken_reroll']
+        self.assertEqual((goal['min_attack'], goal['min_health'], goal['min_crit']), (120, 900, 0))
+        self.assertEqual(goal['cards'][0]['attempts'], 6)
+        self.assertFalse(self.api.reroll_set_mins({'min_attack': 0})['ok'])
