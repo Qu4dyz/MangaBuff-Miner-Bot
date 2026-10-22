@@ -257,3 +257,26 @@ class RerollApiTests(unittest.TestCase):
         self.assertEqual((goal['min_attack'], goal['min_health'], goal['min_crit']), (120, 900, 0))
         self.assertEqual(goal['cards'][0]['attempts'], 6)
         self.assertFalse(self.api.reroll_set_mins({'min_attack': 0})['ok'])
+
+
+class RerollAgainTests(unittest.TestCase):
+    def test_raising_minimums_requeues_finished_cards_and_resumes(self):
+        from buffy.api import BuffyApi
+        api = BuffyApi()
+        store = {'awaken_reroll': {'active': False, 'min_attack': 130, 'min_health': 1100, 'min_crit': 0, 'cards': [
+            {'card_user_id': CID, 'name': 'A', 'status': 'reached', 'result': {'attack': 140, 'health': 1150, 'crit': 9}},
+            {'card_user_id': CID2, 'name': 'B', 'status': 'reached', 'result': {'attack': 200, 'health': 1500, 'crit': 9}}]}}
+        with patch('buffy.api.DataManager.get_setting', side_effect=lambda k, d=None: store.get(k, d)), \
+                patch('buffy.api.DataManager.set_setting', side_effect=store.__setitem__), \
+                patch.object(api, '_log'), patch.object(api, 'run_module', return_value={'ok': True}) as run:
+            self.assertTrue(api.reroll_set_mins({'min_attack': 150, 'min_health': 1200, 'min_crit': 0})['resumed'])
+        self.assertEqual([c['status'] for c in store['awaken_reroll']['cards']], ['waiting', 'reached'])
+        self.assertTrue(store['awaken_reroll']['active'])
+        run.assert_called_once_with('awaken')
+
+    def test_reached_card_raises_a_windows_notification(self):
+        site = FakeSite({CID: card(True, (90, 800, 10), [(160, 1300, 5)])}, energy=5)
+        site.on_reroll_reached = Mock()
+        site.run(GOAL)
+        name, stats = site.on_reroll_reached.call_args.args
+        self.assertIn('атака 160', stats)

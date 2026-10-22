@@ -97,6 +97,7 @@ class BuffyApi:
         self._want_running = False
         self._window = None
         self._social_lock = threading.Lock()  # one MangaBuff sign-in window at a time
+        self._notify = None  # set by the app: Windows notification from the tray icon
         self._on_status_change = None  # set by the app (tray menu refresh)
         self._updater = None  # set by the app
         self._quit = None  # set by the app: full exit
@@ -360,17 +361,13 @@ class BuffyApi:
             route = urljoin("https://mangabuff.ru", root.select_one(".card-filter-form[data-url]")["data-url"])
             found = []
             for awake in (1, -1):
-                rows = bot.management_post(route, {"search": query, "is_battle": awake, "per_page": 30, "page": 1})
-                for c in rows.get("data") or []:
-                    if int(c.get("in_trade") or 0):
-                        continue
-                    image = c.get("image")
-                    found.append({"id": int(c["id"]), "name": c.get("card_name") or query, "rank": c.get("rank"),
-                                  "image": f"https://mangabuff.ru/img/cards/{image}" if image else None,
-                                  "copy": c.get("copy_number"), "awake": awake == 1,
-                                  "attack": c.get("battle_attack"), "health": c.get("battle_health"),
-                                  "crit": c.get("battle_crit_chance")})
-            return {"ok": True, "cards": found[:40]}
+                rows = bot.management_post(route, {"search": query, "is_battle": awake, "per_page": 70, "page": 1})
+                found += [_reroll_card_view(c, awake == 1) for c in rows.get("data") or []
+                          if not int(c.get("in_trade") or 0)]
+            # The site also matches the manga title: cards named like the query come first
+            q = query.lower()
+            found.sort(key=lambda c: q not in (c["name"] or "").lower())
+            return {"ok": True, "cards": found}
         except Exception as e:
             return {"ok": False, "error": f"Не удалось получить коллекцию: {e}"}
 
@@ -379,8 +376,8 @@ class BuffyApi:
         try:
             mins = {k: max(0, int(float((goal or {}).get(k) or 0))) for k in ("min_attack", "min_health", "min_crit")}
             picked = [{"card_user_id": int(c["id"]), "name": str(c.get("name") or ""), "rank": c.get("rank"),
-                       "copy": c.get("copy"), "image": c.get("image"), "status": "waiting", "attempts": 0,
-                       "history": []} for c in cards or []]
+                       "copy": c.get("copy"), "image": c.get("image"), "manga": c.get("manga"), "status": "waiting",
+                       "attempts": 0, "history": []} for c in cards or []]
         except (TypeError, ValueError, KeyError):
             return {"ok": False, "error": "Выбери карты и укажи числа"}
         if not picked:
@@ -393,6 +390,28 @@ class BuffyApi:
                   f"крит {mins['min_crit']}%.")
         started = self.run_module("awaken")
         return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
+
+    def seal_info(self):
+        from arena import SEAL_INFO
+
+        return {sid: {"name": n, "short": s, "rarity": r} for sid, (n, s, r) in SEAL_INFO.items()}
+
+    def reroll_owned(self):
+        """Awakened cards from the bot's own cache: instant, no site request. Strongest first."""
+        from arena import MANAGEMENT_FILE, arena_score
+
+        cards = [c for c in DataManager.load_json(MANAGEMENT_FILE).get("inventory") or []
+                 if c.get("battle_attack") and not int(c.get("in_trade") or 0)]
+        cards.sort(key=arena_score, reverse=True)
+        return {"cards": [_reroll_card_view(c, True) for c in cards]}
+
+    def _reroll_reached(self, name, stats):
+        self._log(f"🎉 Перебор пробуждения: «{name}» готова — {stats}")
+        if self._notify:
+            try:
+                self._notify(f"«{name}» готова: {stats}", "Перебор пробуждения")
+            except Exception:
+                pass
 
     def reroll_goal(self):
         """Light read for the Awakening page while a series runs (polled twice a second)."""
@@ -435,10 +454,17 @@ class BuffyApi:
             return {"ok": False, "error": "Укажи числа"}
         if not any(mins.values()):
             return {"ok": False, "error": "Укажи хотя бы один минимум"}
-        DataManager.set_setting("awaken_reroll", {**current, **mins})
-        self._log(f"🎲 Перебор пробуждения: новые минимумы ATK {mins['min_attack']}, HP {mins['min_health']}, "
+        # A finished card whose result no longer passes goes back into the queue
+        cards = [dict(c, status="waiting") if c.get("status") == "reached" and not _passes(c.get("result"), mins) else c
+                 for c in current.get("cards") or []]
+        DataManager.set_setting("awaken_reroll", {**current, **mins, "cards": cards})
+        self._log(f"🎲 Перебор пробуждения: новые минимумы — атака {mins['min_attack']}, HP {mins['min_health']}, "
                   f"крит {mins['min_crit']}%.")
-        return {"ok": True}
+        left = any(c.get("status") not in ("reached", "missing") for c in cards)
+        if left and not current.get("active"):
+            self.reroll_resume()
+            return {"ok": True, "resumed": True}
+        return {"ok": True, "resumed": bool(current.get("active"))}
 
     def reroll_stop(self):
         goal = DataManager.get_setting("awaken_reroll")
@@ -509,6 +535,7 @@ class BuffyApi:
         )
         bot.manual_callback = self._on_manual
         bot.social_relogin = self._silent_social_relogin
+        bot.on_reroll_reached = self._reroll_reached
         bot.fatal_exit = lambda: setattr(bot, "running", False)  # never kill the app over a one-off run
         bot.running = True
         bot.request_manual_module(name)
@@ -552,6 +579,7 @@ class BuffyApi:
         bot.fatal_exit = lambda b=bot: self._on_fatal(b)
         bot.manual_callback = self._on_manual
         bot.social_relogin = self._silent_social_relogin
+        bot.on_reroll_reached = self._reroll_reached
         self._bot = bot
         self._started_at = time.time()
 
@@ -796,6 +824,20 @@ def _tg_error(description):
     if "too many requests" in text:
         return "Telegram просит подождать минуту. Попробуй чуть позже."
     return f"Telegram ответил ошибкой: {description}"
+
+
+def _reroll_card_view(c, awake):
+    image = c.get("image")
+    return {"id": int(c["id"]), "name": c.get("card_name") or "", "manga": c.get("manga_name"), "rank": c.get("rank"),
+            "copy": c.get("copy_number"), "awake": awake,
+            "image": f"https://mangabuff.ru/img/cards/{image}" if image else None,
+            "attack": c.get("battle_attack") if awake else None, "health": c.get("battle_health"),
+            "crit": c.get("battle_crit_chance"), "seal": c.get("battle_seal_id")}
+
+
+def _passes(stats, mins):
+    return bool(stats) and stats.get("attack", 0) >= mins["min_attack"] and stats.get("health", 0) >= mins["min_health"] \
+        and stats.get("crit", 0) >= mins["min_crit"]
 
 
 SOCIAL_PROVIDERS = {"vkid": "ВКонтакте", "discord": "Discord", "yandex": "Яндекс", "google": "Google"}

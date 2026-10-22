@@ -120,7 +120,8 @@ input, button, select { font: inherit; color: inherit; }
 .btn:active { transform: scale(0.98); }
 .btn:disabled { opacity: .5; cursor: default; transform: none; }
 .btn svg { width: 17px; height: 17px; }
-.btn.primary { background: var(--accent); border-color: transparent; color: #fff; box-shadow: 0 6px 22px rgba(var(--glow-rgb), 0.35); }
+.btn.primary { background: var(--accent) border-box; border-color: transparent; color: #fff; box-shadow: 0 6px 22px rgba(var(--glow-rgb), 0.35); }
+/* border-box: under a transparent border the gradient otherwise repeats and shows its first colour as a stripe */
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.danger { background: rgba(255, 92, 122, 0.12); border-color: rgba(255, 92, 122, 0.35); color: #ffc1cd; }
 .btn.danger:hover { background: rgba(255, 92, 122, 0.2); }
@@ -151,7 +152,8 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 .reroll-grid img { width: 100%; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 8px; background: var(--surface-3); }
 .reroll-grid b { font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reroll-grid small { font-size: 11.5px; color: var(--muted); }
-.reroll-grid .stats { font: 11.5px var(--mono); color: var(--text); }
+.reroll-grid .reroll-stats { gap: 4px; margin-top: 2px; }
+.reroll-grid .reroll-stats .rs { font-size: 11px; padding: 2px 6px; }
 .reroll-grid .plain { font-size: 11.5px; color: var(--faint); }
 .reroll-slider { display: grid; grid-template-columns: 70px 1fr 96px; gap: 14px; align-items: center; margin: 10px 0; }
 .reroll-slider label { font-weight: 650; }
@@ -162,7 +164,25 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
   background: rgba(var(--glow-rgb), 0.10); border: 1px solid rgba(var(--glow-rgb), 0.28); }
 .reroll-energy b { font-size: 18px; }
 .reroll-list { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 16px; }
-.reroll-item { display: flex; gap: 12px; align-items: flex-start; padding: 8px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.reroll-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.reroll-item.done { border-color: rgba(61, 220, 151, 0.55); background: rgba(61, 220, 151, 0.07); }
+.reroll-item .grow { flex: 1; min-width: 0; }
+.reroll-item-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.reroll-state { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 99px; background: var(--surface-3); color: var(--muted); white-space: nowrap; }
+.reroll-state.run { color: var(--warn); }
+.reroll-state.done { color: #06281a; background: var(--success); }
+.reroll-state.miss { color: var(--error); }
+.reroll-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.reroll-stats .rs { font-size: 12.5px; padding: 3px 8px; border-radius: 8px; background: var(--surface-3); color: var(--text); }
+.reroll-stats .rs i { font-style: normal; color: var(--muted); margin-right: 3px; }
+.reroll-stats .rs.seal { color: var(--link); }
+.reroll-stats .plain { font-size: 12px; color: var(--faint); }
+.reroll-rolls em { font-style: normal; font-size: 12px; color: var(--faint); align-self: center; margin-right: 2px; }
+.reroll-run-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.reroll-badge { font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 99px; background: var(--surface-3); }
+.reroll-badge.run { color: var(--warn); }
+.reroll-badge.done { color: #06281a; background: var(--success); }
+#reroll-inline-edit .card { margin: 0 0 16px !important; background: var(--surface-2); }
 .reroll-item img { width: 46px; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 6px; background: var(--surface-3); flex: none; }
 .reroll-item b { display: block; font-size: 14px; }
 .reroll-item small { color: var(--muted); font-size: 12.5px; }
@@ -182,7 +202,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
   content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
   background: #d9d4ea; transition: transform .2s cubic-bezier(.3,1.4,.6,1), background .2s;
 }
-.switch input:checked + span { background: var(--accent); border-color: transparent; }
+.switch input:checked + span { background: var(--accent) border-box; border-color: transparent; }
 .switch input:checked + span::after { transform: translateX(18px); background: #fff; }
 
 .pill {
@@ -510,28 +530,31 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
       <section class="page" id="page-awaken">
         <div class="reroll-energy"><span>⚡ Энергия пробуждения: <b id="reroll-energy">—</b></span><small class="muted" id="reroll-energy-at"></small></div>
         <div class="card" id="reroll-run" hidden>
-          <h3 id="reroll-title"></h3>
+          <div class="reroll-run-head"><h3 id="reroll-title"></h3><span class="reroll-badge" id="reroll-badge"></span></div>
           <p class="lead" id="reroll-target"></p>
           <div class="reroll-list" id="reroll-list"></div>
+          <div id="reroll-inline-edit"></div>
           <div class="row" style="flex-wrap:wrap">
             <button class="btn" id="reroll-stop" title="Карта останется с тем броском, который сейчас на экране">Остановить и оставить</button>
             <button class="btn primary" id="reroll-resume">Продолжить</button>
             <button class="btn" id="reroll-edit">Изменить минимумы</button>
             <button class="btn ghost" id="reroll-new">Новый перебор</button>
           </div>
+          <p class="hint" style="margin:12px 0 0">Когда карта выбьет нужные статы, Buffy покажет уведомление Windows и напишет в Telegram.</p>
         </div>
         <div id="reroll-form">
           <div class="card" id="reroll-pick-card">
             <h3>1. Какие карты пробуждать</h3>
-            <p class="lead">Бот пробуждает карту, смотрит статы и, если они ниже твоих минимумов, бесплатно снимает пробуждение и пробует снова. Тратит только энергию пробуждения, которая копится с боёв.</p>
-            <div class="row"><input class="input" id="reroll-q" placeholder="Название карты, например Цунаде" spellcheck="false"><button class="btn" id="reroll-find">Найти</button></div>
+            <p class="lead">Бот пробуждает карту, смотрит статы и, если они ниже твоих минимумов, бесплатно снимает пробуждение и пробует снова. Тратит только энергию пробуждения, которая копится с боёв. Можно выбрать несколько карт — бот переберёт их по очереди.</p>
+            <div class="row"><input class="input" id="reroll-q" placeholder="Имя карты или тайтл" spellcheck="false"><button class="btn" id="reroll-find">Искать на сайте</button></div>
+            <p class="hint" id="reroll-source" style="margin:10px 0 0"></p>
             <div class="reroll-grid" id="reroll-results"></div>
-            <p class="hint" style="margin:10px 0 0">Можно выбрать несколько карт — бот переберёт их по очереди с одними минимумами. <b id="reroll-picked" style="color:var(--text)"></b></p>
+            <p class="hint" style="margin:10px 0 0"><b id="reroll-picked" style="color:var(--text)"></b></p>
           </div>
-          <div class="card" style="margin-top:18px">
+          <div class="card" id="reroll-mins-card" style="margin-top:18px">
             <h3 id="reroll-mins-title">2. Какие статы оставить</h3>
-            <p class="lead">Бот оставит первый бросок, где каждый стат не ниже выбранного.</p>
-            <div class="reroll-slider"><label for="reroll-a-r">ATK</label><input type="range" id="reroll-a-r" min="60" max="220" step="1" value="130"><input class="input" id="reroll-a" type="number" min="0" value="130"></div>
+            <p class="lead">Бот оставит первый бросок, где каждый стат не ниже выбранного. Печать выпадает случайно — её потом можно перековать отдельно.</p>
+            <div class="reroll-slider"><label for="reroll-a-r">Атака</label><input type="range" id="reroll-a-r" min="60" max="220" step="1" value="130"><input class="input" id="reroll-a" type="number" min="0" value="130"></div>
             <div class="reroll-slider"><label for="reroll-h-r">HP</label><input type="range" id="reroll-h-r" min="500" max="1800" step="10" value="1100"><input class="input" id="reroll-h" type="number" min="0" value="1100"></div>
             <div class="reroll-slider"><label for="reroll-c-r">Крит, %</label><input type="range" id="reroll-c-r" min="0" max="35" step="1" value="0"><input class="input" id="reroll-c" type="number" min="0" value="0"></div>
             <p class="reroll-odds" id="reroll-odds"></p>
@@ -952,6 +975,12 @@ function mockApi() {
         image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }; },
     reroll_start: async () => ({ ok: true }), reroll_stop: async () => ({ ok: true }),
     reroll_resume: async () => ({ ok: true }), reroll_goal: async () => ({ goal: null, energy: null }),
+    seal_info: async () => ({ 14: { name: "Печать уворота", short: "20% шанс уклониться" }, 2: { name: "Печать ярости", short: "+30% атаки ниже 50% HP" } }),
+    reroll_owned: async () => ({ cards: [
+      { id: 1, name: "Ведьма", manga: "Ведьмак", rank: "H", copy: 612, awake: true, attack: 173, health: 1470, crit: 21, seal: 14,
+        image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" },
+      { id: 3, name: "Девушка", manga: "Девушка из соседнего дома", rank: "C", copy: 88, awake: true, attack: 77, health: 1040, crit: 6, seal: 2,
+        image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }),
     reroll_energy: async () => ({ ok: true, left: 23, at: Date.now() / 1000 }), reroll_set_mins: async () => ({ ok: true }),
     check_login: async (e, p) => { await wait(900); return p.length > 3 ? { ok: true } : { ok: false, error: "Сайт не принял почту или пароль" }; },
     finish_onboarding: async () => { onboarded = true; return true; },
@@ -1009,7 +1038,7 @@ function go(page) {
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
   $("#page-title").textContent = PAGES[page][0];
   $("#page-sub").textContent = PAGES[page][1];
-  if (page === "awaken") api.reroll_energy().then(renderEnergy).catch(() => {});
+  if (page === "awaken") { api.reroll_energy().then(renderEnergy).catch(() => {}); loadOwned().catch(() => {}); }
   if (page === "log") { errorsSeen = errorCount; updateBadge(); scrollLog($("#full-log"), true); }
 }
 $$("#nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
@@ -1102,40 +1131,66 @@ function renderProfile(p) {
 }
 
 /* Awakening reroll: several cards, shared minimums */
-const rerollPicks = new Map();  // card_user_id -> card from the search
-let rerollShowForm = false, rerollEdit = false, lastReroll = null, rerollFound = [];
+const rerollPicks = new Map();  // card_user_id -> card
+let rerollShowForm = false, rerollEdit = false, lastReroll = null, rerollShown = [], rerollOwned = [], SEALS = {};
+let rerollSearchSeq = 0, rerollStatuses = null;
 const rerollMins = () => ({ min_attack: $("#reroll-a").value, min_health: $("#reroll-h").value, min_crit: $("#reroll-c").value });
-const statLine = (c) => `${c.attack} / ${c.health} / ${c.crit}%`;
+const sealName = (id) => (SEALS[id] && SEALS[id].name) || "";
+const sealShort = (id) => sealName(id).replace(/^Печать\s+/i, "");
+function statsHtml(c) {
+  if (!c || c.attack == null) return `<span class="plain">не пробуждена</span>`;
+  const seal = sealName(c.seal);
+  return `<span class="rs"><i>Атака</i> ${c.attack}</span><span class="rs"><i>HP</i> ${c.health}</span>`
+    + `<span class="rs"><i>Крит</i> ${c.crit}%</span>`
+    + (seal ? `<span class="rs seal" title="${esc((SEALS[c.seal] || {}).short || "")}">${esc(seal)}</span>` : "");
+}
+const meets = (r, g) => r.attack >= (+g.min_attack || 0) && r.health >= (+g.min_health || 0) && r.crit >= (+g.min_crit || 0);
 function rollChip(r, goal) {
-  const hit = r.attack >= (goal.min_attack || 0) && r.health >= (goal.min_health || 0) && r.crit >= (goal.min_crit || 0);
-  return `<span class="${hit ? "hit" : ""}">${statLine(r)}</span>`;
+  const title = `Атака ${r.attack}, HP ${r.health}, крит ${r.crit}%${r.seal ? ", " + sealName(r.seal) : ""}`;
+  return `<span class="${meets(r, goal) ? "hit" : ""}" title="${esc(title)}">${r.attack} · ${r.health} · ${r.crit}%${r.seal ? " · " + esc(sealShort(r.seal)) : ""}</span>`;
 }
 const REROLL_STATUS = {
-  waiting: () => "ждёт очереди",
-  running: (c) => `попыток: ${c.attempts}`,
-  reached: (c) => `готово за ${c.attempts}: ${statLine(c.result)} 🎉`,
-  missing: () => "не найдена в коллекции",
+  waiting: ["wait", "ждёт очереди"], running: ["run", "перебирается"], reached: ["done", "готово"], missing: ["miss", "не найдена"],
 };
 function renderReroll(goal) {
-  const show = !!(goal && (goal.cards || []).length) && !rerollShowForm && !rerollEdit;
+  const has = !!(goal && (goal.cards || []).length);
+  const show = has && !rerollShowForm;
   $("#reroll-run").hidden = !show;
   $("#reroll-form").hidden = show;
-  $("#reroll-pick-card").hidden = rerollEdit;
+  $("#reroll-start").textContent = rerollEdit ? "Сохранить" : "Запустить перебор";
   $("#reroll-edit-cancel").hidden = !rerollEdit;
-  $("#reroll-mins-title").textContent = rerollEdit ? "Новые минимумы" : "2. Какие статы оставить";
-  $("#reroll-start").textContent = rerollEdit ? "Сохранить минимумы" : "Запустить перебор";
+  if (!has) return;
+  notifyRerollChanges(goal);
   if (!show) return;
   const cards = goal.cards, left = cards.filter((c) => !["reached", "missing"].includes(c.status)).length;
-  $("#reroll-title").textContent = goal.active ? "Идёт перебор" : left ? "Перебор остановлен" : "Перебор завершён";
-  $("#reroll-target").textContent = `Минимумы: ATK ${goal.min_attack} · HP ${goal.min_health} · крит ${goal.min_crit}%`
-    + (goal.active ? " · бот продолжает, пока бои копят энергию" : "");
+  const state = goal.active ? "run" : left ? "pause" : "done";
+  $("#reroll-title").textContent = { run: "Идёт перебор", pause: "Перебор на паузе", done: "Перебор завершён" }[state];
+  $("#reroll-badge").className = "reroll-badge " + state;
+  $("#reroll-badge").textContent = { run: "⏳ идёт", pause: "⏸ пауза", done: "✅ все карты готовы" }[state];
+  $("#reroll-target").textContent = `Оставить, если: атака ≥ ${goal.min_attack} · HP ≥ ${goal.min_health} · крит ≥ ${goal.min_crit}%`;
   $("#reroll-stop").hidden = !goal.active;
   $("#reroll-resume").hidden = goal.active || !left;
-  $("#reroll-edit").hidden = !left;
-  $("#reroll-list").innerHTML = cards.map((c) => `<div class="reroll-item">`
-    + `<img src="${esc(c.image || "")}" alt="" loading="lazy"><div><b>${esc(c.name)}</b>`
-    + `<small>Ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · ${(REROLL_STATUS[c.status] || REROLL_STATUS.waiting)(c)}</small>`
-    + `<div class="reroll-rolls">${(c.history || []).slice(-10).map((r) => rollChip(r, goal)).join("")}</div></div></div>`).join("");
+  $("#reroll-edit").hidden = rerollEdit;
+  $("#reroll-edit").textContent = left ? "Изменить минимумы" : "Перебрать снова с другими минимумами";
+  $("#reroll-list").innerHTML = cards.map((c) => {
+    const [cls, text] = REROLL_STATUS[c.status] || REROLL_STATUS.waiting;
+    const now = c.status === "reached" ? c.result : (c.history || []).slice(-1)[0];
+    return `<div class="reroll-item ${cls}"><img src="${esc(c.image || "")}" alt="" loading="lazy"><div class="grow">`
+      + `<div class="reroll-item-head"><b>${esc(c.name)}</b><span class="reroll-state ${cls}">${text}</span></div>`
+      + `<small>${c.manga ? esc(c.manga) + " · " : ""}ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · попыток: ${c.attempts || 0}</small>`
+      + (now ? `<div class="reroll-stats">${statsHtml(now)}</div>` : "")
+      + ((c.history || []).length ? `<div class="reroll-rolls"><em>Последние броски:</em>${c.history.slice(-8).map((r) => rollChip(r, goal)).join("")}</div>` : "")
+      + `</div></div>`;
+  }).join("");
+}
+// A card reaching its goal gets a toast here; the bot also sends a Windows and a Telegram notification
+function notifyRerollChanges(goal) {
+  const now = Object.fromEntries(goal.cards.map((c) => [c.card_user_id, c.status]));
+  if (rerollStatuses) goal.cards.forEach((c) => {
+    if (c.status === "reached" && rerollStatuses[c.card_user_id] !== "reached")
+      toast(`🎉 «${c.name}» готова: атака ${c.result.attack}, HP ${c.result.health}, крит ${c.result.crit}%${c.result.seal ? ", " + sealName(c.result.seal) : ""}`, "ok");
+  });
+  rerollStatuses = now;
 }
 function renderEnergy(e) {
   if (!e || e.left == null) return;
@@ -1150,7 +1205,35 @@ function plural(n, one, few, many) {
 function renderPicks() {
   const n = rerollPicks.size;
   $("#reroll-picked").textContent = n ? `Выбрано карт: ${n}` : "";
-  $$("#reroll-results button").forEach((b) => b.classList.toggle("on", rerollPicks.has(rerollFound[+b.dataset.i].id)));
+  $$("#reroll-results button").forEach((b) => b.classList.toggle("on", rerollPicks.has(rerollShown[+b.dataset.i].id)));
+}
+function renderTiles(cards, note) {
+  rerollShown = cards.slice(0, 60);
+  $("#reroll-source").textContent = note + (cards.length > 60 ? ` Показаны первые 60 из ${cards.length} — уточни запрос.` : "");
+  $("#reroll-results").innerHTML = rerollShown.map((c, i) => `<button data-i="${i}" title="${esc(c.name)}${c.manga ? " — " + esc(c.manga) : ""}">`
+    + `<img src="${esc(c.image || "")}" alt="" loading="lazy"><b>${esc(c.name)}</b>`
+    + `<small>${c.manga ? esc(c.manga) + "<br>" : ""}ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")}</small>`
+    + `<div class="reroll-stats">${statsHtml(c.awake === false ? null : c)}</div></button>`).join("");
+  $$("#reroll-results button").forEach((b) => b.addEventListener("click", () => {
+    const c = rerollShown[+b.dataset.i];
+    if (rerollPicks.has(c.id)) rerollPicks.delete(c.id); else rerollPicks.set(c.id, c);
+    renderPicks();
+  }));
+  renderPicks();
+}
+// Own awakened cards come from the bot's cache: instant, and filtered as you type
+function filterOwned() {
+  const q = $("#reroll-q").value.trim().toLowerCase();
+  const byName = rerollOwned.filter((c) => !q || c.name.toLowerCase().includes(q));
+  const byTitle = q ? rerollOwned.filter((c) => !byName.includes(c) && (c.manga || "").toLowerCase().includes(q)) : [];
+  renderTiles(byName.concat(byTitle), rerollOwned.length
+    ? "Твои пробуждённые карты, сильные сверху. Непробуждённую копию найди кнопкой «Искать на сайте»."
+    : "Список пробуждённых карт появится после первого цикла арены. Пока ищи кнопкой «Искать на сайте».");
+}
+async function loadOwned() {
+  const r = await api.reroll_owned();
+  rerollOwned = r.cards || [];
+  filterOwned();
 }
 async function updateRerollOdds() {
   const goal = rerollMins();
@@ -1160,24 +1243,19 @@ async function updateRerollOdds() {
     : r.odds === 0 ? "Такие статы выпадают очень редко — перебор может занять очень много попыток."
     : `Шанс за бросок ≈ ${(r.odds * 100).toFixed(1)}% · в среднем ≈ ${Math.ceil(1 / r.odds)} попыток на карту.`;
 }
-$("#reroll-find").addEventListener("click", (e) => busy(e.currentTarget, async () => {
-  const r = await api.reroll_search($("#reroll-q").value);
-  if (!r.ok) { setMsg($("#reroll-msg"), r.error, false); return; }
-  setMsg($("#reroll-msg"), r.cards.length ? "" : "Ничего не нашлось", !!r.cards.length);
-  rerollFound = r.cards;
-  $("#reroll-results").innerHTML = r.cards.map((c, i) => `<button data-i="${i}" title="${esc(c.name)}">`
-    + `<img src="${esc(c.image || "")}" alt="" loading="lazy">`
-    + `<b>${esc(c.name)}</b><small>Ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")}</small>`
-    + (c.awake ? `<span class="stats">${statLine(c)}</span>` : `<span class="plain">не пробуждена</span>`)
-    + `</button>`).join("");
-  $$("#reroll-results button").forEach((b) => b.addEventListener("click", () => {
-    const c = rerollFound[+b.dataset.i];
-    if (rerollPicks.has(c.id)) rerollPicks.delete(c.id); else rerollPicks.set(c.id, c);
-    renderPicks();
-  }));
-  renderPicks();
-}));
+$("#reroll-q").addEventListener("input", filterOwned);
 $("#reroll-q").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#reroll-find").click(); });
+$("#reroll-find").addEventListener("click", async () => {
+  const seq = ++rerollSearchSeq, query = $("#reroll-q").value;  // a newer search makes this answer stale
+  $("#reroll-find").textContent = "Ищу…";
+  const r = await api.reroll_search(query);
+  if (seq !== rerollSearchSeq) return;
+  $("#reroll-find").textContent = "Искать на сайте";
+  if (!r.ok) { setMsg($("#reroll-msg"), r.error, false); return; }
+  setMsg($("#reroll-msg"), "", true);
+  renderTiles(r.cards, r.cards.length ? `Найдено на сайте по «${query.trim()}»: сначала совпадения по имени карты, потом по тайтлу.`
+    : `На сайте ничего не нашлось по «${query.trim()}».`);
+});
 ["a", "h", "c"].forEach((k) => {
   const box = $(`#reroll-${k}`), slider = $(`#reroll-${k}-r`);
   slider.addEventListener("input", () => { box.value = slider.value; updateRerollOdds(); });
@@ -1187,43 +1265,53 @@ async function startReroll() {
   $("#reroll-confirm").classList.remove("show");
   const r = await api.reroll_start([...rerollPicks.values()], rerollMins());
   if (!r.ok) { setMsg($("#reroll-msg"), r.error, false); return; }
-  rerollShowForm = false; rerollPicks.clear(); setMsg($("#reroll-msg"), "", true);
+  rerollShowForm = false; rerollStatuses = null; rerollPicks.clear(); setMsg($("#reroll-msg"), "", true);
   toast(r.warning || (r.queued ? "Перебор начнётся, как только бот закончит текущий шаг" : "Перебор запущен"), r.warning ? "err" : "ok");
+}
+// «Изменить минимумы» opens the same sliders inside the running card instead of another view
+function openInlineEdit(open) {
+  rerollEdit = open;
+  const mins = $("#reroll-mins-card");
+  (open ? $("#reroll-inline-edit") : $("#reroll-form")).appendChild(mins);
+  $("#reroll-mins-title").textContent = open ? "Новые минимумы" : "2. Какие статы оставить";
+  if (open) {
+    const g = lastReroll || {};
+    [["a", g.min_attack], ["h", g.min_health], ["c", g.min_crit]].forEach(([k, v]) => {
+      $(`#reroll-${k}`).value = v ?? 0; $(`#reroll-${k}-r`).value = v ?? 0;
+    });
+    updateRerollOdds();
+  }
+  setMsg($("#reroll-msg"), "", true);
+  renderReroll(lastReroll);
 }
 $("#reroll-start").addEventListener("click", (e) => busy(e.currentTarget, async () => {
   if (rerollEdit) {
     const r = await api.reroll_set_mins(rerollMins());
     if (!r.ok) { setMsg($("#reroll-msg"), r.error, false); return; }
-    rerollEdit = false; setMsg($("#reroll-msg"), "", true); renderReroll(lastReroll);
-    toast("Минимумы сохранены", "ok");
+    openInlineEdit(false);
+    toast(r.resumed ? "Минимумы сохранены — перебор продолжается" : "Минимумы сохранены", "ok");
     return;
   }
-  if (!rerollPicks.size) { setMsg($("#reroll-msg"), "Найди и выбери хотя бы одну карту", false); return; }
+  if (!rerollPicks.size) { setMsg($("#reroll-msg"), "Выбери хотя бы одну карту", false); return; }
   const mins = rerollMins();
-  const losing = [...rerollPicks.values()].filter((c) => c.awake
-    && (c.attack < +mins.min_attack || c.health < +mins.min_health || c.crit < +mins.min_crit));
+  const losing = [...rerollPicks.values()].filter((c) => c.awake !== false && c.attack != null && !meets(c, mins));
   if (!losing.length) return startReroll();
   $("#reroll-confirm-list").innerHTML = losing.map((c) => `<div class="reroll-item"><img src="${esc(c.image || "")}" alt="">`
-    + `<div><b>${esc(c.name)}</b><small>Ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · сейчас ${statLine(c)}</small></div></div>`).join("");
+    + `<div class="grow"><b>${esc(c.name)}</b><small>ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")}</small>`
+    + `<div class="reroll-stats">${statsHtml(c)}</div></div></div>`).join("");
   $("#reroll-confirm").classList.add("show");
 }));
 $("#reroll-confirm-ok").addEventListener("click", startReroll);
 $("#reroll-confirm-cancel").addEventListener("click", () => $("#reroll-confirm").classList.remove("show"));
-$("#reroll-stop").addEventListener("click", async () => { await api.reroll_stop(); toast("Перебор остановлен", "ok"); });
-$("#reroll-new").addEventListener("click", () => { rerollShowForm = true; rerollEdit = false; renderReroll(lastReroll); });
+$("#reroll-stop").addEventListener("click", async () => { await api.reroll_stop(); toast("Перебор остановлен, карта осталась с последним броском", "ok"); });
+$("#reroll-new").addEventListener("click", () => { if (rerollEdit) openInlineEdit(false); rerollShowForm = true; renderReroll(lastReroll); loadOwned(); });
 $("#reroll-resume").addEventListener("click", (e) => busy(e.currentTarget, async () => {
   const r = await api.reroll_resume();
   toast(r.ok ? (r.warning || (r.queued ? "Перебор продолжится, как только бот закончит текущий шаг" : "Перебор продолжен")) : r.error,
     r.ok && !r.warning ? "ok" : "err");
 }));
-$("#reroll-edit").addEventListener("click", () => {
-  const g = lastReroll || {};
-  [["a", g.min_attack], ["h", g.min_health], ["c", g.min_crit]].forEach(([k, v]) => {
-    $(`#reroll-${k}`).value = v ?? 0; $(`#reroll-${k}-r`).value = v ?? 0;
-  });
-  rerollEdit = true; renderReroll(lastReroll); updateRerollOdds();
-});
-$("#reroll-edit-cancel").addEventListener("click", () => { rerollEdit = false; setMsg($("#reroll-msg"), "", true); renderReroll(lastReroll); });
+$("#reroll-edit").addEventListener("click", () => openInlineEdit(true));
+$("#reroll-edit-cancel").addEventListener("click", () => openInlineEdit(false));
 
 function renderState(st) {
   if ("profile" in st) renderProfile(st.profile);
@@ -1692,6 +1780,7 @@ async function refreshBoot() {
   api = await waitForApi();
   renderModules();
   await refreshBoot();
+  try { SEALS = await api.seal_info(); } catch (_) { /* names stay empty */ }
   if (!boot.onboarded) wizard.open(boot.has_credentials ? 2 : 0);
   if (boot.email && boot.login_method !== "social") $("#w-email").value = boot.email;
 

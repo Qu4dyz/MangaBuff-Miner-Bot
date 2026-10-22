@@ -1720,6 +1720,24 @@ def inventory_from_api_card(card, original):
 
 REROLL_SETTING = 'awaken_reroll'  # {active, min_attack, min_health, min_crit, cards: [{card_user_id, name, status, ...}]}
 REROLL_DONE = ('reached', 'missing')
+# Seal names and short effects as the site shows them (data-battle-seals-json)
+SEAL_INFO = {
+    1: ('Печать двойного удара', '30% шанс повторной атаки', 'rare'),
+    2: ('Печать ярости', '+30% атаки ниже 50% HP', 'common'),
+    3: ('Печать казни', '+35% урона по слабым', 'common'),
+    4: ('Печать берсерка', '+30% атаки после убийства', 'rare'),
+    5: ('Печать охотника', '+75% первый удар', 'common'),
+    6: ('Печать шипов', '30% урона обратно', 'rare'),
+    7: ('Печать регенерации', '7% HP после хода', 'common'),
+    8: ('Печать барьера', '-70% первый входящий урон', 'rare'),
+    9: ('Печать бессмертия', 'Выживает с 1 HP', 'epic'),
+    10: ('Печать мести', 'Урон после смерти', 'rare'),
+    11: ('Печать цепной атаки', '25% ударить ещё врага', 'epic'),
+    12: ('Печать вампиризма', '25% лечения от урона', 'rare'),
+    13: ('Печать феникса', '35% воскреснуть', 'legendary'),
+    14: ('Печать уворота', '20% шанс уклониться', 'epic'),
+    15: ('Печать провокации', '100% шанс стать целью', 'epic'),
+}
 REROLL_HOLD_SEC = 3  # a roll stays at least this long before it is discarded, so «Остановить» can keep it
 
 
@@ -1730,7 +1748,8 @@ def card_stats(card):
 
 def stats_text(card):
     s = card_stats(card)
-    return f"ATK {s['attack']}, HP {s['health']}, крит {s['crit']}%"
+    seal = SEAL_INFO.get(s['seal'], ('',))[0]
+    return f"атака {s['attack']}, HP {s['health']}, крит {s['crit']}%" + (f", {seal.lower()}" if seal else '')
 
 
 def reroll_meets(card, goal):
@@ -1856,6 +1875,9 @@ class AwakenRerollMixin:
                 return rolls, True
             if card is not None and reroll_meets(card, goal):
                 self._reroll_update(cid, status='reached', result=card_stats(card))
+                reached = getattr(self, 'on_reroll_reached', None)  # Buffy: Windows notification
+                if reached:
+                    reached(item['name'], stats_text(card))
                 self.log(f"🎲 Перебор пробуждения: «{item['name']}» {stats_text(card)} — цель достигнута, оставил.")
                 self.notifier.notify_alert('перебор пробуждения',
                                            f"«{item['name']}» выбила {stats_text(card)}. Цель достигнута, карта оставлена.")

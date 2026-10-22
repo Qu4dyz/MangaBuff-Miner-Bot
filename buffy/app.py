@@ -169,6 +169,7 @@ def run(start_minimized=False):
 
     api._quit = quit_app
     api._on_hidden = tray.hint_once
+    api._notify = lambda text, title: tray.icon.notify(text, title)
 
     def on_closing():
         action = DataManager.get_setting("app_close_action", "ask")
