@@ -6,7 +6,7 @@
 
 ### Автопилот для MangaBuff: шахта, главы, арена, башня и клуб, пока ты занят своими делами
 
-[![Релиз](https://img.shields.io/github/v/release/Qu4dyz/MangaBuff-Miner-Bot?label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=8b5cf6)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest)
+[![Релиз](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FQu4dyz%2FMangaBuff-Miner-Bot%2Fbadges%2Fversion.json&label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest)
 [![Скачивания](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FQu4dyz%2FMangaBuff-Miner-Bot%2Fbadges%2Fdownloads.json&label=%D1%81%D0%BA%D0%B0%D1%87%D0%B8%D0%B2%D0%B0%D0%BD%D0%B8%D0%B9)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)

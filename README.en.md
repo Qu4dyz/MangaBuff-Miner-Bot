@@ -6,7 +6,7 @@
 
 ### Autopilot for MangaBuff: mine, chapters, arena, tower and club while you do your own thing
 
-[![Release](https://img.shields.io/github/v/release/Qu4dyz/MangaBuff-Miner-Bot?color=8b5cf6)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest)
+[![Release](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FQu4dyz%2FMangaBuff-Miner-Bot%2Fbadges%2Fversion.json&label=release)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest)
 [![Downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FQu4dyz%2FMangaBuff-Miner-Bot%2Fbadges%2Fdownloads.json)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
