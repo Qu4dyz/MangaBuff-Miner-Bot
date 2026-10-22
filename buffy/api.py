@@ -364,7 +364,9 @@ class BuffyApi:
                 for c in rows.get("data") or []:
                     if int(c.get("in_trade") or 0):
                         continue
+                    image = c.get("image")
                     found.append({"id": int(c["id"]), "name": c.get("card_name") or query, "rank": c.get("rank"),
+                                  "image": f"https://mangabuff.ru/img/cards/{image}" if image else None,
                                   "copy": c.get("copy_number"), "awake": awake == 1,
                                   "attack": c.get("battle_attack"), "health": c.get("battle_health"),
                                   "crit": c.get("battle_crit_chance")})

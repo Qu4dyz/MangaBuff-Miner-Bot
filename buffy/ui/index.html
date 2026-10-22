@@ -144,12 +144,20 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 .msg { font-size: 13px; margin-top: 8px; min-height: 18px; }
 .msg.ok { color: var(--success); }
 .msg.err { color: var(--error); }
-.reroll-results { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow: auto; margin: 4px 0 14px; }
-.reroll-results button { display: flex; justify-content: space-between; gap: 12px; text-align: left; padding: 9px 12px;
-  border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; }
-.reroll-results button.on { border-color: var(--glow); box-shadow: 0 0 0 2px rgba(var(--glow-rgb), 0.25); }
-.reroll-results small { color: var(--muted); }
-.reroll-mins { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.reroll-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; margin-top: 14px; }
+.reroll-grid button { display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 9px; text-align: left; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.reroll-grid button.on { border-color: var(--glow); box-shadow: 0 0 0 2px rgba(var(--glow-rgb), 0.35); }
+.reroll-grid img { width: 100%; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 8px; background: var(--surface-3); }
+.reroll-grid b { font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reroll-grid small { font-size: 11.5px; color: var(--muted); }
+.reroll-grid .stats { font: 11.5px var(--mono); color: var(--text); }
+.reroll-grid .plain { font-size: 11.5px; color: var(--faint); }
+.reroll-slider { display: grid; grid-template-columns: 70px 1fr 96px; gap: 14px; align-items: center; margin: 10px 0; }
+.reroll-slider label { font-weight: 650; }
+.reroll-slider input[type=range] { width: 100%; accent-color: var(--glow); }
+.reroll-slider .input { padding: 8px 10px; text-align: right; }
+.reroll-odds { margin: 14px 0 8px; font-weight: 600; }
 .reroll-rolls { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .reroll-rolls span { font: 12px var(--mono); padding: 4px 8px; border-radius: 8px; background: var(--surface-3); color: var(--muted); }
 .reroll-rolls span.hit { color: var(--success); }
@@ -350,6 +358,10 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
         Модули
       </button>
+      <button data-page="awaken">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></svg>
+        Пробуждение
+      </button>
       <button data-page="notify">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7Z"/></svg>
         Telegram
@@ -482,30 +494,33 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
       <section class="page" id="page-modules">
         <div class="grid two" id="modules-grid"></div>
         <p class="hint" style="margin-top:16px">Изменения подхватываются со следующего цикла бота — перезапуск не нужен.</p>
+      </section>
 
-        <div class="card" id="reroll-card" style="margin-top:18px">
-          <h3>🎲 Перебор пробуждения</h3>
-          <p class="lead">Бот пробуждает выбранную карту, смотрит статы и, если они ниже твоих минимумов, бесплатно снимает пробуждение и пробует снова. Тратит только энергию пробуждения, которая копится с боёв; ничего не покупает.</p>
-          <div id="reroll-run" hidden>
-            <p style="margin:0"><b id="reroll-title"></b> <span class="muted" id="reroll-target"></span></p>
-            <p class="muted" id="reroll-status" style="margin:6px 0 0"></p>
-            <div class="reroll-rolls" id="reroll-rolls"></div>
-            <div class="row"><button class="btn" id="reroll-stop">Остановить</button><button class="btn ghost" id="reroll-new">Новый перебор</button></div>
+      <!-- ================= AWAKENING ================= -->
+      <section class="page" id="page-awaken">
+        <div class="card" id="reroll-run" hidden>
+          <h3>Идёт перебор: <span id="reroll-title"></span></h3>
+          <p class="lead" id="reroll-target"></p>
+          <p class="muted" id="reroll-status" style="margin:0"></p>
+          <div class="reroll-rolls" id="reroll-rolls"></div>
+          <div class="row"><button class="btn" id="reroll-stop">Остановить</button><button class="btn ghost" id="reroll-new">Новый перебор</button></div>
+        </div>
+        <div id="reroll-form">
+          <div class="card">
+            <h3>1. Какую карту пробуждать</h3>
+            <p class="lead">Бот пробуждает карту, смотрит статы и, если они ниже твоих минимумов, бесплатно снимает пробуждение и пробует снова. Тратит только энергию пробуждения, которая копится с боёв.</p>
+            <div class="row"><input class="input" id="reroll-q" placeholder="Название карты, например Цунаде" spellcheck="false"><button class="btn" id="reroll-find">Найти</button></div>
+            <div class="reroll-grid" id="reroll-results"></div>
           </div>
-          <div id="reroll-form">
-            <div class="field">
-              <label for="reroll-q">Карта из твоей коллекции</label>
-              <div class="row"><input class="input" id="reroll-q" placeholder="Название, например Цунаде" spellcheck="false"><button class="btn" id="reroll-find">Найти</button></div>
-            </div>
-            <div class="reroll-results" id="reroll-results"></div>
-            <div class="reroll-mins">
-              <div class="field"><label for="reroll-a">ATK не меньше</label><input class="input" id="reroll-a" type="number" min="0" placeholder="150"></div>
-              <div class="field"><label for="reroll-h">HP не меньше</label><input class="input" id="reroll-h" type="number" min="0" placeholder="1200"></div>
-              <div class="field"><label for="reroll-c">Крит не меньше, %</label><input class="input" id="reroll-c" type="number" min="0" placeholder="0"></div>
-            </div>
-            <p class="hint" id="reroll-odds"></p>
+          <div class="card" style="margin-top:18px">
+            <h3>2. Какие статы оставить</h3>
+            <p class="lead" id="reroll-current">Бот оставит первый бросок, где каждый стат не ниже выбранного.</p>
+            <div class="reroll-slider"><label for="reroll-a-r">ATK</label><input type="range" id="reroll-a-r" min="60" max="220" step="1" value="130"><input class="input" id="reroll-a" type="number" min="0" value="130"></div>
+            <div class="reroll-slider"><label for="reroll-h-r">HP</label><input type="range" id="reroll-h-r" min="500" max="1800" step="10" value="1100"><input class="input" id="reroll-h" type="number" min="0" value="1100"></div>
+            <div class="reroll-slider"><label for="reroll-c-r">Крит, %</label><input type="range" id="reroll-c-r" min="0" max="35" step="1" value="0"><input class="input" id="reroll-c" type="number" min="0" value="0"></div>
+            <p class="reroll-odds" id="reroll-odds"></p>
             <p class="hint">Если карта стоит в колоде, бот вернёт её туда после перебора. Из отряда Башни снятие пробуждения её убирает — отряд придётся выбрать заново. Во время вечернего кубка перебор ждёт.</p>
-            <div class="row"><button class="btn primary" id="reroll-start">Запустить перебор</button></div>
+            <div class="row" style="margin-top:12px"><button class="btn primary" id="reroll-start">Запустить перебор</button></div>
             <div class="msg" id="reroll-msg"></div>
           </div>
         </div>
@@ -831,6 +846,7 @@ const MODULES = [
 const PAGES = {
   dash: ["Главная", "Всё, что Buffy делает прямо сейчас"],
   modules: ["Модули", "Что бот делает за тебя"],
+  awaken: ["Пробуждение", "Перебор статов выбранной карты"],
   notify: ["Telegram", "Уведомления на телефон"],
   network: ["Сеть", "Подключение к MangaBuff"],
   log: ["Журнал", "Что Buffy сделал — простыми словами"],
@@ -898,8 +914,10 @@ function mockApi() {
     social_login: async () => { await wait(900); return { ok: true }; },
     reroll_odds: async (g) => ({ odds: (+g.min_attack || 0) > 150 ? 0.026 : 0.08, sample: 388 }),
     reroll_search: async () => { await wait(500); return { ok: true, cards: [
-      { id: 1, name: "Цунаде", rank: "X", copy: 127, awake: true, attack: 173, health: 1470, crit: 21 },
-      { id: 2, name: "Цунаде", rank: "X", copy: 941, awake: false }] }; },
+      { id: 1, name: "Ведьма", rank: "H", copy: 612, awake: true, attack: 173, health: 1470, crit: 21,
+        image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" },
+      { id: 2, name: "Ведьма", rank: "H", copy: 941, awake: false,
+        image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }; },
     reroll_start: async () => ({ ok: true }), reroll_stop: async () => ({ ok: true }),
     check_login: async (e, p) => { await wait(900); return p.length > 3 ? { ok: true } : { ok: false, error: "Сайт не принял почту или пароль" }; },
     finish_onboarding: async () => { onboarded = true; return true; },
@@ -1060,7 +1078,7 @@ function renderReroll(goal) {
   $("#reroll-form").hidden = show;
   if (!show) return;
   $("#reroll-title").textContent = `«${goal.name}»`;
-  $("#reroll-target").textContent = `до ATK ${goal.min_attack} · HP ${goal.min_health} · крит ${goal.min_crit}%`;
+  $("#reroll-target").textContent = `Минимумы: ATK ${goal.min_attack} · HP ${goal.min_health} · крит ${goal.min_crit}%`;
   const res = goal.result ? `${goal.result.attack}/${goal.result.health}/${goal.result.crit}%` : "";
   $("#reroll-status").textContent = {
     waiting: "Ждёт ближайшего цикла арены",
@@ -1084,15 +1102,25 @@ $("#reroll-find").addEventListener("click", (e) => busy(e.currentTarget, async (
   const r = await api.reroll_search($("#reroll-q").value);
   if (!r.ok) { setMsg($("#reroll-msg"), r.error, false); return; }
   setMsg($("#reroll-msg"), r.cards.length ? "" : "Ничего не нашлось", !!r.cards.length);
-  $("#reroll-results").innerHTML = r.cards.map((c, i) => `<button data-i="${i}"><span>${esc(c.name)} <small>${esc(c.rank || "")} №${esc(c.copy ?? "")}</small></span>`
-    + `<small>${c.awake ? `${c.attack}/${c.health}/${c.crit}%` : "не пробуждена"}</small></button>`).join("");
+  $("#reroll-results").innerHTML = r.cards.map((c, i) => `<button data-i="${i}" title="${esc(c.name)}">`
+    + (c.image ? `<img src="${esc(c.image)}" alt="" loading="lazy">` : `<img alt="">`)
+    + `<b>${esc(c.name)}</b><small>Ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")}</small>`
+    + (c.awake ? `<span class="stats">${c.attack} / ${c.health} / ${c.crit}%</span>` : `<span class="plain">не пробуждена</span>`)
+    + `</button>`).join("");
   $$("#reroll-results button").forEach((b) => b.addEventListener("click", () => {
     rerollPick = r.cards[+b.dataset.i];
     $$("#reroll-results button").forEach((o) => o.classList.toggle("on", o === b));
+    $("#reroll-current").textContent = rerollPick.awake
+      ? `Сейчас у карты ATK ${rerollPick.attack}, HP ${rerollPick.health}, крит ${rerollPick.crit}%. Бот оставит первый бросок, где каждый стат не ниже выбранного.`
+      : "Карта ещё не пробуждена. Бот оставит первый бросок, где каждый стат не ниже выбранного.";
   }));
 }));
 $("#reroll-q").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#reroll-find").click(); });
-["#reroll-a", "#reroll-h", "#reroll-c"].forEach((s) => $(s).addEventListener("input", updateRerollOdds));
+["a", "h", "c"].forEach((k) => {
+  const box = $(`#reroll-${k}`), slider = $(`#reroll-${k}-r`);
+  slider.addEventListener("input", () => { box.value = slider.value; updateRerollOdds(); });
+  box.addEventListener("input", () => { slider.value = box.value; updateRerollOdds(); });
+});
 $("#reroll-start").addEventListener("click", (e) => busy(e.currentTarget, async () => {
   if (!rerollPick) { setMsg($("#reroll-msg"), "Найди и выбери карту", false); return; }
   if (rerollPick.awake && !confirm(`Текущие статы «${rerollPick.name}» (${rerollPick.attack}/${rerollPick.health}/${rerollPick.crit}%) пропадут безвозвратно, если они ниже минимумов. Запустить?`)) return;
