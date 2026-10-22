@@ -182,6 +182,17 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 .reroll-badge { font-size: 13px; font-weight: 700; padding: 5px 12px; border-radius: 99px; background: var(--surface-3); }
 .reroll-badge.run { color: var(--warn); }
 .reroll-badge.done { color: #06281a; background: var(--success); }
+.seal-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.seal-chip { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 10px 12px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.seal-chip.on { border-color: var(--glow); box-shadow: 0 0 0 2px rgba(var(--glow-rgb), 0.35); }
+.seal-chip b { font-size: 14px; }
+.seal-chip small { font-size: 12px; color: var(--muted); }
+.seal-chip .seal-meta { color: var(--faint); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.seal-chip.r-epic b { color: #d9a5ff; } .seal-chip.r-legendary b { color: #ffcf6b; } .seal-chip.r-rare b { color: #8fc3ff; }
+.seal-tag { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; }
+.seal-tag.good { color: #06281a; background: var(--success); }
+.seal-tag.bad { color: #fff; background: rgba(255, 92, 122, 0.7); }
 #reroll-inline-edit .card { margin: 0 0 16px !important; background: var(--surface-2); }
 .reroll-item img { width: 46px; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 6px; background: var(--surface-3); flex: none; }
 .reroll-item b { display: block; font-size: 14px; }
@@ -561,6 +572,39 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
             <p class="hint">Если карта стоит в колоде, бот вернёт её туда после перебора. Из отряда Башни снятие пробуждения её убирает — отряд придётся выбрать заново. Во время вечернего кубка перебор ждёт.</p>
             <div class="row" style="margin-top:12px"><button class="btn primary" id="reroll-start">Запустить перебор</button><button class="btn ghost" id="reroll-edit-cancel" hidden>Отмена</button></div>
             <div class="msg" id="reroll-msg"></div>
+          </div>
+        </div>
+
+        <h2 class="section-title" style="margin:28px 0 12px">🔮 Перековка печати</h2>
+        <div class="reroll-energy"><span>💠 Эссенция: <b id="seal-essence">—</b></span><small class="muted">одна перековка — 500, статы карты не меняются</small></div>
+        <div class="card" id="seal-run" hidden>
+          <div class="reroll-run-head"><h3 id="seal-title"></h3><span class="reroll-badge" id="seal-badge"></span></div>
+          <p class="lead" id="seal-target"></p>
+          <div class="reroll-list" id="seal-list"></div>
+          <div class="row" style="flex-wrap:wrap">
+            <button class="btn" id="seal-stop">Остановить и оставить</button>
+            <button class="btn primary" id="seal-resume">Продолжить</button>
+            <input class="input" id="seal-run-limit" type="number" min="0" step="500" placeholder="новый лимит эссенции" style="max-width:200px">
+            <button class="btn ghost" id="seal-new">Новая перековка</button>
+          </div>
+        </div>
+        <div id="seal-form">
+          <div class="card">
+            <h3>1. Каким картам менять печать</h3>
+            <p class="lead">Только пробуждённые карты. Бот перековывает печать, пока не выпадет одна из выбранных, и не трогает атаку, HP и крит.</p>
+            <input class="input" id="seal-q" placeholder="Фильтр по имени карты или тайтлу" spellcheck="false">
+            <div class="reroll-grid" id="seal-results"></div>
+            <p class="hint" style="margin:10px 0 0"><b id="seal-picked" style="color:var(--text)"></b></p>
+          </div>
+          <div class="card" style="margin-top:18px">
+            <h3>2. Какие печати подходят</h3>
+            <p class="lead">Выбери одну или несколько. Подсказки — по 3,5 тыс. боёв арены и кубка: как часто печать стоит у соперников и выигрывает ли она чаще, чем обещает сила колоды. Сила самой колоды влияет намного сильнее любой печати.</p>
+            <div class="seal-chips" id="seal-chips"></div>
+            <p class="reroll-odds" id="seal-odds"></p>
+            <div class="field" style="max-width:320px"><label for="seal-limit">Потратить не больше, эссенции (0 — без лимита)</label>
+              <input class="input" id="seal-limit" type="number" min="0" step="500" value="5000"></div>
+            <div class="row"><button class="btn primary" id="seal-start">Запустить перековку</button></div>
+            <div class="msg" id="seal-msg"></div>
           </div>
         </div>
       </section>
@@ -975,6 +1019,9 @@ function mockApi() {
         image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }; },
     reroll_start: async () => ({ ok: true }), reroll_stop: async () => ({ ok: true }),
     reroll_resume: async () => ({ ok: true }), reroll_goal: async () => ({ goal: null, energy: null }),
+    seal_odds: async (s) => ({ odds: Math.min(0.9, s.length * 0.07) }), seal_state: async () => ({ goal: null, essence: null }),
+    seal_essence: async () => ({ ok: true, left: 5200, at: Date.now() / 1000 }),
+    seal_start: async () => ({ ok: true }), seal_stop: async () => ({ ok: true }), seal_resume: async () => ({ ok: true }),
     seal_info: async () => ({ 14: { name: "Печать уворота", short: "20% шанс уклониться" }, 2: { name: "Печать ярости", short: "+30% атаки ниже 50% HP" } }),
     reroll_owned: async () => ({ cards: [
       { id: 1, name: "Ведьма", manga: "Ведьмак", rank: "H", copy: 612, awake: true, attack: 173, health: 1470, crit: 21, seal: 14,
@@ -1038,7 +1085,12 @@ function go(page) {
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
   $("#page-title").textContent = PAGES[page][0];
   $("#page-sub").textContent = PAGES[page][1];
-  if (page === "awaken") { api.reroll_energy().then(renderEnergy).catch(() => {}); loadOwned().catch(() => {}); }
+  if (page === "awaken") {
+    api.reroll_energy().then(renderEnergy).catch(() => {});
+    api.seal_essence().then(renderEssence).catch(() => {});
+    loadOwned().then(renderSealTiles).catch(() => {});
+    renderSealChips();
+  }
   if (page === "log") { errorsSeen = errorCount; updateBadge(); scrollLog($("#full-log"), true); }
 }
 $$("#nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
@@ -1311,11 +1363,106 @@ $("#reroll-resume").addEventListener("click", (e) => busy(e.currentTarget, async
     r.ok && !r.warning ? "ok" : "err");
 }));
 $("#reroll-edit").addEventListener("click", () => openInlineEdit(true));
+/* Seal reforge: several awakened cards, a set of wanted seals, an essence limit */
+const sealPicks = new Map(), sealWanted = new Set();
+let sealShown = [], sealShowForm = false, lastSeal = null, sealStatuses = null;
+function sealChip(id, on) {
+  const s = SEALS[id] || {};
+  const tag = s.verdict === "сильнее" ? `<span class="seal-tag good">сильнее среднего</span>`
+    : s.verdict === "слабее" ? `<span class="seal-tag bad">слабее среднего</span>` : "";
+  return `<button class="seal-chip ${on ? "on" : ""} r-${esc(s.rarity || "")}" data-seal="${id}">`
+    + `<b>${esc(s.name || "")}</b><small>${esc(s.short || "")}</small>`
+    + `<small class="seal-meta">${s.popularity != null ? `у ${s.popularity}% карт соперников` : ""}${tag}</small></button>`;
+}
+function renderSealChips() {
+  $("#seal-chips").innerHTML = Object.keys(SEALS).map((id) => sealChip(+id, sealWanted.has(+id))).join("");
+  $$("#seal-chips .seal-chip").forEach((b) => b.addEventListener("click", () => {
+    const id = +b.dataset.seal;
+    if (sealWanted.has(id)) sealWanted.delete(id); else sealWanted.add(id);
+    b.classList.toggle("on", sealWanted.has(id));
+    updateSealOdds();
+  }));
+}
+async function updateSealOdds() {
+  if (!sealWanted.size) { $("#seal-odds").textContent = ""; return; }
+  const r = await api.seal_odds([...sealWanted]);
+  $("#seal-odds").textContent = !r.odds ? "Таких печатей среди твоих карт почти нет — перековка может затянуться."
+    : `Шанс за перековку ≈ ${(r.odds * 100).toFixed(0)}% · в среднем ≈ ${Math.ceil(1 / r.odds)} перековок`
+      + ` (≈ ${(Math.ceil(1 / r.odds) * 500).toLocaleString("ru-RU")} эссенции) на карту.`;
+}
+function renderSealTiles() {
+  const q = $("#seal-q").value.trim().toLowerCase();
+  const cards = rerollOwned.filter((c) => !q || c.name.toLowerCase().includes(q) || (c.manga || "").toLowerCase().includes(q));
+  sealShown = cards.slice(0, 60);
+  $("#seal-results").innerHTML = sealShown.map((c, i) => `<button data-i="${i}" class="${sealPicks.has(c.id) ? "on" : ""}">`
+    + `<img src="${esc(c.image || "")}" alt="" loading="lazy"><b>${esc(c.name)}</b>`
+    + `<small>${c.manga ? esc(c.manga) + "<br>" : ""}ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")}</small>`
+    + `<div class="reroll-stats">${statsHtml(c)}</div></button>`).join("");
+  $$("#seal-results button").forEach((b) => b.addEventListener("click", () => {
+    const c = sealShown[+b.dataset.i];
+    if (sealPicks.has(c.id)) sealPicks.delete(c.id); else sealPicks.set(c.id, c);
+    b.classList.toggle("on", sealPicks.has(c.id));
+    $("#seal-picked").textContent = sealPicks.size ? `Выбрано карт: ${sealPicks.size}` : "";
+  }));
+}
+function renderEssence(e) {
+  if (!e || e.left == null) return;
+  $("#seal-essence").textContent = Number(e.left).toLocaleString("ru-RU");
+}
+function renderSeal(goal) {
+  const has = !!(goal && (goal.cards || []).length);
+  const show = has && !sealShowForm;
+  $("#seal-run").hidden = !show;
+  $("#seal-form").hidden = show;
+  if (!has) return;
+  const now = Object.fromEntries(goal.cards.map((c) => [c.card_user_id, c.status]));
+  if (sealStatuses) goal.cards.forEach((c) => {
+    if (c.status === "reached" && sealStatuses[c.card_user_id] !== "reached")
+      toast(`🔮 «${c.name}» получила ${sealName(c.result && c.result.seal).toLowerCase()}`, "ok");
+  });
+  sealStatuses = now;
+  if (!show) return;
+  const left = goal.cards.filter((c) => !["reached", "missing"].includes(c.status)).length;
+  const state = goal.active ? "run" : left ? "pause" : "done";
+  $("#seal-title").textContent = { run: "Идёт перековка", pause: "Перековка на паузе", done: "Перековка завершена" }[state];
+  $("#seal-badge").className = "reroll-badge " + state;
+  $("#seal-badge").textContent = { run: "⏳ идёт", pause: "⏸ пауза", done: "✅ все карты готовы" }[state];
+  $("#seal-target").textContent = "Нужна одна из: " + (goal.seals || []).map((id) => sealShort(id)).join(", ")
+    + ` · потрачено ${goal.spent || 0}${goal.max_essence ? ` из ${goal.max_essence}` : ""} эссенции`;
+  $("#seal-stop").hidden = !goal.active;
+  $("#seal-resume").hidden = goal.active || !left;
+  $("#seal-list").innerHTML = goal.cards.map((c) => {
+    const [cls, text] = REROLL_STATUS[c.status] || REROLL_STATUS.waiting;
+    const cur = c.status === "reached" ? c.result.seal : (c.history || []).slice(-1)[0] ?? c.seal;
+    return `<div class="reroll-item ${cls}"><img src="${esc(c.image || "")}" alt="" loading="lazy"><div class="grow">`
+      + `<div class="reroll-item-head"><b>${esc(c.name)}</b><span class="reroll-state ${cls}">${text}</span></div>`
+      + `<small>${c.manga ? esc(c.manga) + " · " : ""}ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · перековок: ${c.attempts || 0}</small>`
+      + (cur ? `<div class="reroll-stats"><span class="rs seal">${esc(sealName(cur))}</span></div>` : "")
+      + ((c.history || []).length ? `<div class="reroll-rolls"><em>Выпадало:</em>${c.history.slice(-10).map((s) =>
+        `<span class="${(goal.seals || []).includes(s) ? "hit" : ""}">${esc(sealShort(s))}</span>`).join("")}</div>` : "")
+      + `</div></div>`;
+  }).join("");
+}
+$("#seal-q").addEventListener("input", renderSealTiles);
+$("#seal-start").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  const r = await api.seal_start([...sealPicks.values()], [...sealWanted], $("#seal-limit").value);
+  if (!r.ok) { setMsg($("#seal-msg"), r.error, false); return; }
+  sealShowForm = false; sealStatuses = null; sealPicks.clear(); setMsg($("#seal-msg"), "", true);
+  toast(r.warning || (r.queued ? "Перековка начнётся, как только бот закончит текущий шаг" : "Перековка запущена"), r.warning ? "err" : "ok");
+}));
+$("#seal-stop").addEventListener("click", async () => { await api.seal_stop(); toast("Перековка остановлена, печать осталась последней", "ok"); });
+$("#seal-resume").addEventListener("click", (e) => busy(e.currentTarget, async () => {
+  const r = await api.seal_resume($("#seal-run-limit").value || null);
+  toast(r.ok ? (r.warning || "Перековка продолжена") : r.error, r.ok && !r.warning ? "ok" : "err");
+}));
+$("#seal-new").addEventListener("click", () => { sealShowForm = true; renderSeal(lastSeal); renderSealTiles(); });
+
 $("#reroll-edit-cancel").addEventListener("click", () => openInlineEdit(false));
 
 function renderState(st) {
   if ("profile" in st) renderProfile(st.profile);
   if ("reroll" in st) { lastReroll = st.reroll; renderReroll(st.reroll); }
+  if ("seal" in st) { lastSeal = st.seal; renderSeal(st.seal); }
   const hw = st.halloween, hwEl = $("#hw-candies");
   if (hwEl) hwEl.textContent = hw ? `🍬 ${hw.balance ?? 0} конфет · за чтение сегодня ${hw.reading_today}/35 · ` : "";
   $("#candy-v").textContent = hw && hw.balance != null ? fmt(hw.balance) : "—";
@@ -1789,9 +1936,15 @@ async function refreshBoot() {
   loop(pollLogs, 1000);
   // While a reroll runs, show each roll at once so «Остановить» can still keep it
   loop(async () => {
-    if (!$("#page-awaken").classList.contains("active") || !(lastReroll && lastReroll.active)) return;
-    const live = await api.reroll_goal();
-    lastReroll = live.goal; renderReroll(lastReroll); renderEnergy(live.energy);
+    if (!$("#page-awaken").classList.contains("active")) return;
+    if (lastReroll && lastReroll.active) {
+      const live = await api.reroll_goal();
+      lastReroll = live.goal; renderReroll(lastReroll); renderEnergy(live.energy);
+    }
+    if (lastSeal && lastSeal.active) {
+      const live = await api.seal_state();
+      lastSeal = live.goal; renderSeal(lastSeal); renderEssence(live.essence);
+    }
   }, 500);
   loop(async () => renderUpdate(await api.get_update()), 2000);
   setInterval(tickCountdown, 1000);

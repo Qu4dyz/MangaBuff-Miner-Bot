@@ -1953,6 +1953,134 @@ class AwakenRerollMixin:
                 self.log(f'⚠️ Перебор пробуждения: колоду проверю в следующем цикле ({e}).')
 
 
+# Seal meta from 3555 arena and cup fights (Oct 2026): share of opponent cards with the seal, and how much
+# it moved their win rate beyond what deck strength predicts. "" = within noise. Deck strength matters far more.
+SEAL_META = {
+    'regeneration': (25.5, 2.3, 'сильнее'), 'vampirism': (21.6, 0.9, ''), 'rage': (8.5, -1.1, ''),
+    'hunter': (7.3, -2.8, ''), 'execution': (6.4, -3.7, 'слабее'), 'berserk': (4.5, -6.6, 'слабее'),
+    'thorns': (4.2, 3.6, ''), 'dodge': (4.2, 1.5, ''), 'double_strike': (4.1, -1.7, ''), 'revenge': (3.9, -3.3, ''),
+    'barrier': (3.8, -1.0, ''), 'immortality': (2.7, -0.8, ''), 'phoenix': (1.3, -3.6, ''),
+    'taunt': (1.1, -9.6, 'слабее'), 'chain_attack': (1.0, -5.2, ''),
+}
+SEAL_SETTING = 'seal_reroll'  # {active, seals: [ids], max_essence, spent, cards: [{card_user_id, name, status, ...}]}
+SEAL_REROLL_COST = 500
+
+
+def note_essence(left):
+    DataManager.set_setting('reroll_essence', {'left': int(left), 'at': time.time()})
+
+
+def _digits(text):
+    return int(re.sub(r'\D', '', str(text)) or 0)
+
+
+class SealRerollMixin:
+    """Reforge the seal of chosen awakened cards until it is one of the wanted seals.
+
+    Each reforge costs essence (500) and keeps attack, HP and crit; the bot checks that and stops
+    on any change. Never spends past the user's essence limit."""
+
+    def _seal_wanted(self, cid):
+        latest = DataManager.get_setting(SEAL_SETTING) or {}
+        item = next((c for c in latest.get('cards') or [] if int(c['card_user_id']) == cid), None)
+        if not latest.get('active') or item is None or item.get('status') in REROLL_DONE:
+            return None
+        return latest
+
+    def _seal_update(self, cid, **values):
+        latest = DataManager.get_setting(SEAL_SETTING) or {}
+        for item in latest.get('cards') or []:
+            if int(item['card_user_id']) == int(cid):
+                item.update(values)
+                DataManager.set_setting(SEAL_SETTING, latest)
+                return item
+        return None
+
+    def run_seal_reroll(self, max_rolls=40):
+        goal = DataManager.get_setting(SEAL_SETTING) or {}
+        if not goal.get('active') or 19 <= self._msk_now().hour < 22:
+            return 0
+        _, root = self.management_page('/battle/reroll', '.battle-reroll')
+        seal_url, card_url = root['data-reroll-seal-url'], root['data-reroll-card-url']
+        essence = _digits(root.select_one('[data-reroll-essence]').get_text())
+        note_essence(essence)
+        self.management_save({'seal_pending': None})
+        rolls = 0
+        for item in goal.get('cards') or []:
+            if item.get('status') in REROLL_DONE:
+                continue
+            cid = int(item['card_user_id'])
+            try:
+                card = self.management_post(card_url, {'card_user_id': cid}).get('card') or {}
+            except ValueError:
+                card = {}
+            if str(card.get('card_user_id')) != str(cid):
+                self._seal_update(cid, status='missing')
+                self.log(f"⚠️ Перековка печати: «{item['name']}» #{cid} не найдена среди пробуждённых — пропускаю.")
+                continue
+            rolled_at, paused = None, False
+            while rolls < max_rolls and self._alive():
+                latest = self._seal_wanted(cid)
+                if latest is None:
+                    return rolls
+                seal = seal_id((card.get('seal') or {}).get('name')) if isinstance(card.get('seal'), dict) \
+                    else card.get('battle_seal_id')
+                stats = {'attack': int(float(card['attack'])), 'health': int(float(card['health'])),
+                         'crit': int(float(card['crit_chance'])), 'seal': seal}
+                if seal in {int(s) for s in latest.get('seals') or []}:
+                    self._seal_update(cid, status='reached', result=stats)
+                    text = f"«{item['name']}» получила {SEAL_INFO.get(seal, ('печать',))[0].lower()}"
+                    self.log(f'🔮 Перековка печати: {text} — оставил.')
+                    self.notifier.notify_alert('перековка печати', text + '.')
+                    reached = getattr(self, 'on_reroll_reached', None)
+                    if reached:
+                        reached(item['name'], SEAL_INFO.get(seal, ('печать',))[0].lower())
+                    break
+                limit = int(latest.get('max_essence') or 0)
+                if essence < SEAL_REROLL_COST or (limit and int(latest.get('spent') or 0) + SEAL_REROLL_COST > limit):
+                    self.log('🔮 Перековка печати: эссенция кончилась или достигнут лимит — жду.')
+                    return rolls
+                while rolled_at is not None and time.monotonic() - rolled_at < REROLL_HOLD_SEC:
+                    if self._seal_wanted(cid) is None:
+                        return rolls
+                    time.sleep(0.25)
+                self.management_save({'seal_pending': cid})
+                try:
+                    response = self.management_post(seal_url, {'card_user_id': cid}, mutation=True,
+                                                    before_send=lambda: self._seal_wanted(cid) is not None)
+                except SendCancelled:
+                    self.management_save({'seal_pending': None})
+                    return rolls
+                new = response.get('card') or {}
+                if str(new.get('card_user_id')) != str(cid):
+                    raise ValueError('Seal reforge answered for another card')
+                if any(int(float(new[k])) != stats[s] for k, s in (('attack', 'attack'), ('health', 'health'),
+                                                                    ('crit_chance', 'crit'))):
+                    raise ValueError('Seal reforge changed attack, HP or crit — stopped')
+                cost = _digits(response.get('cost') or SEAL_REROLL_COST)
+                essence = _digits(response.get('essence')) if response.get('essence') is not None else essence - cost
+                note_essence(essence)
+                self.management_save({'seal_pending': None})
+                card, rolls, rolled_at = new, rolls + 1, time.monotonic()
+                new_seal = seal_id((new.get('seal') or {}).get('name'))
+                item = self._seal_update(cid, attempts=int(item.get('attempts') or 0) + 1, status='running',
+                                         history=(item.get('history') or [])[-29:] + [new_seal]) or item
+                spent = int((DataManager.get_setting(SEAL_SETTING) or {}).get('spent') or 0) + cost
+                DataManager.set_setting(SEAL_SETTING, {**(DataManager.get_setting(SEAL_SETTING) or {}), 'spent': spent})
+                self.log(f"🔮 Перековка печати «{item['name']}» #{item['attempts']}: "
+                         f"{SEAL_INFO.get(new_seal, ('?',))[0]} (эссенции осталось {essence})")
+            else:
+                paused = True
+            if paused:
+                break
+        latest = DataManager.get_setting(SEAL_SETTING) or {}
+        cards = latest.get('cards') or []
+        if latest.get('active') and cards and all(c.get('status') in REROLL_DONE for c in cards):
+            DataManager.set_setting(SEAL_SETTING, {**latest, 'active': False})
+            self.log('🔮 Перековка печати: все выбранные карты готовы.')
+        return rolls
+
+
 class ArenaManagementMixin:
     def management_state(self):
         return DataManager.load_json(MANAGEMENT_FILE)
@@ -2453,7 +2581,7 @@ def legal_replacement(current_ids, cards, banned_id):
     return chosen
 
 
-class ArenaAutomationMixin(ArenaManagementMixin, AwakenRerollMixin):
+class ArenaAutomationMixin(ArenaManagementMixin, AwakenRerollMixin, SealRerollMixin):
     def evaluate_arena_replacement(self, current, cards, banned, current_energy=None):
         battles = recent_battles(load_observations(os.path.join(BASE_DIR, 'arena_observations.json')))
         if battles and not supported_definitions(battles):
@@ -2608,6 +2736,10 @@ class ArenaAutomationMixin(ArenaManagementMixin, AwakenRerollMixin):
             self.run_awaken_reroll()
         except Exception as e:  # never let it stop the fights
             self.log(f'⚠️ Перебор пробуждения остановлен на этом цикле: {e}')
+        try:
+            self.run_seal_reroll()
+        except Exception as e:
+            self.log(f'⚠️ Перековка печати остановлена на этом цикле: {e}')
         if not DataManager.get_setting('battles_enabled', True):
             return
         today = self._msk_now().date()

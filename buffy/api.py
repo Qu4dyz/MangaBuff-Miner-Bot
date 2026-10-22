@@ -392,9 +392,80 @@ class BuffyApi:
         return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
 
     def seal_info(self):
-        from arena import SEAL_INFO
+        from arena import SEAL_INFO, SEAL_META, SEALS
 
-        return {sid: {"name": n, "short": s, "rarity": r} for sid, (n, s, r) in SEAL_INFO.items()}
+        out = {}
+        for sid, (n, s, r) in SEAL_INFO.items():
+            pop, effect, verdict = SEAL_META.get(SEALS.get(sid), (None, None, ""))
+            out[sid] = {"name": n, "short": s, "rarity": r, "popularity": pop, "effect": effect, "verdict": verdict}
+        return out
+
+    def seal_odds(self, seals):
+        """Chance of one of these seals per reforge, from how often they sit on the person's awakened cards."""
+        from arena import MANAGEMENT_FILE
+
+        cards = [c for c in DataManager.load_json(MANAGEMENT_FILE).get("inventory") or [] if c.get("battle_seal_id")]
+        wanted = {int(s) for s in seals or []}
+        return {"odds": sum(int(c["battle_seal_id"]) in wanted for c in cards) / len(cards) if cards else None}
+
+    def seal_state(self):
+        return {"goal": DataManager.get_setting("seal_reroll"), "essence": DataManager.get_setting("reroll_essence")}
+
+    def seal_essence(self):
+        """Essence balance, read from the site when the Awakening page opens (cached for a minute)."""
+        cached = DataManager.get_setting("reroll_essence") or {}
+        if time.time() - float(cached.get("at") or 0) < 60:
+            return {"ok": True, **cached}
+        try:
+            from arena import _digits, note_essence
+            from engine import MangaMinerBot
+
+            bot = MangaMinerBot(log_callback=lambda *_: None, progress_callback=lambda *_: None,
+                                stats_callback=lambda **_: None)
+            if not bot.validate_session():
+                return {"ok": False, **cached}
+            _, root = bot.management_page("/battle/reroll", ".battle-reroll")
+            note_essence(_digits(root.select_one("[data-reroll-essence]").get_text()))
+            return {"ok": True, **(DataManager.get_setting("reroll_essence") or {})}
+        except Exception:
+            return {"ok": False, **cached}
+
+    def seal_start(self, cards, seals, max_essence):
+        try:
+            wanted = sorted({int(s) for s in seals or []})
+            limit = max(0, int(float(max_essence or 0)))
+            picked = [{"card_user_id": int(c["id"]), "name": str(c.get("name") or ""), "rank": c.get("rank"),
+                       "copy": c.get("copy"), "image": c.get("image"), "manga": c.get("manga"),
+                       "seal": c.get("seal"), "status": "waiting", "attempts": 0, "history": []}
+                      for c in cards or [] if c.get("awake") is not False]
+        except (TypeError, ValueError, KeyError):
+            return {"ok": False, "error": "Выбери карты и печати"}
+        if not picked:
+            return {"ok": False, "error": "Выбери хотя бы одну пробуждённую карту"}
+        if not wanted:
+            return {"ok": False, "error": "Выбери хотя бы одну нужную печать"}
+        DataManager.set_setting("seal_reroll", {"active": True, "seals": wanted, "max_essence": limit, "spent": 0,
+                                                "cards": picked})
+        self._log(f"🔮 Перековка печати: {', '.join(c['name'] for c in picked)}"
+                  + (f", не больше {limit} эссенции" if limit else ""))
+        started = self.run_module("seals")
+        return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
+
+    def seal_resume(self, max_essence=None):
+        goal = DataManager.get_setting("seal_reroll")
+        if not goal or not goal.get("cards"):
+            return {"ok": False, "error": "Нечего продолжать"}
+        if max_essence is not None:
+            goal = {**goal, "max_essence": max(0, int(float(max_essence or 0)))}
+        DataManager.set_setting("seal_reroll", {**goal, "active": True})
+        started = self.run_module("seals")
+        return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
+
+    def seal_stop(self):
+        goal = DataManager.get_setting("seal_reroll")
+        if goal:
+            DataManager.set_setting("seal_reroll", {**goal, "active": False})
+        return {"ok": True}
 
     def reroll_owned(self):
         """Awakened cards from the bot's own cache: instant, no site request. Strongest first."""
@@ -646,6 +717,7 @@ class BuffyApi:
             "status": self._status,
             "profile": DataManager.get_setting("account_profile"),
             "reroll": DataManager.get_setting("awaken_reroll"),
+            "seal": DataManager.get_setting("seal_reroll"),
             "uptime_sec": int(time.time() - self._started_at) if self._started_at else 0,
             "now_msk": datetime.now(MSK).isoformat(),
             "cards": {
