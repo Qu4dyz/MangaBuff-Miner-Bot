@@ -34,13 +34,16 @@ class DiagnosticReportTests(unittest.TestCase):
             self.assertLess(text.index('OLD-FIRST'), text.index('NEW-LAST'))
             reveal.assert_called_once()
 
-    def test_report_failure_does_not_open_github(self):
+    def test_report_failure_still_opens_github_with_short_log(self):
         api = BuffyApi()
         with patch.object(api, '_save_report', side_effect=OSError('disk full')), \
+                patch.object(api, '_report_secrets', return_value=()), \
                 patch('buffy.api.webbrowser.open') as browser:
             result = api.report_problem('reading broken')
-        self.assertFalse(result['ok'])
-        browser.assert_not_called()
+        self.assertTrue(result['ok'])
+        self.assertIn('warning', result)
+        body = parse_qs(urlsplit(browser.call_args.args[0]).query)['body'][0]
+        self.assertNotIn('Buffy-diagnostic.txt', body)
 
     def test_report_creates_file_before_opening_github_and_mentions_attachment(self):
         api = BuffyApi()

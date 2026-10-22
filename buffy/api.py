@@ -134,15 +134,15 @@ class BuffyApi:
         return True
 
     def report_problem(self, description):
-        """Save full diagnostics before opening the issue editor with a short preview."""
+        """Save full diagnostics, then open the issue editor with a short preview (even if saving failed)."""
         result = self.export_logs(description)
-        if not result['ok']:
-            return result
         with self._log_lock:
             raw = list(self._raw)
         url = build_issue_url(description, raw, self._report_secrets(), status=self._status,
-                              report_name=os.path.basename(result['path']))
+                              report_name=os.path.basename(result['path']) if result['ok'] else '')
         webbrowser.open(url)
+        if not result['ok']:
+            return {'ok': True, 'warning': 'Отчёт не сохранился, в сообщение попал только сокращённый журнал.'}
         return result
 
     def _report_secrets(self):

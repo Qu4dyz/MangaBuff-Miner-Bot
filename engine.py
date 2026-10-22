@@ -1527,6 +1527,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 skip_bad = 0
                 stale_site_batches = 0
                 title_stalled = False
+                title_credited = False
                 site_chapters_before = (stats or {}).get("chapters_read")
                 for vol, ch, ch_url in unread_chapters:
                     if chapters_read_session >= target_count or not self._alive():
@@ -1681,6 +1682,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                                 else:
                                     credited = min(len(buffer), max(0, live["chapters_read"] - site_chapters_before))
                             chapters_read_session += credited
+                            title_credited = title_credited or credited > 0
                             self._last_read_count = chapters_read_session
                             self.log('🔎 reading_credit ' + json.dumps({
                                 'run': reading_run, 'batch': reading_batch,
@@ -1829,7 +1831,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     state["current_manga"] = manga_list[manga_idx]
                     state["manga_idx"] = manga_idx
                     DataManager.save_reading_state(state)
-                if title_stalled or stale_site_batches:
+                # A trailing stale batch after real growth is not a stalled title.
+                if title_stalled or (stale_site_batches and not title_credited):
                     stalled_titles += 1
                     if stalled_titles >= 2:
                         self.log("🛑 На двух тайтлах нет роста счётчика. Чтение приостановлено; следующий цикл начну с другого тайтла.")

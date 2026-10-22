@@ -199,6 +199,20 @@ class ReadingRecoveryTests(unittest.TestCase):
         self.assertEqual(self.submitted, ['elised', 'fresh'])
         self.assertEqual(self.state['current_manga'], 'third')
 
+    def test_trailing_stale_batch_after_growth_does_not_count_as_stalled_title(self):
+        self.chapters['elised'] = [93, 94, 95]
+        self.counting_slugs = {'elised'}
+        post = self.post
+
+        def elised_counts_once(url, data, **kwargs):
+            res = post(url, data, **kwargs)
+            self.counting_slugs.discard('elised')
+            return res
+        self.bot.session.post.side_effect = elised_counts_once
+        self.bot.read_manga_chapters(target_count=13)
+        self.assertEqual(self.bot._last_read_count, 2)
+        self.assertIn('third', self.submitted)
+
     def test_unavailable_balance_stops_without_searching_other_titles(self):
         self.bot.get_reading_stats = Mock(side_effect=[dict(self.stats), None])
         self.bot.read_manga_chapters(target_count=13)
