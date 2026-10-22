@@ -374,25 +374,30 @@ class BuffyApi:
         except Exception as e:
             return {"ok": False, "error": f"Не удалось получить коллекцию: {e}"}
 
-    def reroll_start(self, card, goal):
+    def reroll_start(self, cards, goal):
+        """Save the cards and minimums, then start right away (queued for the bot's next pause if it is running)."""
         try:
             mins = {k: max(0, int(float((goal or {}).get(k) or 0))) for k in ("min_attack", "min_health", "min_crit")}
-            cid = int(card["id"])
+            picked = [{"card_user_id": int(c["id"]), "name": str(c.get("name") or ""), "rank": c.get("rank"),
+                       "copy": c.get("copy"), "image": c.get("image"), "status": "waiting", "attempts": 0,
+                       "history": []} for c in cards or []]
         except (TypeError, ValueError, KeyError):
-            return {"ok": False, "error": "Выбери карту и укажи числа"}
+            return {"ok": False, "error": "Выбери карты и укажи числа"}
+        if not picked:
+            return {"ok": False, "error": "Выбери хотя бы одну карту"}
         if not any(mins.values()):
             return {"ok": False, "error": "Укажи хотя бы один минимум"}
-        DataManager.set_setting("awaken_reroll", {"card_user_id": cid, "name": str(card.get("name") or ""),
-                                                  "rank": card.get("rank"), **mins, "active": True,
-                                                  "status": "waiting", "attempts": 0, "history": []})
-        self._log(f"🎲 Перебор пробуждения: «{card.get('name')}» до ATK {mins['min_attack']}, "
-                  f"HP {mins['min_health']}, крит {mins['min_crit']}% — начну в ближайшем цикле арены.")
-        return {"ok": True}
+        DataManager.set_setting("awaken_reroll", {**mins, "active": True, "cards": picked})
+        names = ", ".join(f"«{c['name']}»" for c in picked)
+        self._log(f"🎲 Перебор пробуждения: {names} до ATK {mins['min_attack']}, HP {mins['min_health']}, "
+                  f"крит {mins['min_crit']}%.")
+        started = self.run_module("awaken")
+        return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
 
     def reroll_stop(self):
         goal = DataManager.get_setting("awaken_reroll")
         if goal:
-            DataManager.set_setting("awaken_reroll", {**goal, "active": False, "status": "stopped"})
+            DataManager.set_setting("awaken_reroll", {**goal, "active": False})
         return {"ok": True}
 
     def logout(self):

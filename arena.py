@@ -1710,7 +1710,8 @@ def inventory_from_api_card(card, original):
     return result
 
 
-REROLL_SETTING = 'awaken_reroll'  # {card_user_id, name, min_attack, min_health, min_crit, active, ...}
+REROLL_SETTING = 'awaken_reroll'  # {active, min_attack, min_health, min_crit, cards: [{card_user_id, name, status, ...}]}
+REROLL_DONE = ('reached', 'missing')
 
 
 def card_stats(card):
@@ -1739,18 +1740,18 @@ def reroll_odds(samples, goal):
 
 
 class AwakenRerollMixin:
-    """Awaken one chosen card again and again until its stats reach the user's minimums.
+    """Awaken the chosen cards again and again until each one's stats reach the user's minimums.
 
     Unawakening is free on the site; every awakening costs awakening energy, which arena
     fights refill. The collection is the only truth: after every request the card is looked up
     again, so a crash between request and answer never spends energy twice."""
 
-    def _reroll_card(self, route, goal, awake):
-        data = self.management_post(route, {'search': goal['name'], 'is_battle': awake, 'per_page': 70, 'page': 1})
+    def _reroll_card(self, route, item, awake):
+        data = self.management_post(route, {'search': item['name'], 'is_battle': awake, 'per_page': 70, 'page': 1})
         rows = data.get('data')
         if not isinstance(rows, list):
             raise ValueError('Inventory shape changed')
-        found = [c for c in rows if int(c['id']) == int(goal['card_user_id'])]
+        found = [c for c in rows if int(c['id']) == int(item['card_user_id'])]
         if found and int(found[0].get('in_trade') or 0):
             raise ValueError('Card is in a trade')
         return found[0] if found else None
@@ -1762,17 +1763,19 @@ class AwakenRerollMixin:
             return int(re.sub(r'\D', '', root.select_one(selector).get_text()) or 0)
         return root['data-awakening-url'], count('[data-awakening-free-left]') + count('[data-awakening-energy]')
 
-    def _reroll_save(self, goal, **values):
-        """Merge into what is stored now: «Стоп» or a new card chosen in the app must not be overwritten."""
+    def _reroll_update(self, cid, **values):
+        """Change one card in what is stored now: «Стоп» or a new list chosen in the app must not be overwritten."""
         latest = DataManager.get_setting(REROLL_SETTING) or {}
-        if int(latest.get('card_user_id') or 0) != int(goal['card_user_id']):
-            return goal
-        merged = {**latest, **values}
-        DataManager.set_setting(REROLL_SETTING, merged)
-        return merged
+        cards = latest.get('cards') or []
+        for item in cards:
+            if int(item['card_user_id']) == int(cid):
+                item.update(values)
+                DataManager.set_setting(REROLL_SETTING, latest)
+                return item
+        return None
 
     def _reroll_restore_deck(self):
-        """Unawakening drops the card from the active deck: put the remembered deck back."""
+        """Unawakening drops a card from the active deck: put the remembered deck back."""
         saved = self.management_state().get('reroll_deck')
         if not saved:
             return
@@ -1783,7 +1786,7 @@ class AwakenRerollMixin:
         if self._arena_post(endpoint, payload):
             self.management_save({'reroll_deck': None})
         else:
-            self.log('⚠️ Перебор пробуждения: не удалось вернуть карту в колоду — проверь колоду на сайте.')
+            self.log('⚠️ Перебор пробуждения: не удалось вернуть карты в колоду — проверь колоду на сайте.')
 
     def _reroll_remember_deck(self, cid):
         if self.management_state().get('reroll_deck'):
@@ -1794,61 +1797,83 @@ class AwakenRerollMixin:
         if cid in ids:
             self.management_save({'reroll_deck': {'deck_id': active['data-deck-id'], 'ids': ids}})
 
+    def _reroll_still_wanted(self, cid):
+        latest = DataManager.get_setting(REROLL_SETTING) or {}
+        item = next((c for c in latest.get('cards') or [] if int(c['card_user_id']) == cid), None)
+        if not latest.get('active') or item is None or item.get('status') in REROLL_DONE:
+            return None  # stopped or the card was dropped from the list in the app meanwhile
+        return latest
+
+    def _reroll_one(self, route, unawaken_url, item, budget):
+        """Roll one card. Returns (rolls spent, out_of_energy_or_stopped)."""
+        cid = int(item['card_user_id'])
+        card = self._reroll_card(route, item, 1)
+        if card is None and self._reroll_card(route, item, -1) is None:
+            self._reroll_update(cid, status='missing')
+            self.log(f"⚠️ Перебор пробуждения: карта «{item['name']}» #{cid} не найдена в коллекции — пропускаю.")
+            return 0, False
+        rolls = 0
+        while rolls < budget and self._alive():
+            goal = self._reroll_still_wanted(cid)
+            if goal is None:
+                return rolls, True
+            if card is not None and reroll_meets(card, goal):
+                self._reroll_update(cid, status='reached', result=card_stats(card))
+                self.log(f"🎲 Перебор пробуждения: «{item['name']}» {stats_text(card)} — цель достигнута, оставил.")
+                self.notifier.notify_alert('перебор пробуждения',
+                                           f"«{item['name']}» выбила {stats_text(card)}. Цель достигнута, карта оставлена.")
+                return rolls, False
+            awaken_url, energy = self._reroll_energy()
+            if energy <= 0:  # checked before unawakening: never leave a card plain
+                return rolls, True
+            if card is not None:
+                self._reroll_remember_deck(cid)
+                self.management_save({'reroll_pending': 'unawaken'})
+                self.management_post(unawaken_url, {'card_user_ids[]': [cid], 'confirmed': 1}, mutation=True)
+                if self._reroll_card(route, item, -1) is None:
+                    raise ValueError('Unawakening not confirmed by the collection')
+            self.management_save({'reroll_pending': 'awaken'})
+            self.management_post(awaken_url, {'card_user_id': cid}, mutation=True)
+            card = self._reroll_card(route, item, 1)
+            if card is None:
+                raise ValueError('Awakening not confirmed by the collection')
+            self.management_save({'reroll_pending': None})
+            rolls += 1
+            done = int(item.get('attempts') or 0) + 1
+            item = self._reroll_update(cid, attempts=done, status='running',
+                                       history=(item.get('history') or [])[-29:] + [card_stats(card)]) or item
+            self.log(f"🎲 Перебор пробуждения «{item['name']}» #{done}: {stats_text(card)}")
+            time.sleep(5)  # the site answers 429 to fast series
+        return rolls, rolls >= budget
+
     def run_awaken_reroll(self, max_rolls=20):
         goal = DataManager.get_setting(REROLL_SETTING) or {}
         if not goal.get('active') or 19 <= self._msk_now().hour < 22:  # never touch the deck during the cup
             return 0
-        cid = int(goal['card_user_id'])
         _, root = self.management_page('/battle/unawaken', '.battle-unawaken')
         route = urljoin('https://mangabuff.ru', root.select_one('.card-filter-form[data-url]')['data-url'])
         unawaken_url = root['data-unawaken-url']
-        card = self._reroll_card(route, goal, 1)
-        if card is None and self._reroll_card(route, goal, -1) is None:
-            self._reroll_save(goal, active=False, status='missing')
-            self.log(f"⚠️ Перебор пробуждения: карта «{goal['name']}» #{cid} не найдена в коллекции — остановлен.")
-            return 0
-        self.management_save({'reroll_pending': None})  # the collection above already shows what happened
+        self.management_save({'reroll_pending': None})  # each card is re-read from the collection below
         rolls = 0
         try:
-            while rolls < max_rolls and self._alive():
-                latest = DataManager.get_setting(REROLL_SETTING) or {}
-                if not latest.get('active') or int(latest.get('card_user_id') or 0) != cid:
-                    return rolls  # stopped or another card chosen in the app meanwhile
-                goal = latest
-                if card is not None and reroll_meets(card, goal):
-                    self._reroll_save(goal, active=False, status='reached', result=card_stats(card))
-                    self.log(f"🎲 Перебор пробуждения: «{goal['name']}» {stats_text(card)} — цель достигнута, оставил.")
-                    self.notifier.notify_alert('перебор пробуждения',
-                                               f"«{goal['name']}» выбила {stats_text(card)}. Цель достигнута, карта оставлена.")
-                    return rolls
-                awaken_url, energy = self._reroll_energy()
-                if energy <= 0:  # checked before unawakening: never leave the card plain
-                    if rolls:
-                        self.log('🎲 Перебор пробуждения: энергия кончилась — продолжу, когда бои её накопят.')
-                    return rolls
-                if card is not None:
-                    self._reroll_remember_deck(cid)
-                    self.management_save({'reroll_pending': 'unawaken'})
-                    self.management_post(unawaken_url, {'card_user_ids[]': [cid], 'confirmed': 1}, mutation=True)
-                    if self._reroll_card(route, goal, -1) is None:
-                        raise ValueError('Unawakening not confirmed by the collection')
-                self.management_save({'reroll_pending': 'awaken'})
-                self.management_post(awaken_url, {'card_user_id': cid}, mutation=True)
-                card = self._reroll_card(route, goal, 1)
-                if card is None:
-                    raise ValueError('Awakening not confirmed by the collection')
-                self.management_save({'reroll_pending': None})
-                rolls += 1
-                history = (goal.get('history') or [])[-29:] + [card_stats(card)]
-                goal = self._reroll_save(goal, attempts=int(goal.get('attempts') or 0) + 1,
-                                         history=history, status='running')
-                self.log(f"🎲 Перебор пробуждения #{goal['attempts']}: {stats_text(card)}")
-                time.sleep(5)  # the site answers 429 to fast series
+            for item in goal.get('cards') or []:
+                if item.get('status') in REROLL_DONE:
+                    continue
+                spent, paused = self._reroll_one(route, unawaken_url, item, max_rolls - rolls)
+                rolls += spent
+                if paused:
+                    break
+            latest = DataManager.get_setting(REROLL_SETTING) or {}
+            cards = latest.get('cards') or []
+            if latest.get('active') and cards and all(c.get('status') in REROLL_DONE for c in cards):
+                DataManager.set_setting(REROLL_SETTING, {**latest, 'active': False})
+                self.log('🎲 Перебор пробуждения: все выбранные карты готовы.')
+            elif rolls and latest.get('active'):
+                self.log('🎲 Перебор пробуждения: энергия кончилась — продолжу, когда бои её накопят.')
             return rolls
         finally:
             try:
-                if self._reroll_card(route, goal, 1) is not None:
-                    self._reroll_restore_deck()
+                self._reroll_restore_deck()
             except Exception as e:  # must not hide the error that got us here
                 self.log(f'⚠️ Перебор пробуждения: колоду проверю в следующем цикле ({e}).')
 

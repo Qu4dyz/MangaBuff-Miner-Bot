@@ -3668,6 +3668,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         "reading": ("Чтение глав", 20 * 60),
         "club": ("Клуб", 4 * 60),
         "seasonal": ("Ивенты", 2 * 60),
+        "awaken": ("Перебор пробуждения", 15 * 60),
     }
 
     def request_manual_module(self, name):
@@ -3745,6 +3746,13 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 return f"{visit}, награда дня забрана"
             reward = "награда дня забрана" if self.daily_reward_claimed else "награду дня забрать не получилось"
             return ManualFailed(f"{visit}; {reward}. Работающий бот повторит сам, или запусти ещё раз позже")
+        if name == "awaken":
+            rolls = self.run_awaken_reroll(max_rolls=40)
+            goal = DataManager.get_setting("awaken_reroll") or {}
+            left = [c["name"] for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing")]
+            if not left:
+                return f"бросков: {rolls}, все выбранные карты готовы"
+            return f"бросков: {rolls}; продолжу, когда бои накопят энергию" if rolls else                 ManualFailed("энергии пробуждения нет — бот продолжит, когда бои её накопят")
         if name == "mining":
             out = {"energy": 0}
             self._mining_step(msk_today, out)

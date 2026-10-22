@@ -4,7 +4,7 @@
 
 ### Added
 
-- Awakening reroll (its own «Пробуждение» page): pick a card from tiles with its art, rank, copy number and stats, set minimum ATK, HP and crit with sliders; the bot awakens it, frees it again when the stats fall short (unawakening is free) and repeats with energy from arena fights until the card meets every minimum. It shows the odds from your own awakened cards, puts the card back into the active deck, waits during the evening cup and never buys energy.
+- Awakening reroll (its own «Пробуждение» page): pick one or several cards from tiles with their art, rank, copy number and stats, set shared minimum ATK, HP and crit with sliders; it starts right away (even with the bot stopped) and asks in its own dialog before discarding current stats; the bot awakens it, frees it again when the stats fall short (unawakening is free) and repeats with energy from arena fights until the card meets every minimum. It shows the odds from your own awakened cards, puts the card back into the active deck, waits during the evening cup and never buys energy.
 - Sign-in through VK, Discord, Yandex or Google in Buffy's wizard. Buffy keeps the cookies of MangaBuff's own sign-in window; when the session dies it signs in again in a hidden window and shows it only if the provider asks for input.
 - The account card shows your MangaBuff nickname, avatar and profile cover (animated ones play) instead of the email or provider label.
 - Buffy takes the colours of your MangaBuff profile skin: simple skins recolour the accent, event skins (like the Halloween pumpkin lord) recolour the whole app. Switch it off in Settings → «Тема из профиля MangaBuff».
