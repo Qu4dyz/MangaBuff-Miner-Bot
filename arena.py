@@ -111,11 +111,17 @@ def get_html(session, url, **kwargs):
             headers['X-Requested-With'] = xhr
 
 
-def post_once(session, url, **kwargs):
+class SendCancelled(Exception):
+    """before_send said no after the throttle wait: nothing was sent."""
+
+
+def post_once(session, url, before_send=None, **kwargs):
     if hasattr(session, '_raw_request') and hasattr(session, '_throttle'):
         if session.should_abort and session.should_abort():
             raise RuntimeError('module aborted')
         session._throttle()
+        if before_send and not before_send():  # checked after the wait, right before the request
+            raise SendCancelled()
         response = session._raw_request('POST', url, **kwargs)
         reason = 'http_429' if response.status_code == 429 else is_anti_bot_page(response)
         if reason:
@@ -124,6 +130,8 @@ def post_once(session, url, **kwargs):
         else:
             session._mark_ok('POST', url, response)
         return response
+    if before_send and not before_send():
+        raise SendCancelled()
     return session.post(url, **kwargs)
 
 
@@ -1712,6 +1720,7 @@ def inventory_from_api_card(card, original):
 
 REROLL_SETTING = 'awaken_reroll'  # {active, min_attack, min_health, min_crit, cards: [{card_user_id, name, status, ...}]}
 REROLL_DONE = ('reached', 'missing')
+REROLL_HOLD_SEC = 3  # a roll stays at least this long before it is discarded, so «Остановить» can keep it
 
 
 def card_stats(card):
@@ -1833,7 +1842,7 @@ class AwakenRerollMixin:
             self._reroll_update(cid, status='missing')
             self.log(f"⚠️ Перебор пробуждения: карта «{item['name']}» #{cid} не найдена в коллекции — пропускаю.")
             return 0, False
-        rolls, energy, awaken_url = 0, None, None
+        rolls, energy, awaken_url, rolled_at = 0, None, None, None
         while rolls < budget and self._alive():
             goal = self._reroll_still_wanted(cid)
             if goal is None:
@@ -1850,9 +1859,19 @@ class AwakenRerollMixin:
                 return rolls, True
             if card is not None:
                 self._reroll_remember_deck(cid)
+                # Give the person time to see this roll and press «Остановить» before it is discarded
+                while rolled_at is not None and time.monotonic() - rolled_at < REROLL_HOLD_SEC:
+                    if self._reroll_still_wanted(cid) is None:
+                        return rolls, True
+                    time.sleep(0.25)
                 self.management_save({'reroll_pending': 'unawaken'})
-                # Pairs, not {'card_user_ids[]': [cid]}: curl_cffi urlencodes a dict without doseq and sends "[cid]" (HTTP 422)
-                self.management_post(unawaken_url, [('card_user_ids[]', cid), ('confirmed', 1)], mutation=True)
+                try:
+                    # Pairs, not {'card_user_ids[]': [cid]}: curl_cffi urlencodes a dict without doseq and sends "[cid]" (HTTP 422)
+                    self.management_post(unawaken_url, [('card_user_ids[]', cid), ('confirmed', 1)], mutation=True,
+                                         before_send=lambda: self._reroll_still_wanted(cid) is not None)
+                except SendCancelled:  # «Остановить» came during the request spacing: the card stays as it is
+                    self.management_save({'reroll_pending': None})
+                    return rolls, True
                 # No collection check here: if unawakening silently failed, the site refuses to
                 # awaken an awakened card and the series stops on that error
             self.management_save({'reroll_pending': 'awaken'})
@@ -1862,6 +1881,7 @@ class AwakenRerollMixin:
             if card is None:
                 raise ValueError('Awakening not confirmed by the collection')
             energy = reroll_energy_left(response)
+            rolled_at = time.monotonic()
             self.management_save({'reroll_pending': None})
             rolls += 1
             done = int(item.get('attempts') or 0) + 1
@@ -1919,10 +1939,11 @@ class ArenaManagementMixin:
             raise ValueError('Required arena page unavailable: ' + path)
         return soup, root
 
-    def management_post(self, url, data, mutation=False):
+    def management_post(self, url, data, mutation=False, before_send=None):
         url = same_site_route(url, '/')
         headers = {'X-CSRF-TOKEN': self.csrf_token, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json', 'Referer': 'https://mangabuff.ru/battle'}
-        send = post_once if mutation else lambda s, u, **kw: s.post(u, **kw)
+        send = (lambda s, u, **kw: post_once(s, u, before_send=before_send, **kw)) if mutation \
+            else lambda s, u, **kw: s.post(u, **kw)
         response = send(self.session, url, data=data, headers=headers, timeout=15)
         if response.status_code != 200 or is_anti_bot_page(response):
             detail = ''

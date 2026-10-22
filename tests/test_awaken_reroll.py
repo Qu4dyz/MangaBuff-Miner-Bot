@@ -15,7 +15,7 @@ class FakeSite(AwakenRerollMixin):
 
     def __init__(self, cards, energy, deck=(CID, 2, 3, 4), hour=12, sticky_awake=False):
         self.cards, self.energy, self.deck, self.hour = cards, energy, list(deck), hour
-        self.sticky_awake, self.terse = sticky_awake, False
+        self.sticky_awake, self.terse, self.stop_while_sending = sticky_awake, False, None
         self.state, self.calls, self.saved_decks = {}, [], []
         self.log, self.notifier = Mock(), Mock()
         self.settings = {}
@@ -45,7 +45,12 @@ class FakeSite(AwakenRerollMixin):
         soup = BeautifulSoup(html, 'html.parser')
         return soup, soup.select_one(selector)
 
-    def management_post(self, url, data, mutation=False):
+    def management_post(self, url, data, mutation=False, before_send=None):
+        if before_send and self.stop_while_sending and url.endswith('/unawaken'):
+            self.stop_while_sending()
+        if before_send and not before_send():
+            from arena import SendCancelled
+            raise SendCancelled()
         if 'cards-filter' in url:
             self.calls.append('filter')
             rows = []
@@ -92,15 +97,16 @@ class FakeSite(AwakenRerollMixin):
         if on_awaken:
             real = self.management_post
 
-            def post(url, data, mutation=False):
-                body = real(url, data, mutation)
+            def post(url, data, mutation=False, before_send=None):
+                body = real(url, data, mutation, before_send)
                 if url.endswith('/awaken'):
                     on_awaken(settings)
                 return body
             self.management_post = post
+        self.live_settings = settings
         with patch('arena.DataManager.get_setting', side_effect=lambda k, d=None: settings.get(k, d)), \
                 patch('arena.DataManager.set_setting', side_effect=settings.__setitem__), \
-                patch('arena.time.sleep'):
+                patch('arena.REROLL_HOLD_SEC', 0), patch('arena.time.sleep'):
             done = self.run_awaken_reroll()
         self.settings = settings['awaken_reroll']
         return done
@@ -191,6 +197,21 @@ class AwakenRerollTests(unittest.TestCase):
         self.assertEqual(site.run(GOAL, on_awaken=stop), 1)
         self.assertEqual(site.energy, 9)
         self.assertFalse(site.settings['active'])
+
+    def test_stop_during_request_spacing_keeps_the_last_roll(self):
+        site = FakeSite({CID: card(True, (90, 800, 10), [(172, 920, 5), (145, 1270, 9)])}, energy=10)
+        rolls = []
+
+        def stop_after_first_roll():
+            rolls.append(1)
+            if len(rolls) == 2:  # the second unawaken is about to go: «Остановить» pressed just now
+                s = site.live_settings['awaken_reroll']
+                site.live_settings['awaken_reroll'] = {**s, 'active': False}
+        site.stop_while_sending = stop_after_first_roll
+        self.assertEqual(site.run(GOAL), 1)
+        self.assertEqual(site.cards[CID]['stats'], (172, 920, 5))  # kept, not rerolled to 145/1270
+        self.assertTrue(site.cards[CID]['awake'])
+        self.assertIsNone(site.state.get('reroll_pending'))
 
     def test_quiet_during_the_evening_cup(self):
         site = FakeSite({CID: card(True, (90, 800, 10))}, energy=5, hour=20)

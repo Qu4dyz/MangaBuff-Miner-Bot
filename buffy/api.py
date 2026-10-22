@@ -394,6 +394,10 @@ class BuffyApi:
         started = self.run_module("awaken")
         return {"ok": True, "queued": started.get("queued"), "warning": None if started.get("ok") else started.get("error")}
 
+    def reroll_goal(self):
+        """Light read for the Awakening page while a series runs (polled twice a second)."""
+        return DataManager.get_setting("awaken_reroll")
+
     def reroll_resume(self):
         """Go on with the same cards and minimums after «Остановить»."""
         goal = DataManager.get_setting("awaken_reroll")

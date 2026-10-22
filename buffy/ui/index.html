@@ -510,7 +510,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
           <p class="lead" id="reroll-target"></p>
           <div class="reroll-list" id="reroll-list"></div>
           <div class="row" style="flex-wrap:wrap">
-            <button class="btn" id="reroll-stop">Остановить</button>
+            <button class="btn" id="reroll-stop" title="Карта останется с тем броском, который сейчас на экране">Остановить и оставить</button>
             <button class="btn primary" id="reroll-resume">Продолжить</button>
             <button class="btn" id="reroll-edit">Изменить минимумы</button>
             <button class="btn ghost" id="reroll-new">Новый перебор</button>
@@ -947,7 +947,7 @@ function mockApi() {
       { id: 2, name: "Ведьма", rank: "H", copy: 941, awake: false,
         image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }; },
     reroll_start: async () => ({ ok: true }), reroll_stop: async () => ({ ok: true }),
-    reroll_resume: async () => ({ ok: true }), reroll_set_mins: async () => ({ ok: true }),
+    reroll_resume: async () => ({ ok: true }), reroll_goal: async () => null, reroll_set_mins: async () => ({ ok: true }),
     check_login: async (e, p) => { await wait(900); return p.length > 3 ? { ok: true } : { ok: false, error: "Сайт не принял почту или пароль" }; },
     finish_onboarding: async () => { onboarded = true; return true; },
     start: async () => { status = "starting"; setTimeout(() => status = "running", 800); return { ok: true }; },
@@ -1682,6 +1682,11 @@ async function refreshBoot() {
   const loop = async (fn, ms) => { try { await fn(); } catch (e) { /* backend busy */ } setTimeout(() => loop(fn, ms), ms); };
   loop(async () => renderState(await api.get_state()), 2000);
   loop(pollLogs, 1000);
+  // While a reroll runs, show each roll at once so «Остановить» can still keep it
+  loop(async () => {
+    if (!$("#page-awaken").classList.contains("active") || !(lastReroll && lastReroll.active)) return;
+    lastReroll = await api.reroll_goal(); renderReroll(lastReroll);
+  }, 500);
   loop(async () => renderUpdate(await api.get_update()), 2000);
   setInterval(tickCountdown, 1000);
 })();
