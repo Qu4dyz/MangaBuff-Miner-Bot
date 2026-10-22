@@ -70,11 +70,13 @@ input, button, select { font: inherit; color: inherit; }
 .side-foot { margin-top: auto; padding: 12px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
 .side-foot .who { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-foot .ver { font-size: 11px; color: var(--faint); margin-top: 2px; }
-.side-foot { position: relative; overflow: hidden; background-position: center; background-size: cover; }
-.side-foot video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.side-foot.has-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(12,10,20,0.85), rgba(12,10,20,0.35)); }
-.side-foot .acc { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
-.side-foot.has-cover .ver { color: var(--muted); }
+/* Mini profile: cover strip on top, avatar on its edge, name below on a calm background */
+.side-foot { overflow: hidden; }
+.side-banner { position: relative; height: 52px; margin: -12px -12px 0; background: center / cover no-repeat; }
+.side-banner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.side-foot .acc { display: flex; align-items: center; gap: 10px; }
+.side-foot.has-cover .acc { align-items: flex-end; }
+.side-foot.has-cover .avatar { width: 44px; height: 44px; margin-top: -22px; position: relative; border: 3px solid #110e1a; }
 .side-foot .acc > div { min-width: 0; }
 .avatar { flex: none; border-radius: 50%; object-fit: cover; background: rgba(255,255,255,0.06); }
 .side-foot .avatar { width: 34px; height: 34px; }
@@ -350,7 +352,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
       </button>
     </nav>
     <div class="side-foot" id="side-foot">
-      <video id="side-cover" muted loop autoplay playsinline hidden></video>
+      <div class="side-banner" id="side-banner" hidden><video id="side-cover" muted loop autoplay playsinline hidden></video></div>
       <div class="acc">
         <img class="avatar" id="side-avatar" alt="" hidden>
         <div>
@@ -824,6 +826,9 @@ let api = null;
 
 function mockApi() {
   // Browser preview without the Python backend
+  // Real MangaBuff media, so the demo shows how an animated avatar and cover look
+  const DEMO_PROFILE = { id: "1", name: "Qu4dyz", avatar: "https://mangabuff.ru/img/avatars/x150/558.gif",
+    cover: "https://mangabuff.ru/img/covers/54.jpg", cover_video: "https://mangabuff.ru/img/covers/54.mp4" };
   let status = "stopped", seq = 0, logs = [], onboarded = false, manual = {}, settings = {
     battles_enabled: true, arena_cup_enabled: true, tower_enabled: true, reading_enabled: true,
     ads_enabled: true, club_enabled: true, auto_upgrade: true, seasonal_watch_enabled: true,
@@ -840,7 +845,7 @@ function mockApi() {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   return {
     get_bootstrap: async () => ({ app: "Buffy", version: "11.0.0", repo: "https://github.com/Qu4dyz/MangaBuff-Miner-Bot",
-      email: onboarded ? "demo@buffy.app" : "", has_credentials: onboarded, onboarded, settings, data_dir: "C:\\Users\\you\\AppData\\Roaming\\Buffy" }),
+      email: onboarded ? "demo@buffy.app" : "", has_credentials: onboarded, onboarded, settings, profile: onboarded ? DEMO_PROFILE : null, data_dir: "C:\\Users\\you\\AppData\\Roaming\\Buffy" }),
     get_settings: async () => settings,
     set_setting: async (k, v) => { settings[k] = v; return true; },
     social_login: async () => { await wait(900); return { ok: true }; },
@@ -852,7 +857,7 @@ function mockApi() {
     get_logs: async (after) => logs.filter((l) => l.seq > after),
     clear_logs: async () => { logs = []; return true; },
     get_state: async () => ({
-      status, uptime_sec: 3720,
+      status, uptime_sec: 3720, profile: onboarded ? DEMO_PROFILE : null,
       cards: { found: 6, max: 10, ready: false, cooldown: "28 мин" },
       chapters: { read: 55, max: 75, manga: "solo-leveling" },
       panel: { next_action: "Арена", next_wake_at: new Date(Date.now() + 492000).toISOString(), energy: 0,
@@ -973,8 +978,10 @@ function renderProfile(p) {
     $("#acc-avatar").hidden = !p.avatar;
   }
   setCover($("#acc-banner"), $("#acc-cover"), p);
-  setCover($("#side-foot"), $("#side-cover"), p);
-  $("#side-foot").classList.toggle("has-cover", !!(p && (p.cover || p.cover_video)));
+  setCover($("#side-banner"), $("#side-cover"), p);
+  const hasCover = !!(p && (p.cover || p.cover_video));
+  $("#side-banner").hidden = !hasCover;
+  $("#side-foot").classList.toggle("has-cover", hasCover);
   $("#acc-lead").innerHTML = !boot.email ? "Вход не выполнен"
     : `Вход ${social ? "через" : "по почте"} <b style="color:var(--text)">${esc(via)}</b>`;
 }
