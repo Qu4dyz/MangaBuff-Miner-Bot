@@ -327,6 +327,72 @@ class BuffyApi:
         # The daemon waits here without a heartbeat: stay well under its 8-minute watchdog
         return self._social_window(provider, hidden_sec=SOCIAL_SILENT_SEC, timeout_sec=5 * 60)
 
+    # ------------------------------------------------------- awakening reroll
+    def reroll_state(self):
+        """Current reroll goal and, for the Arena page, how likely its minimums are."""
+        goal = DataManager.get_setting("awaken_reroll") or None
+        return {"goal": goal, "odds": self.reroll_odds(goal or {})["odds"] if goal else None}
+
+    def reroll_odds(self, goal):
+        from arena import MANAGEMENT_FILE, reroll_odds
+
+        try:
+            goal = {k: float((goal or {}).get(k) or 0) for k in ("min_attack", "min_health", "min_crit")}
+        except (TypeError, ValueError):
+            return {"odds": None}
+        cards = DataManager.load_json(MANAGEMENT_FILE).get("inventory") or []
+        return {"odds": reroll_odds(cards, goal), "sample": sum(1 for c in cards if c.get("battle_attack"))}
+
+    def reroll_search(self, query):
+        """Cards from the collection by name, awakened ones with their stats."""
+        query = (query or "").strip()
+        if len(query) < 2:
+            return {"ok": False, "error": "Введи хотя бы две буквы названия карты"}
+        try:
+            from engine import MangaMinerBot
+            from urllib.parse import urljoin
+
+            bot = MangaMinerBot(log_callback=lambda *_: None, progress_callback=lambda *_: None,
+                                stats_callback=lambda **_: None)
+            if not bot.validate_session():
+                return {"ok": False, "error": "Сначала запусти бота, чтобы он вошёл в аккаунт"}
+            _, root = bot.management_page("/battle/unawaken", ".battle-unawaken")
+            route = urljoin("https://mangabuff.ru", root.select_one(".card-filter-form[data-url]")["data-url"])
+            found = []
+            for awake in (1, -1):
+                rows = bot.management_post(route, {"search": query, "is_battle": awake, "per_page": 30, "page": 1})
+                for c in rows.get("data") or []:
+                    if int(c.get("in_trade") or 0):
+                        continue
+                    found.append({"id": int(c["id"]), "name": c.get("card_name") or query, "rank": c.get("rank"),
+                                  "copy": c.get("copy_number"), "awake": awake == 1,
+                                  "attack": c.get("battle_attack"), "health": c.get("battle_health"),
+                                  "crit": c.get("battle_crit_chance")})
+            return {"ok": True, "cards": found[:40]}
+        except Exception as e:
+            return {"ok": False, "error": f"Не удалось получить коллекцию: {e}"}
+
+    def reroll_start(self, card, goal):
+        try:
+            mins = {k: max(0, int(float((goal or {}).get(k) or 0))) for k in ("min_attack", "min_health", "min_crit")}
+            cid = int(card["id"])
+        except (TypeError, ValueError, KeyError):
+            return {"ok": False, "error": "Выбери карту и укажи числа"}
+        if not any(mins.values()):
+            return {"ok": False, "error": "Укажи хотя бы один минимум"}
+        DataManager.set_setting("awaken_reroll", {"card_user_id": cid, "name": str(card.get("name") or ""),
+                                                  "rank": card.get("rank"), **mins, "active": True,
+                                                  "status": "waiting", "attempts": 0, "history": []})
+        self._log(f"🎲 Перебор пробуждения: «{card.get('name')}» до ATK {mins['min_attack']}, "
+                  f"HP {mins['min_health']}, крит {mins['min_crit']}% — начну в ближайшем цикле арены.")
+        return {"ok": True}
+
+    def reroll_stop(self):
+        goal = DataManager.get_setting("awaken_reroll")
+        if goal:
+            DataManager.set_setting("awaken_reroll", {**goal, "active": False, "status": "stopped"})
+        return {"ok": True}
+
     def logout(self):
         self.stop()
         DataManager.clear_credentials()
@@ -498,6 +564,7 @@ class BuffyApi:
         return {
             "status": self._status,
             "profile": DataManager.get_setting("account_profile"),
+            "reroll": DataManager.get_setting("awaken_reroll"),
             "uptime_sec": int(time.time() - self._started_at) if self._started_at else 0,
             "now_msk": datetime.now(MSK).isoformat(),
             "cards": {
