@@ -34,6 +34,7 @@ MSK = timezone(timedelta(hours=3))
 
 # Settings the UI may read and change: key -> default
 SETTINGS = {
+    "profile_theme": True,  # colour the app like the MangaBuff profile skin
     # daemon modules
     "battles_enabled": True,
     "arena_cup_enabled": True,

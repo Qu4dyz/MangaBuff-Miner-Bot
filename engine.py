@@ -7,6 +7,7 @@ import json
 import uuid
 from html import unescape
 from urllib.parse import urljoin
+from profile_theme import skin_classes, skin_variables, stylesheet_urls, theme_from_variables
 from diagnostics import mask_secrets, reading_response_details
 from utils import (
     parse_smart_number,
@@ -443,6 +444,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 return urljoin("https://mangabuff.ru/", found.group(1)) if found else None
 
             profile = {
+                **self._profile_theme(res.text),
                 "id": self.user_id,
                 "name": unescape(name.group(1)),
                 "avatar": media(r'class="profile__avatar">\s*<img src="([^"]+)"'),  # often an animated gif
@@ -453,6 +455,21 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             return profile
         except Exception:
             return None
+
+    def _profile_theme(self, page_html):
+        """App colours from the profile skin. The site CSS is ~3 MB, so it is read again
+        only when the skin or the site's stylesheet version changes."""
+        skins, sheets = skin_classes(page_html), stylesheet_urls(page_html)
+        key = "|".join(skins + sheets)
+        old = DataManager.get_setting("account_profile") or {}
+        if old.get("theme_key") == key:
+            return {"theme": old.get("theme") or {}, "theme_key": key}
+        try:
+            css = [self.session.get(urljoin("https://mangabuff.ru/", url), timeout=30).text
+                   for url in sheets] if skins else []
+            return {"theme": theme_from_variables(skin_variables(css, skins)), "theme_key": key}
+        except Exception:
+            return {"theme": old.get("theme") or {}, "theme_key": old.get("theme_key")}
 
     def use_cookies(self, cookies, user_agent=None):
         load_cookies_into(self.session, cookies)

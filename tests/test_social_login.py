@@ -177,7 +177,8 @@ class RefreshProfileTests(unittest.TestCase):
 
     def test_reads_name_animated_avatar_and_cover(self):
         self.bot.session.get.side_effect = [page(), page(text=PROFILE)]
-        with patch("engine.DataManager.set_setting") as save:
+        with patch("engine.DataManager.set_setting") as save, \
+                patch("engine.DataManager.get_setting", return_value=None):
             profile = self.bot.refresh_profile()
         self.assertEqual(self.bot.session.get.call_args.args[0], "https://mangabuff.ru/users/4242")
         self.assertEqual(profile, {
@@ -185,8 +186,25 @@ class RefreshProfileTests(unittest.TestCase):
             "avatar": "https://mangabuff.ru/img/avatars/x150/558.gif",
             "cover": "https://mangabuff.ru/img/covers/54.jpg",
             "cover_video": "https://mangabuff.ru/img/covers/54.mp4",
+            "theme": {}, "theme_key": "",  # no skin on this profile: Buffy keeps its own colours
         })
         save.assert_called_once_with("account_profile", profile)
+
+    def test_skin_colours_come_from_site_css_once(self):
+        skinned = ('<link rel="stylesheet" href="/css/app.css?id=v1"><body class="isAuth profile-skin profile-skin--12">'
+                   + PROFILE)
+        css = ".profile-skin--12 { --main-purple-color: #b3852d !important; }"
+        self.bot.user_id = "4242"
+        self.bot.session.get.side_effect = [page(text=skinned), page(text=css)]
+        with patch("engine.DataManager.set_setting"), patch("engine.DataManager.get_setting", return_value=None):
+            profile = self.bot.refresh_profile()
+        self.assertEqual(self.bot.session.get.call_args.args[0], "https://mangabuff.ru/css/app.css?id=v1")
+        self.assertEqual(profile["theme"]["--pink"], "#b3852d")
+        # Same skin and stylesheet version next time: no 3 MB download
+        self.bot.session.get.side_effect = [page(text=skinned)]
+        with patch("engine.DataManager.set_setting"), patch("engine.DataManager.get_setting", return_value=profile):
+            self.assertEqual(self.bot.refresh_profile()["theme"], profile["theme"])
+        self.assertEqual(self.bot.session.get.call_count, 3)
 
     def test_unreadable_profile_keeps_old_one_and_never_raises(self):
         self.bot.user_id = "4242"
