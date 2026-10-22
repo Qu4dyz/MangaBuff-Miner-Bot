@@ -3935,6 +3935,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         # Warm / refresh DDoS-Guard cookies up front (proxy required on VPS)
         self.ensure_site_access()
         self.refresh_profile()
+        self.refresh_halloween_info()
 
         # Fill the stats panel now instead of after the first full cycle
         try:

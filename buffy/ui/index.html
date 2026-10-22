@@ -1012,7 +1012,7 @@ function renderState(st) {
   const hw = st.halloween, hwEl = $("#hw-candies");
   if (hwEl) hwEl.textContent = hw ? `🍬 ${hw.balance ?? 0} конфет · за чтение сегодня ${hw.reading_today}/35 · ` : "";
   $("#candy-v").textContent = hw && hw.balance != null ? fmt(hw.balance) : "—";
-  $("#candy-s").textContent = hw ? `За чтение сегодня ${hw.reading_today} / 35` : "Появятся после первого запуска бота";
+  $("#candy-s").textContent = hw ? `За чтение сегодня ${hw.reading_today} / 35` : "Появятся через пару секунд после запуска бота";
   $("#heat-v").textContent = hw && hw.temperature != null ? `${hw.temperature}°` : "—";
   $("#heat-s").textContent = hw && hw.heat_taken ? "Угощение сегодня забрано ✅" : "При 100° бот сам заберёт 5 🍬";
   if (st.status !== status || !!st.manual_busy !== manualBusy) { manualBusy = !!st.manual_busy; renderStatus(st.status); }

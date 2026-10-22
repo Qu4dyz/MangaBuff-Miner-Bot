@@ -275,6 +275,20 @@ class HalloweenEventMixin:
 
     EVENT_PACK_URL = "https://mangabuff.ru/event/pack"
 
+    def refresh_halloween_info(self) -> None:
+        """Candy balance and cauldron heat for the app right at start: run_halloween_event comes
+        at the end of a long cycle, so the cards stayed empty for up to an hour. Reads only."""
+        if not DataManager.get_setting("halloween_event_enabled", True):
+            return
+        try:
+            res = self.session.get(self.EVENT_PACK_URL, timeout=15)
+            info = parse_event_pack(res.text) if res.status_code == 200 else {}
+        except Exception:
+            return
+        if info.get("balance") is not None:  # not the event page (event over, logged out): keep what we had
+            DataManager.set_setting("halloween_event_info",
+                                    {**(DataManager.get_setting("halloween_event_info") or {}), **info})
+
     def run_halloween_event(self) -> Dict:
         res = self.session.get(self.EVENT_PACK_URL, timeout=15)
         if res.status_code != 200:

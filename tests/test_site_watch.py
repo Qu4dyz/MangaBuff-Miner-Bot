@@ -90,6 +90,22 @@ class EventPackTest(unittest.TestCase):
         self.assertIn("/event/heat/claim", bot.session.post.call_args.args[0])
 
 
+    def test_start_reads_candies_without_claiming(self):
+        from seasonal import HalloweenEventMixin
+        bot = HalloweenEventMixin()
+        bot.session = Mock()
+        bot.session.get.return_value = SimpleNamespace(status_code=200, text=self.HTML)
+        with patch("seasonal.DataManager.get_setting", side_effect=lambda k, d=None: {"x": 1} if k == "halloween_event_info" else d),                 patch("seasonal.DataManager.set_setting") as save:
+            bot.refresh_halloween_info()
+        save.assert_called_once_with("halloween_event_info",
+                                     {"x": 1, "balance": 1240, "today": 12, "temperature": 100, "can_take": True})
+        bot.session.post.assert_not_called()
+        bot.session.get.return_value = SimpleNamespace(status_code=200, text="<html>no event</html>")
+        with patch("seasonal.DataManager.set_setting") as save:
+            bot.refresh_halloween_info()
+        save.assert_not_called()
+
+
 class CauldronLockedTest(unittest.TestCase):
     def test_hot_but_locked_cauldron_alerts_once_a_day_and_burns_nothing(self):
         from seasonal import HalloweenEventMixin
