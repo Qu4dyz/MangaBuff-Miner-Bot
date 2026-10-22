@@ -57,7 +57,11 @@ class FakeSite(AwakenRerollMixin):
             return {'data': rows}
         if url.endswith('/unawaken'):
             self.calls.append('unawaken')
-            cid = data['card_user_ids[]'][0]
+            # The site takes card_user_ids[]=<id>; check the form as curl_cffi will encode it
+            from urllib.parse import parse_qsl, urlencode
+            form = parse_qsl(urlencode(data))
+            assert ('confirmed', '1') in form, form
+            cid = int(dict(form)['card_user_ids[]'])
             if not self.sticky_awake:
                 self.cards[cid]['awake'] = False
                 self.deck = [c for c in self.deck if c != cid]

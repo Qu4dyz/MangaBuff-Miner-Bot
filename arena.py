@@ -1829,7 +1829,8 @@ class AwakenRerollMixin:
             if card is not None:
                 self._reroll_remember_deck(cid)
                 self.management_save({'reroll_pending': 'unawaken'})
-                self.management_post(unawaken_url, {'card_user_ids[]': [cid], 'confirmed': 1}, mutation=True)
+                # Pairs, not {'card_user_ids[]': [cid]}: curl_cffi urlencodes a dict without doseq and sends "[cid]" (HTTP 422)
+                self.management_post(unawaken_url, [('card_user_ids[]', cid), ('confirmed', 1)], mutation=True)
                 if self._reroll_card(route, item, -1) is None:
                     raise ValueError('Unawakening not confirmed by the collection')
             self.management_save({'reroll_pending': 'awaken'})

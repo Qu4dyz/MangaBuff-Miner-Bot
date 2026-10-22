@@ -1129,8 +1129,8 @@ async function updateRerollOdds() {
   if (!+goal.min_attack && !+goal.min_health && !+goal.min_crit) { $("#reroll-odds").textContent = ""; return; }
   const r = await api.reroll_odds(goal);
   $("#reroll-odds").textContent = r.odds == null ? ""
-    : r.odds === 0 ? `Среди твоих ${r.sample} пробуждённых карт таких статов не выпадало ни разу — цель очень редкая.`
-    : `Шанс за бросок ≈ ${(r.odds * 100).toFixed(1)}% · в среднем ≈ ${Math.ceil(1 / r.odds)} попыток на карту (по ${r.sample} твоим пробуждённым картам).`;
+    : r.odds === 0 ? "Такие статы выпадают очень редко — перебор может занять очень много попыток."
+    : `Шанс за бросок ≈ ${(r.odds * 100).toFixed(1)}% · в среднем ≈ ${Math.ceil(1 / r.odds)} попыток на карту.`;
 }
 $("#reroll-find").addEventListener("click", (e) => busy(e.currentTarget, async () => {
   const r = await api.reroll_search($("#reroll-q").value);
