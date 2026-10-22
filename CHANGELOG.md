@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Sign-in through VK, Discord, Yandex or Google in Buffy's wizard. Buffy keeps the cookies of MangaBuff's own sign-in window; when the session dies it signs in again in a hidden window and shows it only if the provider asks for input.
+
+### Changed
+
+- The Russian README is now the main one (`README.md`), the English one moved to `README.en.md`. Both start with the download, social sign-in, data and problem-report sections; `.env` names now match the code (`MANGA_LOGIN`/`MANGA_PASSWORD`).
+
 ## 11.0.12 — 2026-10-22
 
 ### Fixed

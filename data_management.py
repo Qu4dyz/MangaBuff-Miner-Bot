@@ -56,8 +56,14 @@ class DataManager:
         return data.get("email"), data.get("password")
 
     @staticmethod
-    def set_credentials(email, password):
-        DataManager.save_json(DATA_FILE, {"email": email, "password": password})
+    def set_credentials(email, password, login_method=None):
+        # login_method "social": no password, the bot lives on cookies from Buffy's sign-in window
+        DataManager.save_json(DATA_FILE, {"email": email, "password": password, "login_method": login_method})
+
+    @staticmethod
+    def has_login():
+        email, password = DataManager.get_credentials()
+        return bool(email and (password or DataManager.get_setting("login_method") == "social"))
 
     # Remembered per account; app preferences (toggles, Telegram, proxy) stay shared
     ACCOUNT_KEYS = ("arena_no_deck", "arena_rank_tracker", "bonus_cards_dry", "bonus_cards_off_date",
@@ -85,7 +91,7 @@ class DataManager:
         email = DataManager.get_credentials()[0]
         if email and not DataManager.get_setting("account_email"):
             DataManager.set_setting("account_email", email)  # installs from before switch_account existed
-        DataManager.save_json(DATA_FILE, {"email": None, "password": None})
+        DataManager.save_json(DATA_FILE, {"email": None, "password": None, "login_method": None})
         if os.path.exists(SESSION_FILE):
             try:
                 os.remove(SESSION_FILE)

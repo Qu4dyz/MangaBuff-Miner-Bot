@@ -95,6 +95,7 @@ class BuffyApi:
         self._started_at = None
         self._want_running = False
         self._window = None
+        self._social_lock = threading.Lock()  # one MangaBuff sign-in window at a time
         self._on_status_change = None  # set by the app (tray menu refresh)
         self._updater = None  # set by the app
         self._quit = None  # set by the app: full exit
@@ -197,15 +198,15 @@ class BuffyApi:
         return True
 
     def get_bootstrap(self):
-        email, password = DataManager.get_credentials()
+        email = DataManager.get_credentials()[0]
         settings = self.get_settings()
         return {
             "app": APP_NAME,
             "version": __version__,
             "repo": REPO_URL,
             "email": email or "",
-            "has_credentials": bool(email and password),
-            "onboarded": bool(settings.get("app_onboarded")) and bool(email and password),
+            "has_credentials": DataManager.has_login(),
+            "onboarded": bool(settings.get("app_onboarded")) and DataManager.has_login(),
             "settings": settings,
             "data_dir": os.path.dirname(_data_file()),
         }
@@ -247,6 +248,80 @@ class BuffyApi:
         except Exception as e:
             return {"ok": False, "error": f"Ошибка соединения: {e}"}
 
+    def social_login(self, provider):
+        """Sign in through MangaBuff's own page (VK, Discord, Yandex, Google) and keep that window's cookies."""
+        name = SOCIAL_PROVIDERS.get(provider)
+        if not name:
+            return {"ok": False, "error": "Неизвестный способ входа"}
+        if self._status in ("running", "starting", "restarting", "stopping") or self._manual_bot is not None:
+            return {"ok": False, "error": "Сначала останови бота и дождись конца ручного запуска"}
+        signed_in = self._social_window(provider, hidden_sec=0)
+        if not signed_in:
+            return {"ok": False, "error": "Вход отменён: окно закрыто до входа на сайт"}
+        try:
+            from engine import MangaMinerBot
+
+            bot = MangaMinerBot(log_callback=lambda *_: None, progress_callback=lambda *_: None,
+                                stats_callback=lambda **_: None)
+            bot.session.cookies.clear()
+            bot.use_cookies(*signed_in)
+            alive = bot.adopt_cookie_session()
+        except Exception as e:
+            return {"ok": False, "error": f"Ошибка соединения: {e}"}
+        if alive is None:
+            return {"ok": False, "error": "Не удалось связаться с MangaBuff. Проверь интернет и попробуй ещё раз."}
+        if not alive:
+            return {"ok": False, "error": "Сайт не подтвердил вход. Попробуй ещё раз или войди по почте и паролю."}
+        label = f"{name} · id{bot.user_id}" if bot.user_id else name
+        DataManager.switch_account(label)
+        DataManager.set_credentials(label, None, login_method="social")
+        DataManager.set_setting("login_provider", provider)
+        self._log(f"✅ Вход выполнен: {label}")
+        return {"ok": True}
+
+    def _social_window(self, provider, hidden_sec, timeout_sec=None):
+        """Open MangaBuff's sign-in through `provider` and wait until the site lets us in.
+        The window starts hidden for `hidden_sec`: VK/Google/Yandex remember the user, so a
+        repeat sign-in usually finishes by itself; only then is the window shown.
+        Returns (cookies, user_agent) or None if closed or timed out."""
+        import webview
+
+        with self._social_lock:
+            win = webview.create_window(f"Вход в MangaBuff через {SOCIAL_PROVIDERS[provider]}",
+                                        f"https://mangabuff.ru/login/redirect/{provider}",
+                                        width=560, height=760, hidden=hidden_sec > 0)
+            closed = threading.Event()
+            win.events.closed += closed.set
+            try:
+                started = time.time()
+                shown = hidden_sec <= 0
+                while not closed.is_set() and time.time() - started < (timeout_sec or SOCIAL_LOGIN_TIMEOUT_SEC):
+                    try:
+                        url = urlsplit(win.get_current_url() or "")
+                        # The site sends a signed-in user from /login/callback/... to an ordinary page
+                        if url.hostname == "mangabuff.ru" and not url.path.startswith("/login"):
+                            cookies = {m.key: m.value for jar in win.get_cookies() for m in jar.values()}
+                            return cookies, win.evaluate_js("navigator.userAgent")
+                    except Exception:
+                        pass  # pywebview gives up after 20 s of a still-loading page; MangaBuff often takes longer
+                    if not shown and time.time() - started >= hidden_sec:
+                        self._log(f"🔑 MangaBuff просит снова войти через {SOCIAL_PROVIDERS[provider]} — открыл окно входа")
+                        win.show()
+                        shown = True
+                    closed.wait(1)
+                return None
+            finally:
+                if not closed.is_set():
+                    win.destroy()
+
+    def _silent_social_relogin(self):
+        """Called by the bot when the saved social session died."""
+        provider = DataManager.get_setting("login_provider")
+        if provider not in SOCIAL_PROVIDERS:
+            return None
+        # The daemon waits here without a heartbeat: stay well under its 8-minute watchdog
+        return self._social_window(provider, hidden_sec=SOCIAL_SILENT_SEC, timeout_sec=5 * 60)
+
     def logout(self):
         self.stop()
         DataManager.clear_credentials()
@@ -255,8 +330,7 @@ class BuffyApi:
 
     # -------------------------------------------------------------- bot
     def start(self):
-        email, password = DataManager.get_credentials()
-        if not (email and password):
+        if not DataManager.has_login():
             return {"ok": False, "error": "Нет данных для входа"}
         if self._status in ("running", "starting", "restarting"):
             return {"ok": True}
@@ -291,8 +365,7 @@ class BuffyApi:
         toggle = MANUAL_TOGGLES.get(name)
         if toggle and not DataManager.get_setting(toggle, True):
             return {"ok": False, "error": "Модуль выключен — сначала включи его переключатель"}
-        email, password = DataManager.get_credentials()
-        if not (email and password):
+        if not DataManager.has_login():
             return {"ok": False, "error": "Сначала войди в аккаунт"}
         if self._status == "stopping":
             return {"ok": False, "error": "Бот останавливается, попробуй через пару секунд"}
@@ -311,6 +384,7 @@ class BuffyApi:
             stats_callback=lambda **_: None,
         )
         bot.manual_callback = self._on_manual
+        bot.social_relogin = self._silent_social_relogin
         bot.fatal_exit = lambda: setattr(bot, "running", False)  # never kill the app over a one-off run
         bot.running = True
         bot.request_manual_module(name)
@@ -353,6 +427,7 @@ class BuffyApi:
         )
         bot.fatal_exit = lambda b=bot: self._on_fatal(b)
         bot.manual_callback = self._on_manual
+        bot.social_relogin = self._silent_social_relogin
         self._bot = bot
         self._started_at = time.time()
 
@@ -596,6 +671,10 @@ def _tg_error(description):
         return "Telegram просит подождать минуту. Попробуй чуть позже."
     return f"Telegram ответил ошибкой: {description}"
 
+
+SOCIAL_PROVIDERS = {"vkid": "ВКонтакте", "discord": "Discord", "yandex": "Яндекс", "google": "Google"}
+SOCIAL_LOGIN_TIMEOUT_SEC = 10 * 60
+SOCIAL_SILENT_SEC = 30  # hidden re-login attempt before the window is shown
 
 ISSUE_URL_LIMIT = 7500  # GitHub refuses much longer prefilled URLs
 

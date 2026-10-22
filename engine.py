@@ -404,7 +404,60 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         self.log("♻️ Сайт ответил 419 (сессия устарела) — вхожу заново и повторяю действие")
         return self.csrf_token if self.login_and_steal_keys() else None
 
+    def adopt_cookie_session(self):
+        """Check the cookies already in self.session on /balance; on success take its CSRF token
+        and user id and save the session. True = logged in, False = guest, None = site unreachable."""
+        res = self.session.get("https://mangabuff.ru/balance", timeout=10)
+        if res.status_code in (401, 419) or (res.status_code == 200 and (
+                "/login" in str(res.url).lower() or "auth-form" in res.text.lower())):
+            return False
+        meta = BeautifulSoup(res.text, "html.parser").find("meta", attrs={"name": "csrf-token"})
+        if res.status_code != 200 or not meta or not meta.get("content"):
+            return None
+        self.csrf_token = meta.get("content")
+        self.session.headers.update({"X-CSRF-TOKEN": self.csrf_token, "X-Requested-With": "XMLHttpRequest",
+                                     "Referer": "https://mangabuff.ru/mine", "Origin": "https://mangabuff.ru"})
+        user = re.search(r"/users/(\d+)", res.text)
+        if user:
+            self.user_id = user.group(1)
+        self._persist_session_cookies()
+        return True
+
+    def use_cookies(self, cookies, user_agent=None):
+        load_cookies_into(self.session, cookies)
+        if user_agent:
+            self.user_agent = user_agent
+            self.session.headers["User-Agent"] = user_agent
+
+    def _restore_social_session(self):
+        """VK/Discord/Yandex/Google accounts have no password: reuse the cookies from Buffy's sign-in window,
+        and when they died, ask Buffy to sign in again through that window (silently if the provider allows)."""
+        self.login_rejected = False
+        try:
+            alive = self.adopt_cookie_session() if self.validate_session() else False
+            relogin = getattr(self, "social_relogin", None)  # set by Buffy; the CLI has no window
+            if alive is False and relogin:
+                fresh = relogin()
+                if fresh:
+                    self.use_cookies(*fresh)
+                    alive = self.adopt_cookie_session()
+        except Exception as e:
+            self.auth_log_buffer.append(tr("log_login_crash", e=e))
+            return False
+        if alive:
+            self.auth_log_buffer.append(tr("log_login_ok"))
+            return True
+        if alive is None:
+            self.auth_log_buffer.append("⚠️ MangaBuff не ответил, вход через соцсеть проверю позже")
+            return False
+        self.login_rejected = True
+        self.auth_log_buffer.append(
+            "❌ Вход через соцсеть устарел: открой Buffy → Настройки → «Сменить аккаунт» и войди заново")
+        return False
+
     def login_and_steal_keys(self):
+        if DataManager.get_setting("login_method") == "social":
+            return self._restore_social_session()
         self.auth_log_buffer.append("Logging in via API...")
         self.login_rejected = False  # True when the site answered and refused the email/password
         try:

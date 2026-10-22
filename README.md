@@ -1,168 +1,130 @@
-[![ru](https://img.shields.io/badge/lang-ru-red.svg)](README.ru.md) [![en](https://img.shields.io/badge/lang-en-green.svg)](README.md)
+[![ru](https://img.shields.io/badge/lang-ru-green.svg)](README.md) [![en](https://img.shields.io/badge/lang-en-red.svg)](README.en.md)
 
-# 🤖 MangaBuff Miner Bot
+# 💜 Buffy — автопилот для MangaBuff
 
-**MangaBuff Miner** is a high-performance, fully autonomous automation daemon and desktop client for the MangaBuff mining game, card collection, and battle systems. Powered by direct HTTP API interaction (no browser overhead), it features advanced combat heuristics, automatic card progression, resilient network sessions, and rich Telegram notifications.
+Buffy сам копает руду, читает главы ради бонусных карт, сражается на арене, водит отряд в Башню Разлома, вкладывается в клуб и смотрит рекламу за алмазы. Работает круглосуточно в фоне на Windows, а обо всём важном пишет в Telegram.
 
-![Status](https://img.shields.io/badge/Status-Active%20Production-brightgreen)
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Mode](https://img.shields.io/badge/Mode-CLI%20%7C%20Desktop%20App%20%7C%2024%2F7%20Daemon-orange)
+[![Последний релиз](https://img.shields.io/github/v/release/Qu4dyz/MangaBuff-Miner-Bot?label=%D1%80%D0%B5%D0%BB%D0%B8%D0%B7)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest)
+[![Скачивания](https://img.shields.io/github/downloads/Qu4dyz/MangaBuff-Miner-Bot/total?label=%D1%81%D0%BA%D0%B0%D1%87%D0%B8%D0%B2%D0%B0%D0%BD%D0%B8%D0%B9)](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases)
 
----
+> ⚠️ **Официальный репозиторий и сборки — только здесь: [Qu4dyz/MangaBuff-Miner-Bot](https://github.com/Qu4dyz/MangaBuff-Miner-Bot).** Не скачивай Buffy из форков и под другими названиями: программа получает вход в твой аккаунт, и чужая сборка может его украсть.
 
-## 💜 Buffy — desktop app for Windows
+## Скачать и запустить
 
-Don't want to touch Python? Grab **Buffy-Setup.exe** (or the portable zip) from [Releases](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest), run it, and the first-launch wizard walks you through login, modules and Telegram. Buffy runs the same 24/7 daemon as the server version, shows live stats (cards, chapters, diamonds, tower, arena rank), keeps a full activity log, and hides to the system tray when closed. Settings live in `%APPDATA%\Buffy`.
+1. Открой [последний релиз](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases/latest) и скачай **Buffy-Setup-….exe** (установщик) или **Buffy-…-portable.zip** (без установки).
+2. Запусти. Windows может написать «Система Windows защитила ваш компьютер»: у программы нет платной цифровой подписи. Нажми **Подробнее → Выполнить в любом случае**.
+3. Мастер первого запуска попросит войти в MangaBuff: **по почте и паролю** или **через ВКонтакте, Discord, Яндекс или Google**. Потом предложит подключить Telegram (по желанию).
+4. Включи нужные модули и нажми **«Запустить»**. Закрытое окно сворачивается в трей у часов, бот продолжает работать.
 
-> Windows may show "Windows protected your PC" for a new unsigned app — click **More info → Run anyway**.
+Buffy обновляется сам: новую версию он скачает и поставит, когда бот не занят вечерним кубком.
 
----
+## Что умеет
 
-## ✨ Features
+- ⛏️ **Шахта.** Копает, когда накопилась энергия, покупает улучшения кирки и «Сильный удар».
+- 📖 **Чтение глав.** Добирает дневные 75 глав и бонусные карты, делает паузы как живой читатель. Если сайт перестал засчитывать главы на одном тайтле, переходит на другой.
+- ⚔️ **Арена и Вечерний кубок.** Выбирает соперников по силе карт и истории боёв, играет кубок 19:00–22:00 МСК. Ценные карты защищены от случайного расхода.
+- 🏰 **Башня Разлома.** Забирает награды, сразу отправляет отряд в самую выгодную экспедицию, качает Штаб.
+- 🏛️ **Клуб.** Вкладывает кристаллы и сообщает, когда клубу нужна карта, которая у тебя есть.
+- 📺 **Реклама за алмазы и ежедневные награды.** Три ролика в день, подарки за вход, сундуки, квесты.
+- 📲 **Telegram.** Выпавшие карты с картинкой, обмены, сводки, тревога, если бот не может войти или сайт просит капчу. Есть тихие часы.
 
-### ⚔️ Arena & Combat Intelligence (`arena.py`)
-* **Autonomous Arena Battles:** Automated matchmaking, target evaluation, and battle execution.
-* **Combat Effectiveness Engine:** Calculates true combat value of cards taking into account stats, buffs, card synergies, and win probabilities.
-* **Opponent Scouting & Optimization:** Analyzes defense logs and opponent compositions to select highest-yield, high-confidence targets.
-* **Card Progression & Protection Policy:**
-  * Automated card awakening and resonance matching.
-  * Intelligent lock system that prevents sacrificing or consuming valuable/legendary cards.
-* **Evening Cup Automation:** Automated participation in the Evening Cup (19:00–22:00 MSK) with dynamic turn strategy and tactic activation.
+## Вход через ВКонтакте, Discord, Яндекс или Google
 
-### 🏛️ Club System (`club.py`)
-* **Personal Crystal Contributions:** Automatically contributes crystals to the club (up to 10/10) to earn club exp and contribution points.
-* **Card Request Alerts:** Monitors club card donation requests and alerts you via Telegram with direct links and card art when requested cards are in your collection.
+Если на сайт ты заходишь через соцсеть, выбери её в мастере входа. Откроется обычное окно MangaBuff: войди как в браузере, Buffy подхватит вход сам. Пароль от соцсети Buffy не видит и не хранит.
 
-### 🏰 Abyss Tower (Башня Разлома)
-* **Continuous Expedition Cycle:** Automatically claims expedition rewards (diamonds, dark crystals, card levels).
-* **Zero-Downtime Redeployment:** Instantly re-dispatches the squad on the optimal expedition immediately upon completion.
-* **HQ Upgrades:** Automatically invests earned resources into Tower Headquarters upgrades.
+Когда сайт сбросит вход, Buffy сначала попробует войти заново незаметно: соцсеть помнит тебя в этом окне, и обычно всё проходит само за пару секунд. Если соцсеть попросит что-то подтвердить, Buffy покажет окно входа и напишет в Telegram.
 
-### 📖 Manga Chapter Reading (`/addHistory`)
-* **Daily Bonus Card Farming:** Sequentially processes manga chapters with natural randomized delays (10–18s) to collect up to 10 daily bonus cards and sharpening scrolls.
-* **Daily Quest Integration:** Automatically completes the 75-chapter daily quest milestone.
-* **State Tracking:** Tracks read history in `reading_state.json` and avoids wasteful requests once daily card drops are exhausted.
-* **Reading Recovery:** Below the daily cap, counts only progress confirmed by `/balance`. After two batches without progress, tries another manga; after two stalled titles, pauses and saves the next title for the following cycle. Failed submissions do not skip chapters. Local history tracks submitted chapters and does not replace the site's daily counter.
-* **Diagnostics:** In Buffy, use **Журнал → Сохранить полный лог** to export `%APPDATA%\Buffy\reports\Buffy-diagnostic.txt`. The report includes both retained log files and the current session buffer with secrets masked; exports replace the same file. Problem reports open its folder and ask you to attach it on GitHub, where the inline preview is shortened. Reading diagnostics include HTTP status, safe error fields and before/after daily counters, without cookies, reward tokens or full HTML pages. Older logs beyond file rotation are unavailable.
+Google иногда не пускает во встроенные окна приложений. Тогда на странице входа MangaBuff нажми «Забыли пароль?», задай пароль для своей почты и входи в Buffy по почте и паролю.
 
-### ⛏️ Mining, Quests & Daily Routine
-* **Ore Mining & Auto-Upgrades:** Sends mining hits (`/mine/hit`), purchases pickaxe upgrades and Strong Hit as soon as sufficient ore is collected.
-* **Daily Rewarded Ads (3x7 💎):** Watches all 3 daily ads via `POST /balance/ads` (+21 diamonds daily) with humanized watch durations.
-* **Daily Rewards & Quests:** Scans and claims daily login gifts, chest rewards, and completed battle quests.
+## Где хранятся данные
 
-### 🛡️ Network Robustness & Session Persistence
-* **Resilient HTTP Layer (`http_session.py`):** Hybrid session engine supporting `curl_cffi` browser TLS impersonation with fallback to standard `requests`.
-* **DDoS-Guard / Cloudflare Handling:** Auto-recovers cookies, deduplicates DDoS-Guard session tokens, and keeps valid session credentials in `session_cache.json`.
-* **Anti-Ban Humanization:** Randomized timing jitters, micro-breaks between battles, and realistic user simulation.
+Все настройки, вход в аккаунт и журнал лежат только на твоём компьютере, в `%APPDATA%\Buffy`. Buffy общается только с MangaBuff, с Telegram (если ты его подключил) и с GitHub (проверка обновлений). Кнопка **«Папка с данными»** в настройках открывает эту папку.
 
-### 📲 Smart Telegram Notifier (`tg_notifier.py`)
-* **Visual Card Art Drops:** Sends card drop notifications with actual image attachments (WebP, PNG, GIF detection via magic bytes).
-* **Trade Alerts:** Instant trade notifications with direct action links.
-* **Quiet Hours & Alert Escalation:** Configurable night mode with forced loud alerts if manual captcha intervention is needed.
-* **Cycle Heartbeats:** Compact periodic status summaries reporting energy, diamonds, card counts, and upcoming actions.
+## Если что-то не работает
+
+1. В Buffy открой **Настройки → Сообщить о проблеме** и опиши, что случилось.
+2. Buffy сохранит полный отчёт `Buffy-diagnostic.txt` (пароли, почта и токены в нём скрыты), откроет папку с ним и страницу нового issue на GitHub.
+3. Перетащи файл отчёта в сообщение и отправь.
+
+Сохранить отчёт без сообщения можно в **Журнал → Сохранить полный лог**.
+
+## Частые вопросы
+
+**Могут ли забанить?** Это неофициальная программа, и автоматизация может нарушать правила сайта. Buffy ведёт себя осторожно: паузы как у человека, никаких частых повторных входов, остановка при капче. Но гарантий нет, риск остаётся на тебе.
+
+**Нужен ли включённый компьютер?** Да, Buffy работает, пока работает компьютер. Для круглосуточной работы без компьютера есть серверный режим, он описан ниже.
+
+**Можно несколько аккаунтов?** Сейчас один аккаунт на одну копию Buffy. «Сменить аккаунт» в настройках переключает вход.
 
 ---
 
-## 🕹️ Modes of Operation
+## Для разработчиков и серверов
 
-| Mode | Command | Description |
-|------|---------|-------------|
-| **Smart Daemon (24/7)** | `python main.py --daemon` | Headless, continuous 24/7 daemon designed for VPS/servers. Automatically calculates sleep intervals until the earliest pending event (tower return, chest unlock, energy refill, midnight reset). |
-| **Standard CLI** | `python main.py` | Runs a complete farm and maintenance cycle once, outputs status, and exits cleanly. |
-| **Status Check** | `python main.py --status` | Fast, read-only health check of current energy, balance, and account state without performing actions. |
-| **Buffy desktop app** | `python main.py --app` | Windows app with onboarding wizard, live dashboard, module toggles, Telegram setup, tray icon and autostart. Requires `requirements-desktop.txt`. |
+Тот же бот работает без интерфейса на Linux-сервере. Нужен Python 3.10+.
 
----
+| Режим | Команда | Что делает |
+|-------|---------|------------|
+| Демон 24/7 | `python main.py --daemon` | Работает без остановки, спит до ближайшего события (энергия, башня, сундук, полночь МСК). |
+| Один проход | `python main.py` | Один полный цикл, потом выход. |
+| Статус | `python main.py --status` | Только читает состояние аккаунта, ничего не делает. |
+| Buffy | `python main.py --app` | Приложение для Windows, нужен `requirements-desktop.txt`. |
 
-## 🚀 Quick Start
+### Установка
 
-### 1. Requirements
-* Python 3.10 or higher
-* Git
-
-### 2. Installation
 ```bash
 git clone https://github.com/Qu4dyz/MangaBuff-Miner-Bot.git
 cd MangaBuff-Miner-Bot
 python -m venv venv
-# Linux / macOS:
-source venv/bin/activate
-# Windows:
-venv\Scripts\activate
-
-pip install -r requirements.txt
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r requirements.txt   # для Buffy: requirements-desktop.txt
 ```
 
-### 3. Configuration
-Create a `.env` file in the project root:
+Файл `.env` в корне проекта (можно не создавать: бот спросит почту и пароль при первом запуске):
+
 ```env
-# MangaBuff Credentials (optional if entered via GUI/CLI prompt)
-MB_EMAIL=your_email@example.com
-MB_PASSWORD=your_password
-
-# Telegram Notifications (optional but recommended)
-TG_TOKEN=your_bot_token
-TG_CHAT_ID=your_telegram_chat_id
+MANGA_LOGIN=you@example.com
+MANGA_PASSWORD=your_password
+TG_TOKEN=123456:bot-token     # по желанию
+TG_CHAT_ID=123456789          # по желанию
 ```
 
-### 4. Running as a Linux Systemd Service (VPS 24/7)
-To run the bot continuously in the background on a Linux VPS:
+На сервере работает только вход по почте и паролю. Для соцсетей нужно окно Buffy.
+
+### Служба systemd
+
 ```ini
 # /etc/systemd/system/mangabuff.service
 [Unit]
-Description=MangaBuff Miner Bot Smart Daemon
-After=network.target
+Description=MangaBuff bot
+After=network-online.target
 
 [Service]
-Type=simple
-User=root
-WorkingDirectory=/root/mangabuff-bot
-ExecStart=/root/mangabuff-bot/venv/bin/python /root/mangabuff-bot/main.py --daemon
+User=mangabuff
+WorkingDirectory=/opt/mangabuff
+ExecStart=/opt/mangabuff/venv/bin/python main.py --daemon
 Restart=always
-RestartSec=15
+RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
 ```
-Enable and start the service:
+
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable mangabuff
-sudo systemctl start mangabuff
+sudo useradd --system --home /opt/mangabuff mangabuff
+sudo chown -R mangabuff /opt/mangabuff
+sudo systemctl enable --now mangabuff
 ```
+
+### Устройство проекта
+
+- `main.py` — точка входа (CLI, демон, Buffy)
+- `engine.py` — основной цикл бота: вход, шахта, чтение, башня, награды
+- `arena.py`, `club.py` — арена с кубком и клуб
+- `http_session.py` — HTTP с TLS-отпечатком браузера и обработкой DDoS-Guard
+- `tg_notifier.py` — уведомления в Telegram
+- `buffy/` — приложение для Windows (pywebview, интерфейс, трей, обновления)
+- `tests/` — тесты: `python -m pytest tests`
 
 ---
 
-## 📁 Project Structure
-
-```
-├── main.py                     # Entry point (CLI, Daemon, desktop app flags)
-├── engine.py                   # MangaMinerBot core farm loop & lifecycle orchestration
-├── arena.py                    # Consolidated Arena subsystem (combat simulation, optimization, locks, Evening Cup)
-├── club.py                     # Club automation (crystal contributions, card donation alerts)
-├── http_session.py             # Robust curl_cffi/requests HTTP session layer
-├── tg_notifier.py              # Asynchronous Telegram notification engine
-├── buffy/                      # Buffy desktop app: pywebview window, web UI, tray, autostart
-├── config.py                   # Selectors, endpoints, and constants
-├── data_management.py          # Session and credential persistence
-├── utils.py                    # Safe cookie handling, parsing, and utilities
-├── languages.py                # Multi-language translations (EN / RU / UA)
-├── path.py                     # Base path resolution (script vs compiled exe)
-└── refresh_panel.py            # Headless panel stats refresher
-```
-
----
-
-## ⚙️ Dependencies
-
-* `requests` & `curl_cffi` — Resilient HTTP networking with TLS fingerprint impersonation
-* `beautifulsoup4` — HTML parsing and data extraction
-* `pywebview`, `pystray`, `pillow` — Buffy desktop app (`requirements-desktop.txt`, Windows only)
-* `python-dotenv` — Environment configuration
-* `packaging` & `urllib3` — Protocol support
-
----
-
-## 📄 Disclaimer
-
-*This project is developed for educational and personal use only. Use responsibly and in accordance with MangaBuff's Terms of Service.*
+*Неофициальный проект, не связан с MangaBuff. Используй на свой риск.*

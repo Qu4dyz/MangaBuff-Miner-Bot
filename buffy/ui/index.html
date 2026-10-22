@@ -642,7 +642,14 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 
       <div class="wiz-step" data-step="1">
         <h2>Вход в MangaBuff</h2>
-        <p class="lead">Почта и пароль от сайта. Они хранятся только на этом компьютере.</p>
+        <p class="lead">Как ты входишь на сайт. Данные для входа хранятся только на этом компьютере.</p>
+        <div class="row" style="flex-wrap:wrap;gap:8px">
+          <button class="btn" data-social="vkid">ВКонтакте</button>
+          <button class="btn" data-social="discord">Discord</button>
+          <button class="btn" data-social="yandex">Яндекс</button>
+          <button class="btn" data-social="google">Google</button>
+        </div>
+        <p class="muted" style="font-size:13px;margin:8px 0 14px">Откроется окно MangaBuff: войди там, Buffy подхватит вход сам. Если Google не пускает во встроенное окно, задай на сайте пароль через «Забыли пароль?» и войди по почте. Или по почте и паролю:</p>
         <div class="field">
           <label for="w-email">Почта</label>
           <input class="input" id="w-email" type="email" placeholder="you@example.com" autocomplete="off" spellcheck="false">
@@ -812,6 +819,7 @@ function mockApi() {
       email: onboarded ? "demo@buffy.app" : "", has_credentials: onboarded, onboarded, settings, data_dir: "C:\\Users\\you\\AppData\\Roaming\\Buffy" }),
     get_settings: async () => settings,
     set_setting: async (k, v) => { settings[k] = v; return true; },
+    social_login: async () => { await wait(900); return { ok: true }; },
     check_login: async (e, p) => { await wait(900); return p.length > 3 ? { ok: true } : { ok: false, error: "Сайт не принял почту или пароль" }; },
     finish_onboarding: async () => { onboarded = true; return true; },
     start: async () => { status = "starting"; setTimeout(() => status = "running", 800); return { ok: true }; },
@@ -1327,6 +1335,12 @@ async function doLogin() {
   });
 }
 $("#w-login").addEventListener("click", doLogin);
+$$("[data-social]").forEach((b) => b.addEventListener("click", () => busy(b, async () => {
+  setMsg($("#w-login-msg"), "Войди в открывшемся окне MangaBuff…", true);
+  const r = await api.social_login(b.dataset.social);
+  if (r.ok) { setMsg($("#w-login-msg"), "", true); wizard.show(2); }
+  else setMsg($("#w-login-msg"), r.error, false);
+})));
 $("#w-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
 $("#w-email").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#w-pass").focus(); });
 

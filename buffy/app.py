@@ -192,9 +192,8 @@ def run(start_minimized=False):
         if start_minimized:
             # Started with Windows: say it is running, or people launch it again or think it failed
             threading.Timer(3, tray.hint_once).start()
-        email, password = DataManager.get_credentials()
         onboarded = DataManager.get_setting("app_onboarded", False)
-        if email and password and onboarded and DataManager.get_setting("app_start_bot_on_launch", True):
+        if DataManager.has_login() and onboarded and DataManager.get_setting("app_start_bot_on_launch", True):
             api.start()
 
     webview.start(on_started, private_mode=False, storage_path=_storage_dir())

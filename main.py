@@ -45,7 +45,7 @@ def main():
     print("=" * 50)
 
     email, pwd = DataManager.get_credentials()
-    if not email or not pwd:
+    if not DataManager.has_login():
         env_login = os.getenv("MANGA_LOGIN")
         env_pass = os.getenv("MANGA_PASSWORD")
         if env_login and env_pass:
