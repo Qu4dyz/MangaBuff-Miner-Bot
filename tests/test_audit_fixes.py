@@ -438,7 +438,10 @@ class UpdateCacheTests(unittest.TestCase):
                 os.makedirs(cache)
                 app._drop_stale_ui_cache(d)       # same version again: cache is kept
                 self.assertTrue(os.path.exists(cache))
-        self.assertEqual(settings["app_ui_version"], __version__)
+                with patch("buffy.app._ui_stamp", return_value=__version__ + "-changedpage"):
+                    app._drop_stale_ui_cache(d)   # same version, edited page: cache is dropped
+                self.assertFalse(os.path.exists(cache))
+        self.assertEqual(settings["app_ui_version"], __version__ + "-changedpage")
 
 
 class CupRegistrationTests(unittest.TestCase):
