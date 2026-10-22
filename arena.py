@@ -1761,6 +1761,11 @@ def reroll_card_from_response(response, cid):
             'battle_crit_chance': parsed['crit_chance'], 'battle_seal_id': canonical_card(api).get('battle_seal_id')}
 
 
+def note_awaken_energy(left):
+    """Remember how many awakenings are left, for the app's Awakening page."""
+    DataManager.set_setting('awaken_energy', {'left': int(left), 'at': time.time()})
+
+
 def reroll_energy_left(response):
     """Awakenings left after this one, or None when the answer does not say (then the page is read)."""
     try:
@@ -1791,7 +1796,9 @@ class AwakenRerollMixin:
 
         def count(selector):
             return int(re.sub(r'\D', '', root.select_one(selector).get_text()) or 0)
-        return root['data-awakening-url'], count('[data-awakening-free-left]') + count('[data-awakening-energy]')
+        left = count('[data-awakening-free-left]') + count('[data-awakening-energy]')
+        note_awaken_energy(left)
+        return root['data-awakening-url'], left
 
     def _reroll_update(self, cid, **values):
         """Change one card in what is stored now: «Стоп» or a new list chosen in the app must not be overwritten."""
@@ -1881,6 +1888,8 @@ class AwakenRerollMixin:
             if card is None:
                 raise ValueError('Awakening not confirmed by the collection')
             energy = reroll_energy_left(response)
+            if energy is not None:
+                note_awaken_energy(energy)
             rolled_at = time.monotonic()
             self.management_save({'reroll_pending': None})
             rolls += 1

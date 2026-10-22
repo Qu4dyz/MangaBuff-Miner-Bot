@@ -127,6 +127,7 @@ class AwakenRerollTests(unittest.TestCase):
         self.assertEqual(site.cards[CID]['stats'], (155, 1250, 9))  # the first roll that meets every minimum stays
         self.assertEqual(site.energy, 7)
         self.assertEqual(site.deck, [CID, 2, 3, 4])  # card is back in the same deck
+        self.assertEqual(site.live_settings['awaken_energy']['left'], 7)  # shown on the Awakening page
         self.assertEqual(site.settings['cards'][0]['status'], 'reached')
         self.assertEqual(site.settings['cards'][0]['attempts'], 3)
         self.assertFalse(site.settings['active'])

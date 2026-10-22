@@ -158,6 +158,9 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 .reroll-slider input[type=range] { width: 100%; accent-color: var(--glow); }
 .reroll-slider .input { padding: 8px 10px; text-align: right; }
 .reroll-odds { margin: 14px 0 8px; font-weight: 600; }
+.reroll-energy { display: flex; align-items: baseline; gap: 12px; margin: 0 0 16px; padding: 12px 16px; border-radius: var(--radius-sm);
+  background: rgba(var(--glow-rgb), 0.10); border: 1px solid rgba(var(--glow-rgb), 0.28); }
+.reroll-energy b { font-size: 18px; }
 .reroll-list { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 16px; }
 .reroll-item { display: flex; gap: 12px; align-items: flex-start; padding: 8px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
 .reroll-item img { width: 46px; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 6px; background: var(--surface-3); flex: none; }
@@ -505,6 +508,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 
       <!-- ================= AWAKENING ================= -->
       <section class="page" id="page-awaken">
+        <div class="reroll-energy"><span>⚡ Энергия пробуждения: <b id="reroll-energy">—</b></span><small class="muted" id="reroll-energy-at"></small></div>
         <div class="card" id="reroll-run" hidden>
           <h3 id="reroll-title"></h3>
           <p class="lead" id="reroll-target"></p>
@@ -947,7 +951,8 @@ function mockApi() {
       { id: 2, name: "Ведьма", rank: "H", copy: 941, awake: false,
         image: "https://mangabuff.ru/img/cards/card_778facb2-41c2-4f18-b10c-a8b0e554b666.png" }] }; },
     reroll_start: async () => ({ ok: true }), reroll_stop: async () => ({ ok: true }),
-    reroll_resume: async () => ({ ok: true }), reroll_goal: async () => null, reroll_set_mins: async () => ({ ok: true }),
+    reroll_resume: async () => ({ ok: true }), reroll_goal: async () => ({ goal: null, energy: null }),
+    reroll_energy: async () => ({ ok: true, left: 23, at: Date.now() / 1000 }), reroll_set_mins: async () => ({ ok: true }),
     check_login: async (e, p) => { await wait(900); return p.length > 3 ? { ok: true } : { ok: false, error: "Сайт не принял почту или пароль" }; },
     finish_onboarding: async () => { onboarded = true; return true; },
     start: async () => { status = "starting"; setTimeout(() => status = "running", 800); return { ok: true }; },
@@ -1004,6 +1009,7 @@ function go(page) {
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
   $("#page-title").textContent = PAGES[page][0];
   $("#page-sub").textContent = PAGES[page][1];
+  if (page === "awaken") api.reroll_energy().then(renderEnergy).catch(() => {});
   if (page === "log") { errorsSeen = errorCount; updateBadge(); scrollLog($("#full-log"), true); }
 }
 $$("#nav button").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
@@ -1130,6 +1136,16 @@ function renderReroll(goal) {
     + `<img src="${esc(c.image || "")}" alt="" loading="lazy"><div><b>${esc(c.name)}</b>`
     + `<small>Ранг ${esc(c.rank || "?")} · №${esc(c.copy ?? "?")} · ${(REROLL_STATUS[c.status] || REROLL_STATUS.waiting)(c)}</small>`
     + `<div class="reroll-rolls">${(c.history || []).slice(-10).map((r) => rollChip(r, goal)).join("")}</div></div></div>`).join("");
+}
+function renderEnergy(e) {
+  if (!e || e.left == null) return;
+  $("#reroll-energy").textContent = `${e.left} ${plural(e.left, "бросок", "броска", "бросков")}`;
+  const min = Math.round((Date.now() / 1000 - (e.at || 0)) / 60);
+  $("#reroll-energy-at").textContent = min < 1 ? "только что" : `обновлено ${min} мин назад`;
+}
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
 }
 function renderPicks() {
   const n = rerollPicks.size;
@@ -1685,7 +1701,8 @@ async function refreshBoot() {
   // While a reroll runs, show each roll at once so «Остановить» can still keep it
   loop(async () => {
     if (!$("#page-awaken").classList.contains("active") || !(lastReroll && lastReroll.active)) return;
-    lastReroll = await api.reroll_goal(); renderReroll(lastReroll);
+    const live = await api.reroll_goal();
+    lastReroll = live.goal; renderReroll(lastReroll); renderEnergy(live.energy);
   }, 500);
   loop(async () => renderUpdate(await api.get_update()), 2000);
   setInterval(tickCountdown, 1000);

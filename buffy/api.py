@@ -396,7 +396,24 @@ class BuffyApi:
 
     def reroll_goal(self):
         """Light read for the Awakening page while a series runs (polled twice a second)."""
-        return DataManager.get_setting("awaken_reroll")
+        return {"goal": DataManager.get_setting("awaken_reroll"), "energy": DataManager.get_setting("awaken_energy")}
+
+    def reroll_energy(self):
+        """Awakenings left, read from the site when the Awakening page opens (cached for a minute)."""
+        cached = DataManager.get_setting("awaken_energy") or {}
+        if time.time() - float(cached.get("at") or 0) < 60:
+            return {"ok": True, **cached}
+        try:
+            from engine import MangaMinerBot
+
+            bot = MangaMinerBot(log_callback=lambda *_: None, progress_callback=lambda *_: None,
+                                stats_callback=lambda **_: None)
+            if not bot.validate_session():
+                return {"ok": False, **cached}
+            bot._reroll_energy()  # stores the fresh number
+            return {"ok": True, **(DataManager.get_setting("awaken_energy") or {})}
+        except Exception:
+            return {"ok": False, **cached}
 
     def reroll_resume(self):
         """Go on with the same cards and minimums after «Остановить»."""
