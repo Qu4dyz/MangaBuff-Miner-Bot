@@ -1,0 +1,37 @@
+# Download counter for the README. Badge services query GitHub with shared tokens and sometimes get
+# "no releases found"; here the count comes from our own token and lands as a static JSON on the
+# `badges` branch, which shields.io only reads (https://shields.io/badges/endpoint-badge).
+name: Download badge
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Count downloads of every release asset
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        total=$(gh api "repos/${{ github.repository }}/releases" --paginate --jq '[.[].assets[].download_count] | add // 0' | awk '{s+=$1} END {print s+0}')
+        mkdir -p out
+        printf '{"schemaVersion":1,"label":"downloads","message":"%s","color":"8b5cf6"}\n' "$total" > out/downloads.json
+        cat out/downloads.json
+
+    - name: Publish to the badges branch
+      run: |
+        cd out
+        git init -q -b badges
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add downloads.json
+        git commit -q -m "Update download count"
+        git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" badges
