@@ -30,3 +30,4 @@ backup_*/
 .kilo/
 # Battle archive (local data)
 *.sqlite3
+webview/
