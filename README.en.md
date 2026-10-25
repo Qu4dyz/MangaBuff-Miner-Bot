@@ -15,6 +15,12 @@
 
 </div>
 
+> **License and redistribution:** Buffy / MangaBuff Miner Bot is source-available, not open source. Personal, non-commercial use and private builds are permitted under [LICENSE](LICENSE). Publishing or distributing the code, modified or rebranded versions, installers or other builds requires prior written permission from the relevant copyright holder, except as permitted by that license, GitHub's terms or applicable law. Attribution alone is not permission.
+>
+> **Official releases:** [Qu4dyz/MangaBuff-Miner-Bot](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases). A third-party fork or renamed build is not an official Buffy release and may not be presented as one. Sharing a link to the official releases is always fine.
+>
+> **Contact / permissions:** [GitHub issues](https://github.com/Qu4dyz/MangaBuff-Miner-Bot/issues) or Telegram [@qu4dyz](https://t.me/qu4dyz).
+
 ---
 
 ## ✨ In short

@@ -1,0 +1,118 @@
+Buffy / MangaBuff Miner Bot — Personal Use License
+Version 1.0, 25 October 2026
+
+Copyright (c) 2026 Qu4dyz, for the original material owned by Qu4dyz.
+All rights reserved except as expressly granted below.
+Other contributors and third parties retain rights in their own material.
+
+This is a proprietary, source-available license, not an open-source license.
+
+1. Scope
+
+These terms apply only to material whose copyright holder makes it available
+under this license (the Software), including its source code, object code,
+documentation and original project assets. They apply to the Software as a
+whole and to its copyright-protected portions.
+
+Third-party libraries, components and other separately licensed material remain
+subject to their own applicable terms; this license does not override them.
+This license does not claim ownership of MangaBuff or its content, or of users'
+account data, settings or logs.
+
+2. Personal use
+
+You may download, install and run official releases of the Software, without
+charge, for your own personal, non-commercial use. You may also inspect the
+source code, make private copies, and build or modify it solely for that same
+personal use, including on a server you control. Private backup copies are
+permitted. These permissions are conditional on compliance with this license
+and do not authorize distribution to other people. No other rights are granted
+by this license unless expressly stated here.
+
+You may freely share links to the official project and official releases
+listed below. Sharing such a link is not distribution under section 3.
+
+Official project and releases:
+https://github.com/Qu4dyz/MangaBuff-Miner-Bot
+https://github.com/Qu4dyz/MangaBuff-Miner-Bot/releases
+
+3. No redistribution or publication without permission
+
+Except for the permissions in sections 2 and 5, or where required by applicable
+law, prior written permission from the relevant copyright holder is required to:
+
+- distribute, upload, republish, sell, sublicense or otherwise provide copies
+  of all or copyright-protected portions of the Software or its modifications
+  to other people, whether as source code, executables, installers, portable
+  archives or other packages;
+- publish or distribute a renamed or rebranded version of the Software;
+- incorporate protected portions of the Software into another published or
+  distributed project; or
+- provide the Software to others as a hosted service or use it commercially.
+
+These restrictions apply to free distribution as well as paid distribution,
+including through Telegram, websites, repositories and file-sharing services.
+Attribution, a link to this project, a change of name, or the addition of new
+features does not by itself grant permission for any of the above activities.
+You must not misrepresent authorship of the original material. In copies you
+make under this license, retain this license and existing copyright, authorship
+and license notices. Renaming the Software or removing notices does not remove
+these conditions.
+
+4. Names and branding
+
+Private copies and builds permitted by section 2 may retain the existing
+project names, logos and icons. You may also use the names "Buffy" and
+"MangaBuff Miner Bot" as needed to describe the official project truthfully.
+No other permission to use the project's names, logos, icons or other branding
+is granted by this license.
+
+You must not present a modified build or any other unofficial software or
+service as an official Buffy release or as endorsed by Qu4dyz. These branding
+permissions do not grant permission to distribute copies or builds.
+
+5. GitHub functionality, legal exceptions and existing rights
+
+Nothing in this license limits rights granted under GitHub's applicable Terms
+of Service, including viewing and forking a public repository through the
+service as permitted by those terms. A GitHub fork does not by itself grant
+additional permission to distribute builds outside the service.
+
+Nothing in this license restricts uses allowed by mandatory applicable law.
+These terms do not revoke rights validly granted under an earlier license or
+separate agreement for a version to which that grant applies.
+
+6. Contributions
+
+If you submit code, documentation or other material to the official project
+(for example, a pull request or a patch in an issue), you allow Qu4dyz to use,
+modify and distribute it as part of the Software under this license or any
+later license chosen for the Software, and you confirm that you have the right
+to give this permission.
+
+7. Termination
+
+Any breach of this license automatically ends the permissions it gives to the
+person in breach. Qu4dyz may reinstate them in writing.
+
+8. Permission requests and contact
+
+For material owned by Qu4dyz, contact Qu4dyz:
+- GitHub issues: https://github.com/Qu4dyz/MangaBuff-Miner-Bot/issues
+- Telegram: @qu4dyz (https://t.me/qu4dyz)
+
+Permission must be explicit and in writing. Public access to the repository,
+silence, or acknowledgement of the original author is not such permission.
+Qu4dyz cannot grant rights in material owned by others on their behalf.
+
+9. Use at your own risk and no warranty
+
+The Software automates actions on MangaBuff. Automation may conflict with the
+rules of MangaBuff or other services. You alone are responsible for how you use
+the Software and for the consequences for your accounts, including limits,
+lost items or bans.
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS",
+WITHOUT WARRANTIES OF ANY KIND. THE COPYRIGHT HOLDERS SHALL NOT BE LIABLE FOR
+CLAIMS OR DAMAGES ARISING FROM USE OF THE SOFTWARE. THIS DOES NOT EXCLUDE ANY
+LIABILITY THAT CANNOT LAWFULLY BE EXCLUDED.

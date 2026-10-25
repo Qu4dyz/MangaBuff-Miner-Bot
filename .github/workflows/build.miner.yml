@@ -71,6 +71,8 @@ jobs:
         }
         $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
         if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+        # The license travels with every official build (installer and portable zip)
+        Copy-Item LICENSE build\main.dist\LICENSE.txt
         $dist = (Resolve-Path build\main.dist).Path
         & $iscc /Q "/DDistDir=$dist" "/DAppVersion=${{ steps.ver.outputs.version }}" installer\buffy.iss
         if ($LASTEXITCODE -ne 0) { exit 1 }
