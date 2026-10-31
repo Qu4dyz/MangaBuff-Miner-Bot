@@ -10,6 +10,8 @@ BALANCE = '<div><span>Комментарии</span> <b>{}/13</b></div>'
 
 class CommentTests(unittest.TestCase):
     def run_once(self, settings, done=3, post_status=200, items=None):
+        import time
+        settings.setdefault("owned_stickers", {"at": time.time(), "ids": ["8336", "7463", "8337"]})
         b = object.__new__(MangaMinerBot)
         b.log, b.notifier, b.session, b.csrf_token = Mock(), Mock(), Mock(), "t"
         b._msk_now = lambda: dt.datetime(2026, 10, 31, 12)
@@ -26,12 +28,35 @@ class CommentTests(unittest.TestCase):
         b.session.post.assert_not_called()
 
     def test_sticker_goes_under_the_read_chapter(self):
-        settings = {"comments_enabled": True}
+        import time
+        settings = {"comments_enabled": True, "owned_stickers": {"at": time.time(), "ids": ["8336", "9999"]}}
         b = self.run_once(settings)
         data = b.session.post.call_args.kwargs["data"]
         self.assertEqual((data["commentable_id"], data["commentable_type"], data["text"]), ("2235", "mangaChapter", ""))
-        self.assertIn(data["sticker_id"], ("8336", "7463", "8337"))
+        self.assertEqual(data["sticker_id"], "8336")     # 9999 is bought but not a thank-you sticker
         self.assertEqual(settings["comment_day"]["titles"], ["petlya"])
+
+    def test_without_thank_you_stickers_a_short_phrase_is_sent(self):
+        import time
+        from engine import THANKS_PHRASES
+        settings = {"comments_enabled": True, "owned_stickers": {"at": time.time(), "ids": []}}
+        data = self.run_once(settings).session.post.call_args.kwargs["data"]
+        self.assertIn(data["text"], THANKS_PHRASES)
+        self.assertEqual(data["sticker_id"], "")
+
+    def test_owned_stickers_come_from_bought_packs_only(self):
+        picker = ('<button class="tabs__item sticker__pack-item" data-page="248"><span class="sticker__pack-badge sticker__pack-badge--owned">Куплен</span></button>'
+                  '<button class="tabs__item sticker__pack-item" data-page="231"><span class="sticker__pack-badge sticker__pack-badge--locked">x</span></button>')
+        pack = '<button type="button"\n class="sticker__item"\n data-id="8336"\n data-image="/img/stickers/247/6.png">'
+        settings = {}
+        b = object.__new__(MangaMinerBot)
+        b.csrf_token = "t"
+        b.session = Mock()
+        b.session.post.side_effect = lambda url, **kw: SimpleNamespace(
+            status_code=200, json=lambda: {"content": pack if url.endswith("/248") else picker})
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+            self.assertEqual(b._owned_stickers(), {"8336"})
+        self.assertEqual([c.args[0] for c in b.session.post.call_args_list][-1], "https://mangabuff.ru/stickers/248")
 
     def test_one_per_title_a_day_and_a_pause_between(self):
         settings = {"comments_enabled": True}

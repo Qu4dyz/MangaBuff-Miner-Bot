@@ -67,6 +67,10 @@ ARENA_BATCH_SECONDS = 12 * 60
 # ==========================================
 # BOT ENGINE
 # ==========================================
+# Thank-you stickers people put under chapters (checked by eye), most used first. Only bought packs work.
+THANKS_STICKERS = ("7825", "7962", "7812", "7449", "8336", "7822", "7463", "8337")
+THANKS_PHRASES = ("Спасибо за главу!", "Спасибо за перевод!", "Спасибо!", "Благодарю за главу", "Спасибо, ждём продолжения")
+
 EVENT_CANDY_DROPS = 35  # "до 35 раз в сутки, раз в 3 минуты" on /event/pack
 
 
@@ -2016,6 +2020,34 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         # 6 reads in a row without a drop: the site gives none now, don't read for nothing
         return day["n"] < EVENT_CANDY_DROPS and day.get("misses", 0) < 6
 
+    def _owned_stickers(self):
+        """Sticker ids from the packs this account bought, refreshed once a day."""
+        cached = DataManager.get_setting("owned_stickers") or {}
+        if time.time() - float(cached.get("at", 0)) < 24 * 3600:
+            return set(cached.get("ids", []))
+        headers = {"X-CSRF-TOKEN": self.csrf_token, "X-Requested-With": "XMLHttpRequest"}
+
+        def content(url):
+            res = self.session.post(url, data={"stickerHistory": "[]"}, headers=headers, timeout=15)
+            if res.status_code != 200:
+                raise ValueError(f"HTTP {res.status_code}")
+            try:
+                return res.json().get("content", "")
+            except Exception:
+                return res.text
+        try:
+            picker = content("https://mangabuff.ru/stickers")
+            packs = [re.search(r'data-page="(\d+)"', nav).group(1)
+                     for nav in re.findall(r'<button[^>]*sticker__pack-item[^>]*>.*?</button>', picker, re.S)
+                     if "pack-badge--owned" in nav and re.search(r'data-page="(\d+)"', nav)]
+            ids = set()
+            for pack in packs:
+                ids |= set(re.findall(r'class="sticker__item"[^>]*data-id="(\d+)"', content(f"https://mangabuff.ru/stickers/{pack}")))
+        except Exception:
+            return set(cached.get("ids", []))
+        DataManager.set_setting("owned_stickers", {"at": time.time(), "ids": sorted(ids)})
+        return ids
+
     def _comment_quest(self):
         """(done, total) of the daily comment quest on /balance, or None when it cannot be read."""
         try:
@@ -2043,12 +2075,15 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         quest = self._comment_quest() if item else None
         if not quest or quest[0] >= quest[1]:
             return
-        stickers = [s for s in (DataManager.get_setting("comment_stickers") or ["8336", "7463", "8337"])
-                    if str(s) != str(day.get("last_sticker"))] or ["8336"]
-        sticker = str(random.choice(stickers))
+        bought = self._owned_stickers()
+        owned = [s for s in THANKS_STICKERS if s in bought]
+        if owned:
+            text, sticker = "", random.choice([s for s in owned if s != day.get("last_sticker")] or owned)
+        else:  # no thank-you sticker bought on this account: a short phrase instead
+            text, sticker = random.choice([t for t in THANKS_PHRASES if t != day.get("last_sticker")]), ""
         try:
             res = self.session.post("https://mangabuff.ru/comments", data={
-                "text": "", "commentable_id": item["comment_id"], "commentable_type": "mangaChapter",
+                "text": text, "commentable_id": item["comment_id"], "commentable_type": "mangaChapter",
                 "parent_id": "", "sticker_id": sticker, "is_trade": 0, "is_raffle": 0,
             }, headers={"Accept": "application/json, text/javascript, */*; q=0.01", "X-CSRF-TOKEN": self.csrf_token,
                         "X-Requested-With": "XMLHttpRequest", "Referer": item["url"]}, timeout=10)
@@ -2057,8 +2092,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             ok, why = False, str(e)
         if ok:
             day["titles"].append(item["slug"])
-            day.update(last_at=time.time(), last_sticker=sticker)
-            self.log(f"💬 Стикер-спасибо под «{item['slug']}» т.{item['vol']} гл.{item['ch']} "
+            day.update(last_at=time.time(), last_sticker=sticker or text)
+            what = f"Стикер-спасибо #{sticker}" if sticker else f"«{text}»"
+            self.log(f"💬 {what} под «{item['slug']}» т.{item['vol']} гл.{item['ch']} "
                      f"(задание {quest[0] + 1}/{quest[1]})")
         else:
             day["stopped"] = True
