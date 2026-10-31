@@ -67,8 +67,13 @@ ARENA_BATCH_SECONDS = 12 * 60
 # ==========================================
 # BOT ENGINE
 # ==========================================
-# Thank-you stickers people put under chapters (checked by eye), most used first. Only bought packs work.
-THANKS_STICKERS = ("7825", "7962", "7812", "7449", "8336", "7822", "7463", "8337")
+# Every plain "спасибо"/"благодарю"/"thank you" sticker on the site (all 186 packs reviewed by eye, 2026-10-31);
+# "спасибо за обмен/заявку" and sarcastic ones are left out. Hearts last as a soft fallback. Only bought packs work.
+THANKS_STICKERS = (
+    "7868", "7812", "7449", "7962", "7825", "7155", "7414", "7999", "8174", "8210", "8236", "8259",
+    "8319", "8377", "7483", "7590", "7670", "8421", "7108", "8336", "4188", "4614", "4447",
+    "7463", "8337",
+)
 THANKS_PHRASES = ("Спасибо за главу!", "Спасибо за перевод!", "Спасибо!", "Благодарю за главу", "Спасибо, ждём продолжения")
 
 EVENT_CANDY_DROPS = 35  # "до 35 раз в сутки, раз в 3 минуты" on /event/pack
