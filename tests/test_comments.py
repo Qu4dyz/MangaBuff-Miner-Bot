@@ -106,6 +106,22 @@ class BookmarkTests(unittest.TestCase):
             self.assertEqual(b._bookmarked_slugs(), {"aaa", "bbb", "ccc"})
             b.session.get.assert_not_called()
 
+    def test_unknown_account_id_is_looked_up_and_a_failed_load_blocks_reading(self):
+        settings = {}
+        b = object.__new__(MangaMinerBot)
+        b.log, b.user_id = Mock(), None
+        b.session = Mock(get=lambda url, **kw: SimpleNamespace(
+            status_code=200, text='<a href="/users/279379">me</a>' if "balance" in url else
+            '<a class="bookmark__manga-name" href="/manga/lukizm">L</a>'))
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)), \
+                patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+            self.assertEqual(b._bookmarked_slugs(), {"lukizm"})
+            self.assertEqual(b.user_id, "279379")
+            settings.clear()
+            b.user_id = None
+            b.session = Mock(get=Mock(side_effect=OSError))
+            self.assertIsNone(b._bookmarked_slugs())    # never loaded: the caller must not read
+
 
 if __name__ == "__main__":
     unittest.main()

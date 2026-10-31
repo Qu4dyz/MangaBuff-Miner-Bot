@@ -20,6 +20,7 @@ class ReadingRecoveryTests(unittest.TestCase):
         self.slugs = ['elised', 'fresh', 'third']
         self.chapters = {s: list(range(93, 111)) for s in self.slugs}
         self.bot.get_popular_manga_slugs = lambda: self.slugs
+        self.bot._bookmarked_slugs = lambda: set()
         self.stats = dict(chapters_read=62, chapters_max=75, cards_found=0,
                           cards_max=10, card_ready=False)
         self.bot.get_reading_stats = lambda: dict(self.stats)

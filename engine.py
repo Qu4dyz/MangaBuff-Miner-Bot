@@ -1417,27 +1417,34 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         cached = DataManager.get_setting("bookmark_slugs") or {}
         if time.time() - float(cached.get("at", 0)) < 6 * 3600:
             return set(cached.get("slugs", []))
+        old = set(cached["slugs"]) if "slugs" in cached else None  # None: never loaded, do not read blind
         if not getattr(self, "user_id", None):
-            return set(cached.get("slugs", []))
+            try:
+                found = re.search(r"/users/(\d+)", self.session.get("https://mangabuff.ru/balance", timeout=10).text)
+            except Exception:
+                found = None
+            if not found:
+                return old
+            self.user_id = found.group(1)
         base = f"https://mangabuff.ru/users/{self.user_id}/bookmarks"
         card = re.compile(r'<a\b[^>]*\bbookmark__manga[^>]*>')
         slug = re.compile(r'href="(?:https://mangabuff\.ru)?/manga/([\w-]+)"')
         try:
             first = self.session.get(base, timeout=15)
             if first.status_code != 200:
-                return set(cached.get("slugs", []))
+                return old
             found = set()
             for folder in sorted(set(re.findall(r'folder_id=(\d+)', first.text))) or [""]:
                 for page in range(1, 30):
                     res = self.session.get(f"{base}?folder_id={folder}&page={page}", timeout=15)
                     if res.status_code != 200:
-                        return set(cached.get("slugs", [])) | found  # partial: keep the old list too
+                        return old | found if old is not None else None  # partial: keep the old list too
                     got = {m.group(1) for tag in card.findall(res.text) for m in [slug.search(tag)] if m}
                     if not got - found:
                         break
                     found |= got
         except Exception:
-            return set(cached.get("slugs", []))
+            return old
         DataManager.set_setting("bookmark_slugs", {"at": time.time(), "slugs": sorted(found)})
         self.log(f"📚 Закладки: {len(found)} тайтлов — бот их не читает, чтобы не сбить твой прогресс.")
         return found
@@ -1551,6 +1558,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if DataManager.get_setting("reading_skip_bookmarks", True):
             # Reading a title the owner follows would move their own "stopped at chapter N" mark
             mine = self._bookmarked_slugs()
+            if mine is None:
+                self.log("⚠️ Не удалось загрузить закладки — чтение отложено, чтобы не сбить твой прогресс.")
+                return False
             manga_list = [slug for slug in manga_list if slug not in mine]
         if not manga_list:
             self.log("⚠️ Нет доступных тайтлов для чтения — повторю позже.")
