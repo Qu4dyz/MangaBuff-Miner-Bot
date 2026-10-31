@@ -2065,7 +2065,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
     def _comment_after_read(self, items):
         """Owner-only experiment: a thank-you sticker under a chapter the bot really read.
 
-        One per title a day, a few minutes apart, only while the daily quest (N/13) is unfinished,
+        One per chapter, a few minutes apart, only while the daily quest (N/13) is unfinished,
         so a deleted comment is simply made up later. Any refusal stops it for the day.
         """
         if not DataManager.get_setting("comments_enabled", False):
@@ -2073,10 +2073,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         today = str(self._msk_now().date())
         day = DataManager.get_setting("comment_day") or {}
         if day.get("date") != today:
-            day = {"date": today, "titles": [], "stopped": False}
+            day = {"date": today, "chapters": [], "stopped": False}
         if day.get("stopped") or time.time() - float(day.get("last_at", 0)) < 4 * 60:
             return
-        item = next((b for b in reversed(items) if b.get("comment_id") and b["slug"] not in day["titles"]), None)
+        done = day.setdefault("chapters", [])
+        item = next((b for b in reversed(items) if b.get("comment_id") and b["comment_id"] not in done), None)
         quest = self._comment_quest() if item else None
         if not quest or quest[0] >= quest[1]:
             return
@@ -2096,7 +2097,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         except Exception as e:
             ok, why = False, str(e)
         if ok:
-            day["titles"].append(item["slug"])
+            done.append(item["comment_id"])
             day.update(last_at=time.time(), last_sticker=sticker or text)
             what = f"Стикер-спасибо #{sticker}" if sticker else f"«{text}»"
             self.log(f"💬 {what} под «{item['slug']}» т.{item['vol']} гл.{item['ch']} "

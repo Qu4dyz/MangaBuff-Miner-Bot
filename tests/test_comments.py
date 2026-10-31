@@ -34,7 +34,7 @@ class CommentTests(unittest.TestCase):
         data = b.session.post.call_args.kwargs["data"]
         self.assertEqual((data["commentable_id"], data["commentable_type"], data["text"]), ("2235", "mangaChapter", ""))
         self.assertEqual(data["sticker_id"], "8336")     # 9999 is bought but not a thank-you sticker
-        self.assertEqual(settings["comment_day"]["titles"], ["petlya"])
+        self.assertEqual(settings["comment_day"]["chapters"], ["2235"])
 
     def test_without_thank_you_stickers_a_short_phrase_is_sent(self):
         import time
@@ -58,13 +58,13 @@ class CommentTests(unittest.TestCase):
             self.assertEqual(b._owned_stickers(), {"8336"})
         self.assertEqual([c.args[0] for c in b.session.post.call_args_list][-1], "https://mangabuff.ru/stickers/248")
 
-    def test_one_per_title_a_day_and_a_pause_between(self):
+    def test_one_per_chapter_and_a_pause_between(self):
         settings = {"comments_enabled": True}
         self.run_once(settings)
         settings["comment_day"]["last_at"] = 0          # pause over
-        b = self.run_once(settings)                       # same title again
+        b = self.run_once(settings)                       # same chapter again
         b.session.post.assert_not_called()
-        b = self.run_once(settings, items=[{"comment_id": "9", "slug": "other", "vol": 1, "ch": 1.0, "url": "u"}])
+        b = self.run_once(settings, items=[{"comment_id": "9", "slug": "petlya", "vol": 1, "ch": 15.0, "url": "u"}])
         b.session.post.assert_called_once()
 
     def test_stops_at_the_quest_limit_and_makes_up_deleted_ones(self):
