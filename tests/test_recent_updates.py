@@ -83,6 +83,21 @@ class UpdateTests(unittest.TestCase):
         self.bot.notifier.notify_rank_tier_promotion.assert_not_called()
         self.assertEqual(self.settings['arena_rank_tracker']['current_tier'], 'Золото')
 
+    def test_bouncing_between_two_tiers_announces_the_new_tier_once(self):
+        gold, plat, diamond = rank('Золото', 2, 'Золото 1'), rank(), rank('Алмаз', 4, 'Алмаз 4')
+        self.bot.get_current_arena_rank_info = Mock(side_effect=[gold, plat, gold, plat, gold, plat, diamond])
+        for _ in range(7):
+            self.bot.check_arena_rank_promotion(1, 1, 0)
+        calls = [c.kwargs['new_tier'] for c in self.bot.notifier.notify_rank_tier_promotion.call_args_list]
+        self.assertEqual(len(calls), 2)                  # Платина once, then Алмаз
+        self.assertIn('Алмаз', calls[1])
+
+    def test_season_reset_announces_climbing_again(self):
+        self.bot.get_current_arena_rank_info = Mock(side_effect=[rank(), rank('Бронза', 0, 'Бронза 1'), rank('Серебро', 1, 'Серебро 1')])
+        for _ in range(3):
+            self.bot.check_arena_rank_promotion()
+        self.bot.notifier.notify_rank_tier_promotion.assert_called_once()
+
     @patch('engine.time.sleep')
     def test_third_zero_reward_battle_is_counted(self, sleep):
         self.settings['arena_rank_mode'] = False

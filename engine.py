@@ -3069,7 +3069,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         saved_index = tracker.get("tier_index", -1)
         saved_icon = tracker.get("icon", "")
 
-        if current_index > saved_index:
+        # Highest tier already announced: bouncing between two tiers on a weak deck must not re-announce it
+        best_index = tracker.get("best_index", saved_index)
+        if saved_index > current_index >= saved_index - 1 or saved_index < current_index <= best_index:
+            tracker.update(current_tier=current_tier, tier_index=current_index, icon=current_icon,
+                           division=current_division, best_index=best_index)
+            DataManager.set_setting("arena_rank_tracker", tracker)
+
+        elif current_index > saved_index:
             total_battles = tracker["battles_in_tier"]
             total_wins = tracker["wins_in_tier"]
             total_losses = tracker["losses_in_tier"]
@@ -3102,7 +3109,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             DataManager.set_setting("arena_rank_tracker", tracker)
 
         elif current_index < saved_index:
-            # Rank dropped or season reset
+            # Dropped two tiers or more: a season reset, announce climbing again
             tracker = {
                 "current_tier": current_tier,
                 "tier_index": current_index,
