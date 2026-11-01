@@ -1445,7 +1445,8 @@ class ManualArenaController:
                 getattr(self.bot, 'log', print)('⚠️ Кубок: на странице появилось новое — ' + ', '.join(new))
                 try:
                     self.bot.notifier.notify_alert('в кубке появилось что-то новое',
-                                                   'Бот этого не знает: ' + ', '.join(new))
+                                                   'Бот этого не знает: ' + ', '.join(new) +
+                                                   '. Кубок идёт как обычно; это заметка для доработки бота.')
                 except Exception:
                     pass
             path.write_text(json.dumps({'fights': (saved.get('fights', []) + [entry])[-5:],
@@ -1543,6 +1544,9 @@ class ManualArenaController:
                 temporary = history_path.with_suffix('.tmp')
                 temporary.write_text(json.dumps({'battles': history[-40:]}), encoding='utf-8')
                 temporary.replace(history_path)
+                if self.state.get('winner_user_id'):
+                    from tg_notifier import get_notifier
+                    get_notifier().tally(cup_fights=1, cup_wins=int(item['is_win']))
             log('Кубок: бой завершён fight=' + self.fight_id + ' winner=' + str(self.state.get('winner_user_id')) +
                 ' revision=' + str(self.state.get('revision')))
             return 'finished'
@@ -1906,7 +1910,8 @@ class AwakenRerollMixin:
                     reached(item['name'], stats_text(card))
                 self.log(f"🎲 Перебор пробуждения: «{item['name']}» {stats_text(card)} — цель достигнута, оставил.")
                 self.notifier.notify_alert('перебор пробуждения',
-                                           f"«{item['name']}» выбила {stats_text(card)}. Цель достигнута, карта оставлена.")
+                                           f"«{item['name']}» выбила {stats_text(card)}. Цель достигнута, карта оставлена.",
+                                           icon='✅')
                 return rolls, False
             if energy is None:
                 awaken_url, energy = self._reroll_energy()
@@ -2076,7 +2081,7 @@ class SealRerollMixin:
                     self._seal_update(cid, status='reached', result=stats)
                     text = f"«{item['name']}» получила {SEAL_INFO.get(seal, ('печать',))[0].lower()}"
                     self.log(f'🔮 Перековка печати: {text} — оставил.')
-                    self.notifier.notify_alert('перековка печати', text + '.')
+                    self.notifier.notify_alert('перековка печати', text + '.', icon='✅')
                     reached = getattr(self, 'on_reroll_reached', None)
                     if reached:
                         reached(item['name'], SEAL_INFO.get(seal, ('печать',))[0].lower())

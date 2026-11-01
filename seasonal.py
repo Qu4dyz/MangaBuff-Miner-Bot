@@ -163,7 +163,7 @@ class SiteWatchMixin:
         if new:
             lines = [f"🏆 Новая ачивка-пасхалка: <code>{a}</code>" for a in new.get("achievements", [])]
             lines += [f"🧩 Новый скрипт: <code>{s}</code>" for s in new.get("scripts", [])]
-            self.notifier.notify_alert("на сайте появилось новое", "\n".join(lines))
+            self.notifier.notify_alert("на сайте появилось новое", "\n".join(lines), icon="🔭")
             self.log("🔭 На сайте новое: " + ", ".join(new.get("achievements", []) + new.get("scripts", [])))
         return new
 
@@ -201,7 +201,8 @@ class SiteWatchMixin:
             found = new.get("scripts", []) + new.get("achievements", [])
             events.append("🧩 Новое на сайте: " + (", ".join(found) if found else "новых скриптов пока не видно"))
         if events:
-            self.notifier.notify_alert("Хэллоуин", "\n".join(events) + "\n<a href=\"https://mangabuff.ru/halloween/quest\">Открыть</a>")
+            self.notifier.notify_alert("Хэллоуин", "\n".join(events) + "\n<a href=\"https://mangabuff.ru/halloween/quest\">Открыть</a>",
+                                       icon="🎃")
             self.log("🎃 " + " | ".join(events))
         return events
 

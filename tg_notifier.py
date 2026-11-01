@@ -28,6 +28,50 @@ def _image_mime_and_name(photo_bytes, index=0):
     return f"card_{index}.bin", "application/octet-stream"
 
 
+MSK = timezone(timedelta(hours=3))
+_DAY_LOCK = threading.Lock()
+MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
+          "сентября", "октября", "ноября", "декабря")
+
+
+def daily_summary(day, prev=None):
+    """Text of the daily summary from a tg_day tally; prev is the day before, for comparison."""
+    prev = prev or {}
+    y, m, d = (int(x) for x in day["date"].split("-"))
+    lines = [f"📅 <b>Итог дня · {d} {MONTHS[m - 1]}</b>"]
+
+    def gain(t):
+        return t["dia_last"] - t["dia_first"] if "dia_first" in t and "dia_last" in t else None
+    if gain(day) is not None:
+        line = f"💎 Баланс: {day['dia_first']:,} → <b>{day['dia_last']:,}</b> ({gain(day):+,}"
+        lines.append(line + (f", вчера {gain(prev):+,})" if gain(prev) is not None else ")"))
+    earned = [(label, day.get(key, 0)) for key, label in
+              (("ads_diamonds", "реклама"), ("tower_diamonds", "башня"), ("comment_diamonds", "комментарии"))]
+    earned = [f"{label} +{n:,}" for label, n in earned if n]
+    if earned:
+        lines.append("Заработано: " + " · ".join(earned))
+    rows = [("📖 Главы", day.get("chapters", 0)), ("🃏 карты", day.get("cards", 0)),
+            ("📜 свитки", day.get("scrolls", 0)), ("💬 комментарии", day.get("comments", 0))]
+    rows = [f"{label} {n}" for label, n in rows if n]
+    if rows:
+        lines.append(" · ".join(rows))
+    fights = []
+    if day.get("battles"):
+        fights.append(f"⚔️ Арена: {day['battles']} боёв, побед {day.get('wins', 0)}")
+    if day.get("cup_fights"):
+        fights.append(f"🏆 Кубок: {day['cup_fights']} боёв, побед {day.get('cup_wins', 0)}")
+    if fights:
+        lines.append(" · ".join(fights))
+    extra = [("⛏️ руда +", day.get("ore", 0)), ("🔮 кристаллы +", day.get("tower_crystals", 0)),
+             ("🔮 эссенция +", day.get("essence", 0)), ("🎃 конфеты +", day.get("candies", 0))]
+    extra = [f"{label}{n:,}" for label, n in extra if n]
+    if extra:
+        lines.append(" · ".join(extra))
+    if len(lines) == 1:
+        lines.append("Ничего заметного: бот почти не работал.")
+    return "\n".join(lines)
+
+
 class TelegramNotifier:
     """Asynchronous, rate-limited, HTML-formatted Telegram Notifier with Silent & Night Mode."""
 
@@ -352,61 +396,28 @@ class TelegramNotifier:
     # STRUCTURED NOTIFICATIONS (Clean HTML format)
     # ==========================================
     def notify_session_start(self, email, ore=None, essence=None):
-        msg = (
-            "🤖 <b>MangaBuff Miner — Сессия запущена</b>\n"
-            f"👤 <b>Аккаунт:</b> <code>{email}</code>\n"
-        )
-        if ore is not None:
-            msg += f"💎 <b>Руда:</b> <code>{ore:,}</code>\n"
-        if essence is not None:
-            msg += f"🔮 <b>Эссенция:</b> <code>{essence:,}</code>\n"
+        msg = f"🤖 <b>Бот запущен</b>\nАккаунт: <code>{escape(str(email))}</code>"
         self.send_message(msg, silent=True)
 
     def notify_daily_reward(self, message):
-        msg = f"🎁 <b>Ежедневная награда</b>\n{message}"
-        self.send_message(msg, silent=True)
+        self.tally(daily_reward=1)
 
     def notify_quests_claimed(self, count, essence=None, energy=None):
-        msg = (
-            f"📋 <b>Ежедневные квесты</b>\n"
-            f"✅ Успешно получено наград: <b>{count}</b>\n"
-        )
-        if essence:
-            msg += f"🔮 Текущая эссенция: <b>{essence}</b>\n"
-        if energy:
-            msg += f"⚡ Энергия пробуждения: <b>{energy}</b>\n"
-        self.send_message(msg, silent=True)
+        self.tally(quests=count)
 
     def notify_mining_summary(self, clicks, added_ore, total_ore):
-        msg = (
-            "⛏️ <b>Итоги майнинга</b>\n"
-            f"🔨 Ударов: <b>{clicks}</b>\n"
-            f"💎 Добыто руды: <b>+{added_ore:,}</b>\n"
-            f"💰 Всего руды: <b>{total_ore:,}</b>"
-        )
-        self.send_message(msg, silent=True)
+        self.tally(ore=added_ore)
 
     def notify_upgrade(self, title, level=None, cost=None):
-        msg = f"⬆️ <b>Улучшение в магазине!</b>\n<b>{title}</b>\n"
+        msg = f"⬆️ <b>Улучшение: {escape(str(title))}</b>"
         if level:
-            msg += f"Новый уровень: <b>{level}</b>\n"
+            msg += f"\nУровень: <b>{level}</b>"
         if cost:
-            msg += f"Потрачено: <b>{cost:,} руды</b>"
+            msg += f"\nПотрачено: <b>{cost:,}</b> руды"
         self.send_message(msg, silent=True)
 
     def notify_battle_summary(self, battles, wins, losses, essence_earned, daily_cap_reached=False, rank_name=None):
-        cap_str = " (достигнут лимит 1000/день)" if daily_cap_reached else ""
-        mode_str = " (Поднятие ранга)" if essence_earned <= 0 else ""
-        msg = (
-            f"⚔️ <b>Итоги серии боёв на Арене{mode_str}</b>\n"
-            f"📊 Проведено боёв: <b>{battles}</b>\n"
-            f"🏆 Побед: <b>{wins}</b> | 💀 Поражений: <b>{losses}</b>\n"
-        )
-        if essence_earned > 0:
-            msg += f"🔮 Заработано эссенции: <b>+{essence_earned:,}</b>{cap_str}\n"
-        if rank_name:
-            msg += f"🏅 Текущий ранг: <b>{rank_name}</b>\n"
-        self.send_message(msg, silent=True)
+        self.tally(battles=battles, wins=wins, losses=losses, essence=max(0, essence_earned))
 
     def notify_rank_tier_promotion(
         self,
@@ -436,7 +447,7 @@ class TelegramNotifier:
         div_str = f" ({new_division})" if new_division and new_division != new_tier else ""
 
         msg = (
-            "🎉 <b>Повышение ранга на Арене!</b>\n\n"
+            "🎉 <b>Арена: новый ранг</b>\n\n"
             f"⚔️ Новый этап: <b>{old_tier} ➔ {new_tier}</b>{div_str}\n"
             f"⏱ <b>Заняло времени:</b> {duration_str}\n"
             f"📊 <b>Всего боёв на этапе:</b> {battles}\n"
@@ -450,7 +461,7 @@ class TelegramNotifier:
         url = boost_url or "https://mangabuff.ru/clubs/klub-garemshchikov/boost"
         card_str = f"<b>{escape(card_name)}</b> (#{card_id})" if card_name else f"карту <b>#{card_id}</b>"
         msg = (
-            "🃏 <b>Клубный вклад: доступна нужная карта!</b>\n\n"
+            "🃏 <b>Клуб просит карту, которая у тебя есть</b>\n\n"
             f"Клуб сейчас запрашивает {card_str}.\n"
             "Эта карта есть в вашей коллекции — вы можете пожертвовать её для клуба.\n\n"
             f"👉 <a href=\"{url}\">Перейти на страницу вклада в клуб</a>"
@@ -483,7 +494,7 @@ class TelegramNotifier:
         if not recv_photos and photo_bytes:
             recv_photos = [photo_bytes]
 
-        header = "🤝 <b>Новое предложение обмена на MangaBuff!</b>\n"
+        header = "🤝 <b>Новое предложение обмена</b>\n"
         if user_name:
             header += f"👤 <b>Пользователь:</b> <code>{escape(str(user_name))}</code>\n"
         if receive_cards:
@@ -519,7 +530,7 @@ class TelegramNotifier:
             )
         elif status == "accepted":
             msg = (
-                f"🎉 <b>Обмен #{trade_id} успешно завершён!</b>\n"
+                f"🎉 <b>Обмен #{trade_id} завершён</b>\n"
                 f"Обмен с пользователем <b>{user_name}</b> принят."
             )
         elif status == "rejected":
@@ -532,49 +543,29 @@ class TelegramNotifier:
         self.send_message(msg, silent=True)
 
     def notify_jackpot(self, card_rarity, card_title=None):
-        msg = (
-            "🔥 <b>ДЖЕКПОТ! ВЫПАЛА РЕДКАЯ КАРТА!</b> 🔥\n"
-            f"🌟 Редкость: <b>{escape(str(card_rarity).upper())}</b>\n"
-        )
+        msg = f"🔥 <b>Джекпот: редкая карта ({escape(str(card_rarity).upper())})</b>\n"
         if card_title:
-            msg += f"🃏 Карта: <b>{escape(str(card_title))}</b>\n"
-        msg += "💾 Карта сохранена в <code>jackpot_cards.json</code> и защищена от расхода!"
+            msg += f"🃏 {escape(str(card_title))}\n"
+        msg += "Сохранил в <code>jackpot_cards.json</code>, бот её не потратит."
         self.send_message(msg)
 
     def notify_tower_claimed(self, diamonds, crystals, levels_gained=0):
-        msg = (
-            "🏰 <b>Башня Разлома — Экспедиция завершена!</b>\n"
-            f"💎 Алмазы: <b>+{diamonds:,}</b>\n"
-            f"🔮 Темные кристаллы: <b>+{crystals:,}</b>\n"
-        )
+        self.tally(tower_diamonds=diamonds, tower_crystals=crystals)
+        msg = f"🏰 <b>Башня: экспедиция завершена</b>\n💎 +{diamonds:,} · 🔮 кристаллы +{crystals:,}"
         if levels_gained > 0:
-            msg += f"⬆️ Карты получили уровней: <b>+{levels_gained}</b>\n"
+            msg += f"\nКарты получили уровней: <b>+{levels_gained}</b>"
         self.send_message(msg)
 
-    def notify_tower_started(self, difficulty, duration_hours, ends_at=None):
-        msg = (
-            "⚔️ <b>Башня Разлома — Новая экспедиция отправлена!</b>\n"
-            f"🗺️ Сложность: <b>{difficulty}</b>\n"
-            f"⏱️ Длительность: <b>{duration_hours} ч.</b>\n"
-        )
-        if ends_at:
-            msg += f"🏁 Окончание: <code>{ends_at}</code>\n"
-        self.send_message(msg, silent=True)
-
     def notify_ads_watched(self, count, diamonds):
-        msg = (
-            "📺 <b>Просмотр рекламы завершен!</b>\n"
-            f"🎬 Просмотрено: <b>{count}/3</b>\n"
-            f"💎 Получено: <b>+{diamonds} алмазов</b>"
-        )
-        self.send_message(msg, silent=True)
+        self.tally(ads_diamonds=diamonds)
 
     def notify_card_dropped(self, card_name, card_image=None, cards_today=None, photo_bytes=None, copy_info=None, user_id=None, card_id=None):
         import urllib.parse
         market_url = f"https://mangabuff.ru/market?q={urllib.parse.quote_plus(card_name)}"
         inventory_url = f"https://mangabuff.ru/users/{user_id}/cards?sort=new" if user_id else None
 
-        msg = "🎁 <b>Найдена бонусная карта за чтение!</b>\n"
+        self.tally(cards=1)
+        msg = "🎁 <b>Бонусная карта за чтение</b>\n"
         msg += f'🃏 Карта: <a href="{market_url}"><b>{escape(str(card_name))}</b></a>\n'
         if copy_info and copy_info.get("copy_number"):
             num = copy_info["copy_number"]
@@ -600,32 +591,14 @@ class TelegramNotifier:
             self.send_message(msg, disable_preview=False if card_image else True)
 
     def notify_scroll_dropped(self, scroll_name, rank=None):
-        msg = "📜 <b>Выпал свиток заточки за чтение!</b>\n"
-        msg += f"✨ Свиток: <b>{escape(str(scroll_name))}</b>"
-        if rank:
-            msg += f" (Ранг {rank})"
-        self.send_message(msg, silent=True)
+        self.tally(scrolls=1)
 
     def notify_reading_summary(self, chapters_read, total_today=None, cards_gained=0, scrolls_gained=0):
-        # In night mode, suppress routine reading progress completely if no drops occurred
-        if self.is_night_time() and cards_gained == 0 and scrolls_gained == 0:
-            return
+        self.tally(chapters=chapters_read)
 
-        msg = (
-            "📖 <b>Чтение глав завершено!</b>\n"
-            f"📚 Прочитано в сессии: <b>{chapters_read} глав</b>\n"
-        )
-        if total_today is not None:
-            msg += f"📊 Дневной прогресс: <b>{total_today}/75</b>\n"
-        if cards_gained > 0:
-            msg += f"🃏 Найдено карт: <b>+{cards_gained}</b>\n"
-        if scrolls_gained > 0:
-            msg += f"📜 Найдено свитков: <b>+{scrolls_gained}</b>\n"
-        self.send_message(msg, silent=True)
-
-    def notify_alert(self, title, detail):
-        msg = f"⚠️ <b>Внимание: {title}</b>\n{detail}"
-        self.send_message(msg)
+    def notify_alert(self, title, detail, icon="⚠️"):
+        title = str(title)
+        self.send_message(f"{icon} <b>{title[:1].upper() + title[1:]}</b>\n{detail}")
 
     def notify_seasonal_event_live(self, paths, labels=None):
         """Loud alert when Halloween / event pages come online (was 404, now live HTML)."""
@@ -637,7 +610,7 @@ class TelegramNotifier:
             lines.append(f"• <b>{escape(str(label))}</b> — <a href=\"{url}\">{escape(path)}</a>")
         body = "\n".join(lines) if lines else "• страницы ивента"
         msg = (
-            "🎃 <b>MangaBuff: сезонное обновление онлайн!</b>\n\n"
+            "🎃 <b>На сайте открылся ивент</b>\n\n"
             "Появились страницы, которых раньше не было:\n"
             f"{body}\n\n"
             "Можно заходить и смотреть механики (квест, мини-игра, паки, freebies), "
@@ -668,16 +641,19 @@ class TelegramNotifier:
 
     def notify_cycle_heartbeat(self, energy, balance, ads_count, cards_count, tower_str, next_action, next_wait_min, diamonds=None, chapters_str=None, force=False):
         """
-        Send periodic cycle status report.
-        - Suppressed entirely during night quiet hours (23:00 - 08:00 MSK) unless force=True.
-        - Throttled to at most once every 4 hours (configurable via tg_heartbeat_interval_hours) unless force=True.
-        - Always delivered silently (disable_notification=True).
+        Short status every few hours (tg_heartbeat_interval_hours, default 4), silent, none at night.
+        Each call also keeps the day's diamond balance for the daily summary.
         """
-        # 1. Suppress during night hours
+        if diamonds is not None:
+            def keep(day):
+                day.setdefault("dia_first", diamonds)
+                day["dia_last"] = diamonds
+            self._update_day(keep)
+        else:
+            self._roll_day()
         if self.is_night_time() and not force:
             return
 
-        # 2. Check throttle interval
         interval_hours = DataManager.get_setting("tg_heartbeat_interval_hours")
         if interval_hours is None:
             try:
@@ -696,27 +672,52 @@ class TelegramNotifier:
         DataManager.set_setting("tg_last_heartbeat_at", now)
 
         ore_dia = (balance // 100) if balance else 0
-        dia_part = f" | 💎 Баланс: <b>{diamonds:,}</b>" if diamonds is not None else ""
-
-        msg = "🤖 <b>Отчет цикла MangaBuff</b>\n"
-        msg += f"⛏️ Руда: <b>{balance:,}</b> (≈{ore_dia:,} 💎){dia_part}\n"
-
-        if diamonds is not None:
-            total_dia = diamonds + ore_dia
-            msg += f"💰 Всего капитал: <b>~{total_dia:,} 💎</b> | ⚡ Энергия: <b>{energy}</b>\n"
-        else:
-            msg += f"⚡ Энергия: <b>{energy}</b>\n"
-
-        ch_part = f"📖 Главы: <b>{chapters_str}</b> | " if chapters_str else ""
-        msg += f"{ch_part}📺 Реклама: <b>{ads_count}/3</b> | 🃏 Карты: <b>{cards_count}</b>\n"
-        msg += f"🏰 Башня: <b>{tower_str}</b>\n"
+        top = [f"💎 <b>{diamonds:,}</b>"] if diamonds is not None else []
+        top += [f"⛏️ руда {balance:,} (≈{ore_dia:,} 💎)", f"⚡ {energy}"]
+        today = [f"главы {chapters_str}"] if chapters_str else []
+        today += [f"реклама {ads_count}/3", f"карты {cards_count}"]
+        day = DataManager.get_setting("tg_day") or {}
+        if DataManager.get_setting("comments_enabled", False):
+            today.append(f"комментарии {day.get('comments', 0)}/13")
+        msg = "📊 <b>Сводка</b>\n" + " · ".join(top) + "\nСегодня: " + " · ".join(today)
+        msg += f"\n🏰 Башня: {tower_str}"
         hw = DataManager.get_setting("halloween_event_info")
         if hw and hw.get("balance") is not None:
-            day = DataManager.get_setting("halloween_candy_day") or {}
-            msg += (f"🎃 Конфеты: <b>{hw['balance']}</b> | за чтение сегодня {day.get('n', 0)}/35"
-                    f" | 🔥 котёл {hw.get('temperature') or 0}°\n")
-        msg += f"💤 Следующее: <b>{next_action}</b> (~{next_wait_min} мин)"
+            candy = DataManager.get_setting("halloween_candy_day") or {}
+            msg += (f"\n🎃 Конфеты: {hw['balance']} · за чтение {candy.get('n', 0)}/35"
+                    f" · котёл {hw.get('temperature') or 0}°")
+        msg += f"\nДальше: <b>{next_action}</b> через ~{next_wait_min} мин"
         self.send_message(msg, silent=True)
+
+    # ------------------------------------------------------------------ daily summary
+    def tally(self, **counts):
+        """Count routine events for the daily summary instead of a message for each."""
+        def add(day):
+            for key, value in counts.items():
+                day[key] = day.get(key, 0) + (value or 0)
+        self._update_day(add)
+
+    def _update_day(self, change):
+        try:
+            with _DAY_LOCK:
+                day = self._roll_day()
+                change(day)
+                DataManager.set_setting("tg_day", day)
+        except Exception:
+            pass
+
+    def _roll_day(self):
+        """Today's tally (MSK); the first call of a new day sends the summary of the day before."""
+        today = str(datetime.now(MSK).date())
+        day = DataManager.get_setting("tg_day") or {}
+        if day.get("date") == today:
+            return day
+        if len(day) > 1:
+            self.send_message(daily_summary(day, DataManager.get_setting("tg_day_prev") or {}), silent=True)
+            DataManager.set_setting("tg_day_prev", day)
+        day = {"date": today}
+        DataManager.set_setting("tg_day", day)
+        return day
 
 
 # Global singleton instance

@@ -174,12 +174,7 @@ class ClubAutomationMixin:
 
         if contributed_count > 0:
             self.log(f"💎 Клуб: внесено {contributed_count} кристаллов (+{total_exp} опыта, +{total_points} очков)!")
-            self.notifier.send_message(
-                f"💎 <b>Персональный вклад в клуб</b>\n"
-                f"Внесено кристаллов: <b>{contributed_count}</b>\n"
-                f"Получено опыта клубу: <b>+{total_exp}</b>",
-                silent=True,
-            )
+            self.notifier.tally(club_crystals=contributed_count)
 
         return finished
 

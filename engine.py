@@ -264,7 +264,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             try:
                 self.notifier.notify_alert(
                     f"Модуль «{name}» завис",
-                    f"Лимит {timeout_sec // 60} мин. Прерываю; если не отпустит — рестарт.",
+                    f"Лимит {timeout_sec // 60} мин. Прерываю; если не отпустит — перезапущусь сам. Делать ничего не нужно.",
                 )
             except Exception:
                 pass
@@ -2109,13 +2109,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if ok:
             done.append(item["comment_id"])
             day.update(last_at=time.time(), last_sticker=sticker or text)
+            self.notifier.tally(comments=1, comment_diamonds=7)  # the site pays 7 💎 per quest comment
             what = f"Стикер-спасибо #{sticker}" if sticker else f"«{text}»"
             self.log(f"💬 {what} под «{item['slug']}» т.{item['vol']} гл.{item['ch']} "
                      f"(задание {quest[0] + 1}/{quest[1]})")
         else:
             day["stopped"] = True
             self.log(f"⚠️ Комментарий не отправлен ({why}) — до завтра больше не пробую")
-            self.notifier.notify_alert("комментарии", f"Сайт не принял стикер под главой ({why}). До завтра бот комментарии не пишет.")
+            self.notifier.notify_alert("комментарии", f"Сайт не принял стикер под главой ({why}). До завтра бот комментарии не пишет, делать ничего не нужно.")
         DataManager.set_setting("comment_day", day)
 
     def _take_event_drop(self, drop, headers):
@@ -2132,6 +2133,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 if info.get("balance") is not None:  # the page is re-read every 30 min; keep the count live meanwhile
                     info["balance"] += 3 if drop.get("type") == "pumpkin" else 1
                     DataManager.set_setting("halloween_event_info", info)
+                self.notifier.tally(candies=3 if drop.get("type") == "pumpkin" else 1)
                 self.log(f"🍬 Ивент: подобрал {what} за чтение ({day['n']}/{EVENT_CANDY_DROPS} за сегодня)")
             else:
                 self.log(f"⚠️ Ивент: не удалось подобрать {what} (HTTP {r.status_code})")
@@ -2956,7 +2958,6 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             dur_hours = duration_mins // 60
                             self.log(tr("log_tower_started", diff=difficulty.capitalize(), dur=dur_hours))
                             DataManager.set_setting("tower_no_squad", False)
-                            self.notifier.notify_tower_started(difficulty.capitalize(), dur_hours, ends_at)
                             return max(60, int(rem_sec))
                         except Exception:
                             return duration_mins * 60
@@ -3727,7 +3728,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     self.log(f"✅ Вход восстановлен с {attempt + 1}-й попытки.")
                     self.notifier.notify_alert(
                         "вход на MangaBuff восстановлен",
-                        f"Авторизация прошла с {attempt + 1}-й попытки, продолжаю работу.",
+                        f"Авторизация прошла с {attempt + 1}-й попытки, продолжаю работу.", icon="✅",
                     )
                 return True
 
