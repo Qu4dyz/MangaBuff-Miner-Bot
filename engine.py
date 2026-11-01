@@ -3921,6 +3921,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             left = [c["name"] for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing", "refused")]
             if not left:
                 return f"бросков: {rolls}, все выбранные карты готовы"
+            if not rolls and not goal.get("active"):
+                return ManualFailed("перебор не включён — выбери карты и нажми «Начать» на странице «Пробуждение»")
+            if not rolls and 19 <= self._msk_now().hour < 22:
+                return ManualFailed("во время кубка (19–22 МСК) колоду не трогаю — перебор продолжится после 22:00")
             if rolls and not getattr(self, "_reroll_out_of_energy", False):
                 return f"бросков: {rolls}; цель не выбита, запусти ещё раз или бот продолжит сам"
             return f"бросков: {rolls}; энергия кончилась, продолжу, когда бои её накопят" if rolls else                 ManualFailed("энергии пробуждения нет — бот продолжит, когда бои её накопят")
