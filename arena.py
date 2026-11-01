@@ -1899,7 +1899,7 @@ class AwakenRerollMixin:
             self.log(f"⚠️ Перебор пробуждения: карта «{item['name']}» #{cid} не найдена в коллекции — пропускаю.")
             return 0, False
         rolls, energy, awaken_url, rolled_at = 0, None, None, None
-        while rolls < budget and self._alive():
+        while rolls < budget and self._alive() and time.monotonic() < self._reroll_deadline:
             goal = self._reroll_still_wanted(cid)
             if goal is None:
                 return rolls, True
@@ -1916,6 +1916,7 @@ class AwakenRerollMixin:
             if energy is None:
                 awaken_url, energy = self._reroll_energy()
             if energy <= 0:  # checked before unawakening: never leave a card plain
+                self._reroll_out_of_energy = True
                 return rolls, True
             if card is not None:
                 self._reroll_remember_deck(cid)
@@ -1961,7 +1962,7 @@ class AwakenRerollMixin:
             self.log(f"🎲 Перебор пробуждения «{item['name']}» #{done}: {stats_text(card)}")
         return rolls, rolls >= budget
 
-    def run_awaken_reroll(self, max_rolls=20):
+    def run_awaken_reroll(self, max_rolls=20, max_seconds=None):
         goal = DataManager.get_setting(REROLL_SETTING) or {}
         if not goal.get('active') or 19 <= self._msk_now().hour < 22:  # never touch the deck during the cup
             return 0
@@ -1970,6 +1971,8 @@ class AwakenRerollMixin:
         unawaken_url = root['data-unawaken-url']
         self.management_save({'reroll_pending': None})  # each card is re-read from the collection below
         rolls = 0
+        self._reroll_out_of_energy = False
+        self._reroll_deadline = time.monotonic() + max_seconds if max_seconds else float('inf')
         try:
             for item in goal.get('cards') or []:
                 if item.get('status') in REROLL_DONE:
@@ -1983,8 +1986,10 @@ class AwakenRerollMixin:
             if latest.get('active') and cards and all(c.get('status') in REROLL_DONE for c in cards):
                 DataManager.set_setting(REROLL_SETTING, {**latest, 'active': False})
                 self.log('🎲 Перебор пробуждения: все выбранные карты готовы.')
-            elif rolls and latest.get('active'):
+            elif rolls and latest.get('active') and self._reroll_out_of_energy:
                 self.log('🎲 Перебор пробуждения: энергия кончилась — продолжу, когда бои её накопят.')
+            elif rolls and latest.get('active'):
+                self.log(f'🎲 Перебор пробуждения: сделал {rolls} бросков за этот заход — продолжу.')
             return rolls
         finally:
             try:

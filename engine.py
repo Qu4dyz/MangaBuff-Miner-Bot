@@ -3828,7 +3828,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         "reading": ("Чтение глав", 20 * 60),
         "club": ("Клуб", 4 * 60),
         "seasonal": ("Ивенты", 2 * 60),
-        "awaken": ("Перебор пробуждения", 15 * 60),
+        "awaken": ("Перебор пробуждения", 60 * 60),
         "seals": ("Перековка печати", 15 * 60),
     }
 
@@ -3916,12 +3916,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             return f"перековок: {rolls}; продолжу позже" if rolls else \
                 ManualFailed("эссенции не хватает или достигнут лимит — бот продолжит, когда она появится")
         if name == "awaken":
-            rolls = self.run_awaken_reroll(max_rolls=40)
+            rolls = self.run_awaken_reroll(max_rolls=10 ** 6, max_seconds=50 * 60)  # inside the 60-minute module limit
             goal = DataManager.get_setting("awaken_reroll") or {}
             left = [c["name"] for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing", "refused")]
             if not left:
                 return f"бросков: {rolls}, все выбранные карты готовы"
-            return f"бросков: {rolls}; продолжу, когда бои накопят энергию" if rolls else                 ManualFailed("энергии пробуждения нет — бот продолжит, когда бои её накопят")
+            if rolls and not getattr(self, "_reroll_out_of_energy", False):
+                return f"бросков: {rolls}; цель не выбита, запусти ещё раз или бот продолжит сам"
+            return f"бросков: {rolls}; энергия кончилась, продолжу, когда бои её накопят" if rolls else                 ManualFailed("энергии пробуждения нет — бот продолжит, когда бои её накопят")
         if name == "mining":
             out = {"energy": 0}
             self._mining_step(msk_today, out)

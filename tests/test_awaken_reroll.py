@@ -154,6 +154,14 @@ class AwakenRerollTests(unittest.TestCase):
         self.assertTrue(site.cards[CID]['awake'])
         self.assertEqual(site.deck, [CID, 2, 3, 4])
         self.assertTrue(site.settings['active'])  # goes on when fights refill energy
+        self.assertIn('энергия кончилась', site.log.call_args.args[0])
+
+    def test_roll_limit_is_not_reported_as_empty_energy(self):
+        site = FakeSite({CID: card(True, (90, 800, 10), [(100, 900, 5)] * 25)}, energy=400)
+        self.assertEqual(site.run(GOAL), 20)              # the arena cycle's share per pass
+        logged = [c.args[0] for c in site.log.call_args_list]
+        self.assertFalse(any('энергия кончилась' in m for m in logged))
+        self.assertIn('сделал 20 бросков', logged[-1])
 
     def test_plain_card_is_awakened_without_unawaken(self):
         site = FakeSite({CID: card(False, (0, 0, 0), [(170, 1300, 15)])}, energy=5, deck=(2, 3, 4, 5))
