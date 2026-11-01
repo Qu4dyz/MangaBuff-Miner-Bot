@@ -3916,7 +3916,19 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             return f"перековок: {rolls}; продолжу позже" if rolls else \
                 ManualFailed("эссенции не хватает или достигнут лимит — бот продолжит, когда она появится")
         if name == "awaken":
-            rolls = self.run_awaken_reroll(max_rolls=10 ** 6, max_seconds=50 * 60)  # inside the 60-minute module limit
+            deadline, rolls, drops = time.time() + 50 * 60, 0, 0  # inside the 60-minute module limit
+            while True:
+                try:
+                    rolls += self.run_awaken_reroll(max_rolls=10 ** 6, max_seconds=max(60, deadline - time.time()))
+                    break
+                except ValueError:  # the site refused something: not a connection problem
+                    raise
+                except Exception as e:  # dropped connection or proxy hiccup: the next pass re-reads the card from the site
+                    drops += 1
+                    if drops > 5 or time.time() > deadline - 90 or not self._alive():
+                        raise
+                    self.log(f"🌐 Перебор пробуждения: связь оборвалась ({str(e)[:80]}) — повторю через 30 с")
+                    time.sleep(30)
             goal = DataManager.get_setting("awaken_reroll") or {}
             left = [c["name"] for c in goal.get("cards") or [] if c.get("status") not in ("reached", "missing", "refused")]
             if not left:

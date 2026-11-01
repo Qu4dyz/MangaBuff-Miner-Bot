@@ -352,3 +352,18 @@ class RefusedCardTests(unittest.TestCase):
         self.assertEqual((first['status'], first['reason']), ('refused', 'Карта заблокирована'))
         self.assertEqual(second['status'], 'reached')
         self.assertTrue(site.cards[CID]['awake'])  # never left plain
+
+
+class ManualRerollTests(unittest.TestCase):
+    def test_dropped_connection_is_retried_not_fatal(self):
+        from engine import MangaMinerBot
+        b = object.__new__(MangaMinerBot)
+        b.log, b._alive, b._reroll_out_of_energy = Mock(), Mock(return_value=True), False
+        b._msk_now = lambda: datetime(2026, 11, 1, 12)
+        b.run_awaken_reroll = Mock(side_effect=[OSError("curl: (7) CONNECT tunnel failed, response 403"), 5])
+        goal = {"active": True, "cards": [{"name": "Анансе", "status": "running"}]}
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: goal if k == "awaken_reroll" else d),                 patch("engine.time.sleep"):
+            summary = b._manual_step("awaken")
+        self.assertEqual(b.run_awaken_reroll.call_count, 2)
+        self.assertTrue(summary.startswith("бросков: 5"))
+
