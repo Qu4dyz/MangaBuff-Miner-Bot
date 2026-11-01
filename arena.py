@@ -2311,6 +2311,7 @@ class ArenaManagementMixin:
         buff_code = None
         buff_ranking = []
         buff_options, active_buff = owned_buff_options(home)
+        cup_time = 19 <= self._msk_now().hour < 22
         if supported_definitions(battles):
             meta = self.refresh_arena_meta(banned)
             manual = DataManager.load_json(os.path.join(BASE_DIR, 'manual_arena_history.json')).get('battles', [])
@@ -2327,6 +2328,11 @@ class ArenaManagementMixin:
                                         since=time.time() - 3 * 86400, limit=600, with_steps_only=True)
             pool = archive_opponent_teams(archive, limit=8) if len(archive) >= 20 else opponent_teams(battles, limit=3)
             opponents = pool + manual_teams + meta[:2]
+            # Cup players are much stronger than arena bots: during the cup pick the deck and buff against them
+            if cup_time:
+                cup = battle_store.load(battle_store.db_path(BASE_DIR), source='cup', since=time.time() - 7 * 86400, limit=400)
+                if len(cup) >= 20:
+                    opponents = archive_opponent_teams(cup, limit=12)
 
             def currently_legal_opponent(entry):
                 rows = entry.get('cards', []) if isinstance(entry, dict) else entry
@@ -2334,6 +2340,11 @@ class ArenaManagementMixin:
 
             opponents = [entry for entry in opponents if currently_legal_opponent(entry)]
             normalized = normalized_owned(cards, battles, energy)
+            if cup_time:
+                # Cup fights spend no energy: the arena drains the best cards right before 19:00
+                energy = None
+                for c in normalized:
+                    c['energy'] = None
             known = {int(c['id']): c for c in normalized}
             rules = calibrate_rules(battles)
             if len(archive) >= 50:
@@ -2401,7 +2412,7 @@ class ArenaManagementMixin:
         for cid, value in zip(chosen, energies):
             energy_observations[str(cid)] = {'value': value, 'at': time.time()}
         self.management_save({'energy_observations': energy_observations})
-        if self._arena_low_energy and chosen != current and not _retry:
+        if self._arena_low_energy and chosen != current and not _retry and not cup_time:
             # A bench card's energy was estimated too high: now it's an exact read,
             # so pick again right away instead of idling for hours.
             self.log('🔁 Арена: карта в новом составе ещё не восстановилась — пересобираю колоду.')
