@@ -51,7 +51,10 @@ class DailySummaryTests(unittest.TestCase):
         self.assertNotIn("Арена", text)
 
     def test_heartbeat_keeps_the_days_balance_and_is_short(self):
-        settings = {"tg_heartbeat_interval_hours": 4}
+        import datetime as dt
+        today = str(dt.datetime.now(tg_notifier.MSK).date())
+        settings = {"tg_heartbeat_interval_hours": 4, "comments_enabled": True,
+                    "comment_day": {"date": today, "chapters": ["1"], "quest": 13}}
         n = self.notifier(settings)
         n.is_night_time = lambda: False
         n.notify_cycle_heartbeat(10, 5000, 3, "4/10", "2ч 5м", "Башня", 30, diamonds=1200, chapters_str="75/75")
@@ -59,7 +62,7 @@ class DailySummaryTests(unittest.TestCase):
         self.assertEqual((settings["tg_day"]["dia_first"], settings["tg_day"]["dia_last"]), (1200, 1250))
         n.send_message.assert_called_once()              # second one is inside the 4 h interval
         text = n.send_message.call_args.args[0]
-        self.assertIn("Сегодня: главы 75/75 · реклама 3/3 · карты 4/10", text)
+        self.assertIn("Сегодня: главы 75/75 · реклама 3/3 · карты 4/10 · комментарии 13/13", text)
         self.assertLessEqual(text.count("\n"), 4)
 
 

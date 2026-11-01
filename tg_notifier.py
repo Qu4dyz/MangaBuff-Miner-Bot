@@ -34,6 +34,14 @@ MONTHS = ("января", "февраля", "марта", "апреля", "ма�
           "сентября", "октября", "ноября", "декабря")
 
 
+def comments_done(date):
+    """Today's comment quest as the site counted it last time, else what the bot posted itself."""
+    day = DataManager.get_setting("comment_day") or {}
+    if day.get("date") != date:
+        return 0
+    return day.get("quest", len(day.get("chapters", [])))
+
+
 def daily_summary(day, prev=None):
     """Text of the daily summary from a tg_day tally; prev is the day before, for comparison."""
     prev = prev or {}
@@ -678,7 +686,7 @@ class TelegramNotifier:
         today += [f"реклама {ads_count}/3", f"карты {cards_count}"]
         day = DataManager.get_setting("tg_day") or {}
         if DataManager.get_setting("comments_enabled", False):
-            today.append(f"комментарии {day.get('comments', 0)}/13")
+            today.append(f"комментарии {comments_done(day.get('date'))}/13")
         msg = "📊 <b>Сводка</b>\n" + " · ".join(top) + "\nСегодня: " + " · ".join(today)
         msg += f"\n🏰 Башня: {tower_str}"
         hw = DataManager.get_setting("halloween_event_info")

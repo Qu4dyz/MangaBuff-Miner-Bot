@@ -2089,6 +2089,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         done = day.setdefault("chapters", [])
         item = next((b for b in reversed(items) if b.get("comment_id") and b["comment_id"] not in done), None)
         quest = self._comment_quest() if item else None
+        if quest:
+            day["quest"] = quest[0]  # the site's own counter, shown in Telegram
+            DataManager.set_setting("comment_day", day)
         if not quest or quest[0] >= quest[1]:
             return
         bought = self._owned_stickers()
@@ -2108,7 +2111,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             ok, why = False, str(e)
         if ok:
             done.append(item["comment_id"])
-            day.update(last_at=time.time(), last_sticker=sticker or text)
+            day.update(last_at=time.time(), last_sticker=sticker or text, quest=quest[0] + 1)
             self.notifier.tally(comments=1, comment_diamonds=7)  # the site pays 7 💎 per quest comment
             what = f"Стикер-спасибо #{sticker}" if sticker else f"«{text}»"
             self.log(f"💬 {what} под «{item['slug']}» т.{item['vol']} гл.{item['ch']} "
