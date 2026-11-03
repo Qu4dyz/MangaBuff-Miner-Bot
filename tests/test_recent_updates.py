@@ -132,6 +132,20 @@ class UpdateTests(unittest.TestCase):
         read_ids = {call.args[0].split('/')[-2] for call in self.bot.session.post.call_args_list}
         self.assertEqual(read_ids, {'card', 'scroll', 'animated', 'club', 'tower', 'delivered'})
 
+    @patch('engine.time.sleep')
+    def test_cancelled_trade_is_read_even_without_a_telegram_alert(self, sleep):
+        html = ''.join(
+            f'<div class="notifications__item notifications__item--not-read" data-id="{key}">'
+            f'<a href="/users/1">yazavame</a> {text} предложение на обмен <a href="/trades/94065893">просмотреть</a></div>'
+            for key, text in [('cancel', 'отменил'), ('offer', 'отправил')])
+        html += ('<div class="notifications__item notifications__item--not-read" data-id="open">'
+                 'отправил предложение на обмен <a href="/trades/5">просмотреть</a></div>')
+        self.bot.session.get.return_value = response(html)
+        self.bot.session.post.return_value = response()
+        self.bot.clean_unwanted_notifications(active_trade_ids=[])
+        read_ids = {call.args[0].split('/')[-2] for call in self.bot.session.post.call_args_list}
+        self.assertEqual(read_ids, {'cancel', 'offer'})          # the open offer stays unread
+
     def trade_setup(self, delivered):
         self.bot.session.get.side_effect = [
             response('<div class="notifications__item" data-id="1"><button data-trade-id="10"></button></div>'),

@@ -1294,6 +1294,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 items = soup.select(".notifications__item")
                 if not items:
                     continue
+                # A cancelled, declined or accepted trade needs no answer: its notifications can be read
+                # even when no Telegram alert went out (an offer sent and cancelled during the cup).
+                closed_trade_ids = set()
+                for item in items:
+                    if re.search(r"(отменил|отклонил|принял)\w* предложение", item.get_text(" ", strip=True).lower()):
+                        link = item.find("a", href=re.compile(r"/trades/\d+"))
+                        if link:
+                            closed_trade_ids.add(re.search(r"/trades/(\d+)", link["href"]).group(1))
 
                 for item in items:
                     notif_id = item.get("data-id")
@@ -1330,7 +1338,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                             link = item.find("a", href=re.compile(r"/trades/\d+"))
                             match = re.search(r"/trades/(\d+)", link.get("href", "")) if link else None
                             trade_id = match.group(1) if match else None
-                        if trade_id and str(trade_id) in delivered_trade_ids:
+                        if trade_id and (str(trade_id) in delivered_trade_ids or str(trade_id) in closed_trade_ids):
                             unwanted_notif_ids.add(notif_id)
                         continue
 
