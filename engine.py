@@ -2863,6 +2863,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                         crystals = rewards.get("dark_crystals", 0)
                         lvl_ups = len(c_data.get("data", {}).get("level_ups", []))
                         self.log(tr("log_tower_claimed", diamonds=diamonds, crystals=crystals))
+                        extra = {k: v for k, v in rewards.items() if k not in ("diamonds", "dark_crystals") and v}
+                        if extra:  # club crystals and other items; logged so the real drop rate can be counted
+                            self.log(f"💠 Башня: ещё в награде {json.dumps(extra, ensure_ascii=False)[:300]}")
                         self.notifier.notify_tower_claimed(diamonds, crystals, lvl_ups)
                     except Exception as e:
                         self.log(f"⚠️ Tower claim parse error: {e}")
@@ -3220,6 +3223,11 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             if not m:
                 return None
             earned_essence = int(m.group(1))
+            # Item drops the site shows under a win; logged so the real drop rate can be counted
+            for key, label in (("club_crystals", "клубный кристалл"), ("advertising_beacons", "предмет для рекламы")):
+                drop = re.search(r'"%s"\s*:\s*\[(.*?)\]' % key, res.text)
+                if drop and drop.group(1).strip():
+                    self.log(f"💠 Арена: выпал {label} ({drop.group(1).count('{') or 1} шт.)")
 
             # 2. Parse win status
             is_win = None
