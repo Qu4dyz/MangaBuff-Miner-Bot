@@ -55,7 +55,7 @@ Every module can be turned on or off, and most can be started by hand right away
 | ⚔️ | **Arena** | Builds the strongest deck, fights while essence is paid, opens chests |
 | 🏆 | **Evening Cup** | Plays the cup move by move, 19:00–22:00 MSK |
 | 🏰 | **Abyss Tower** | Claims expedition rewards, re-sends the squad, upgrades the HQ |
-| 🏛️ | **Club** | Contributes crystals and tells you when the club needs your card |
+| 🏛️ | **Club** | Contributes crystals and tells you when the club needs your card. While the site keeps the contributions page behind a browser check, it reminds you to contribute by hand |
 | 📺 | **Ads** | Three ads a day for +21 💎, nothing to watch yourself |
 | 🎃 | **Events** | Collects holiday rewards, such as Halloween candies |
 | ✨ | **Awakening reroll** | Awakens chosen cards again and again until ATK, HP and CR reach your minimums |
@@ -66,7 +66,7 @@ Every module can be turned on or off, and most can be started by hand right away
 
 <br>
 
-A new bonus card unlocks roughly every 45–60 minutes. Buffy reads until it drops and fills the daily 75 chapters on the way, pausing between chapters like a real reader so the site counts them. If a title stops counting (for example, its chapters were already read), Buffy moves to another one.
+A new bonus card unlocks about an hour after the previous one. Buffy reads until it drops and fills the daily 75 chapters on the way, pausing between chapters like a real reader so the site counts them. If a title stops counting (for example, its chapters were already read), Buffy moves to another one.
 
 </details>
 
