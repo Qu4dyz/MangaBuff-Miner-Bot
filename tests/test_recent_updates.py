@@ -720,6 +720,16 @@ class ClubScheduleTests(unittest.TestCase):
         self.assertEqual(self.bot.get_club_slug.call_count, 1)
         self.assertEqual(self.bot.club_check_interval(), 6 * 3600)
 
+    def test_walled_off_boost_page_waits_until_tomorrow_with_one_alert(self):
+        self.bot.notifier = Mock()
+        self.bot.get_club_slug = Mock(return_value='my-club')
+        self.bot.session.get.return_value = Mock(status_code=403, text='DDoS-Guard')
+        self.bot.run_club_cycle()
+        self.bot.run_club_cycle()
+        self.assertEqual(self.bot.session.get.call_count, 1)
+        self.bot.notifier.notify_alert.assert_called_once()
+        self.assertEqual(self.bot.club_check_interval(), 6 * 3600)
+
     def test_full_crystals_switch_to_rare_checks(self):
         self.assertEqual(self.bot.club_check_interval(), 30 * 60)
         html = '<div class="club-crystals" data-contribute-url="/c"><div class="club-crystals__progress">10 / 10</div></div>'

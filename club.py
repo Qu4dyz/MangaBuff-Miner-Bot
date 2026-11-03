@@ -20,8 +20,8 @@ class ClubAutomationMixin:
     def club_check_interval(self) -> int:
         """Seconds until the next club visit: crystals are a daily 10/10, the wanted card rotates."""
         today = _msk_today()
-        if DataManager.get_setting("club_none_date") == today:
-            return 6 * 3600  # not in a club: looked once today
+        if today in (DataManager.get_setting("club_none_date"), DataManager.get_setting("club_blocked_date")):
+            return 6 * 3600  # not in a club, or the site walled the page off: looked once today
         if DataManager.get_setting("club_crystals_date") == today:
             return 3 * 3600  # crystals done: only the wanted-card alert is left
         return 30 * 60
@@ -70,7 +70,7 @@ class ClubAutomationMixin:
             return
 
         today = _msk_today()
-        if DataManager.get_setting("club_none_date") == today:
+        if today in (DataManager.get_setting("club_none_date"), DataManager.get_setting("club_blocked_date")):
             return
         slug = self.get_club_slug()
         if not slug and getattr(self, "_club_lookup_failed", False):
@@ -83,6 +83,12 @@ class ClubAutomationMixin:
 
         try:
             r = self.session.get(boost_url, timeout=15)
+            if r.status_code == 403:
+                # The site's anti-bot wall on this page (since 2026-10-29): retrying all day only adds checks
+                DataManager.set_setting("club_blocked_date", today)
+                self.log(f"⚠️ Страница вкладов клуба ({slug}) закрыта защитой сайта (403) — вклады до завтра пропущены")
+                self.notifier.notify_alert("клуб", "Сайт закрыл для бота страницу вкладов клуба. Кристаллы можно внести вручную: Мой клуб → Вклад. Бот попробует снова завтра.")
+                return
             if r.status_code != 200:
                 self.log(f"⚠️ Страница вкладов клуба ({slug}) вернула код {r.status_code}")
                 return
