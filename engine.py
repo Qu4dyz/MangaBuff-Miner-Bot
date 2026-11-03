@@ -2075,8 +2075,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
     def _comment_after_read(self, items):
         """Owner-only experiment: a thank-you sticker under a chapter the bot really read.
 
-        One per chapter, a few minutes apart, only while the daily quest (N/13) is unfinished,
-        so a deleted comment is simply made up later. Any refusal stops it for the day.
+        One per chapter, at most two per title a day and 30-60 min apart (13 in a row under one
+        title looks like the spam the site rules ban), only while the daily quest (N/13) is
+        unfinished, so a deleted comment is simply made up later. Any refusal stops it for the day.
         """
         if not DataManager.get_setting("comments_enabled", False):
             return
@@ -2084,10 +2085,12 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         day = DataManager.get_setting("comment_day") or {}
         if day.get("date") != today:
             day = {"date": today, "chapters": [], "stopped": False}
-        if day.get("stopped") or time.time() - float(day.get("last_at", 0)) < 4 * 60:
+        if day.get("stopped") or time.time() - float(day.get("last_at", 0)) < float(day.get("gap", 4 * 60)):
             return
         done = day.setdefault("chapters", [])
-        item = next((b for b in reversed(items) if b.get("comment_id") and b["comment_id"] not in done), None)
+        titles = day.setdefault("titles", {})
+        item = next((b for b in reversed(items) if b.get("comment_id") and b["comment_id"] not in done
+                     and titles.get(b.get("slug"), 0) < 2), None)
         quest = self._comment_quest() if item else None
         if quest:
             day["quest"] = quest[0]  # the site's own counter, shown in Telegram
@@ -2111,7 +2114,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             ok, why = False, str(e)
         if ok:
             done.append(item["comment_id"])
-            day.update(last_at=time.time(), last_sticker=sticker or text, quest=quest[0] + 1)
+            titles[item.get("slug")] = titles.get(item.get("slug"), 0) + 1
+            day.update(last_at=time.time(), gap=random.randint(30 * 60, 60 * 60),
+                       last_sticker=sticker or text, quest=quest[0] + 1)
             self.notifier.tally(comments=1, comment_diamonds=7)  # the site pays 7 💎 per quest comment
             what = f"Стикер-спасибо #{sticker}" if sticker else f"«{text}»"
             self.log(f"💬 {what} под «{item['slug']}» т.{item['vol']} гл.{item['ch']} "

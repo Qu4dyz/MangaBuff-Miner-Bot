@@ -67,6 +67,20 @@ class CommentTests(unittest.TestCase):
         b = self.run_once(settings, items=[{"comment_id": "9", "slug": "petlya", "vol": 1, "ch": 15.0, "url": "u"}])
         b.session.post.assert_called_once()
 
+    def test_at_most_two_per_title_and_30_to_60_minutes_apart(self):
+        import time
+        settings = {"comments_enabled": True}
+        self.run_once(settings)
+        gap = settings["comment_day"]["gap"]
+        self.assertTrue(30 * 60 <= gap <= 60 * 60)
+        settings["comment_day"]["last_at"] = time.time() - gap + 60   # a minute of pause left
+        self.run_once(settings, items=[{"comment_id": "8", "slug": "other", "vol": 1, "ch": 1.0, "url": "u"}]).session.post.assert_not_called()
+        for cid in ("9", "10"):
+            settings["comment_day"]["last_at"] = 0
+            self.run_once(settings, items=[{"comment_id": cid, "slug": "petlya", "vol": 1, "ch": 15.0, "url": "u"}])
+        self.assertEqual(settings["comment_day"]["chapters"], ["2235", "9"])   # third under petlya refused
+        self.assertEqual(settings["comment_day"]["titles"], {"petlya": 2})
+
     def test_stops_at_the_quest_limit_and_makes_up_deleted_ones(self):
         settings = {"comments_enabled": True}
         self.run_once(settings, done=13).session.post.assert_not_called()
