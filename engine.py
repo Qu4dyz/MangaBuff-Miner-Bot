@@ -2078,9 +2078,17 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         One per chapter, at most two per title a day and 30-60 min apart (13 in a row under one
         title looks like the spam the site rules ban), only while the daily quest (N/13) is
         unfinished, so a deleted comment is simply made up later. Any refusal stops it for the day.
+        The bot reads one title for hours, so chapters read in the last 7 days are kept as a pool
+        and the next comment goes to a title other than the previous one when there is one.
         """
         if not DataManager.get_setting("comments_enabled", False):
             return
+        pool = [b for b in DataManager.get_setting("comment_pool") or [] if time.time() - b.get("at", 0) < 7 * 86400]
+        known = {b["comment_id"] for b in pool}
+        pool += [{**{k: b.get(k) for k in ("comment_id", "slug", "vol", "ch", "url")}, "at": time.time()}
+                 for b in items if b.get("comment_id") and b["comment_id"] not in known]
+        pool = pool[-300:]
+        DataManager.set_setting("comment_pool", pool)
         today = str(self._msk_now().date())
         day = DataManager.get_setting("comment_day") or {}
         if day.get("date") != today:
@@ -2089,8 +2097,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             return
         done = day.setdefault("chapters", [])
         titles = day.setdefault("titles", {})
-        item = next((b for b in reversed(items) if b.get("comment_id") and b["comment_id"] not in done
-                     and titles.get(b.get("slug"), 0) < 2), None)
+        fresh = [b for b in reversed(pool) if not b.get("done") and b["comment_id"] not in done
+                 and titles.get(b.get("slug"), 0) < 2]
+        item = next((b for b in fresh if b.get("slug") != day.get("last_slug")), fresh[0] if fresh else None)
         quest = self._comment_quest() if item else None
         if quest:
             day["quest"] = quest[0]  # the site's own counter, shown in Telegram
@@ -2115,7 +2124,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if ok:
             done.append(item["comment_id"])
             titles[item.get("slug")] = titles.get(item.get("slug"), 0) + 1
-            day.update(last_at=time.time(), gap=random.randint(30 * 60, 60 * 60),
+            item["done"] = True
+            DataManager.set_setting("comment_pool", pool)
+            day.update(last_at=time.time(), gap=random.randint(30 * 60, 60 * 60), last_slug=item.get("slug"),
                        last_sticker=sticker or text, quest=quest[0] + 1)
             self.notifier.tally(comments=1, comment_diamonds=7)  # the site pays 7 💎 per quest comment
             what = f"Стикер-спасибо #{sticker}" if sticker else f"«{text}»"

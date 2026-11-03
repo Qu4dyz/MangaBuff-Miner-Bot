@@ -75,11 +75,20 @@ class CommentTests(unittest.TestCase):
         self.assertTrue(30 * 60 <= gap <= 60 * 60)
         settings["comment_day"]["last_at"] = time.time() - gap + 60   # a minute of pause left
         self.run_once(settings, items=[{"comment_id": "8", "slug": "other", "vol": 1, "ch": 1.0, "url": "u"}]).session.post.assert_not_called()
-        for cid in ("9", "10"):
+        for cid in ("9", "10", "11"):
             settings["comment_day"]["last_at"] = 0
             self.run_once(settings, items=[{"comment_id": cid, "slug": "petlya", "vol": 1, "ch": 15.0, "url": "u"}])
-        self.assertEqual(settings["comment_day"]["chapters"], ["2235", "9"])   # third under petlya refused
-        self.assertEqual(settings["comment_day"]["titles"], {"petlya": 2})
+        # the remembered "other" chapter goes next, then petlya again; a third petlya is refused
+        self.assertEqual(settings["comment_day"]["chapters"], ["2235", "8", "10"])
+        self.assertEqual(settings["comment_day"]["titles"], {"petlya": 2, "other": 1})
+
+    def test_chapters_read_earlier_are_remembered_for_later_comments(self):
+        settings = {"comments_enabled": True}
+        self.run_once(settings, done=13)                                   # quest full: only remembered
+        settings["comment_day"]["date"] = "2026-10-30"                     # next day
+        b = self.run_once(settings, items=[{"comment_id": "2235", "slug": "petlya", "vol": 1, "ch": 14.0, "url": "u"}])
+        self.assertEqual(b.session.post.call_args.kwargs["data"]["commentable_id"], "2235")
+        self.assertTrue(settings["comment_pool"][0]["done"])
 
     def test_stops_at_the_quest_limit_and_makes_up_deleted_ones(self):
         settings = {"comments_enabled": True}
