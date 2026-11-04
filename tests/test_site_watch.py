@@ -95,7 +95,7 @@ class EventPackTest(unittest.TestCase):
         bot = HalloweenEventMixin()
         bot.session = Mock()
         bot.session.get.return_value = SimpleNamespace(status_code=200, text=self.HTML)
-        with patch("seasonal.DataManager.get_setting", side_effect=lambda k, d=None: {"x": 1} if k == "halloween_event_info" else d),                 patch("seasonal.DataManager.set_setting") as save:
+        with patch("seasonal.DataManager.get_setting", side_effect=lambda k, d=None: {"x": 1} if k == "halloween_event_info" else (True if k == "halloween_event_enabled" else d)),                 patch("seasonal.DataManager.set_setting") as save:
             bot.refresh_halloween_info()
         save.assert_any_call("halloween_event_info",
                              {"x": 1, "balance": 1240, "today": 12, "temperature": 100, "can_take": True})

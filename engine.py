@@ -2037,7 +2037,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
     def _event_candies_wanted(self):
         """Keep reading for Halloween candies until today's drops are in, while the event page is live."""
         info = DataManager.get_setting("halloween_event_info")
-        if not info or not DataManager.get_setting("halloween_event_enabled", True)                 or not DataManager.get_setting("reading_enabled", True):
+        if not info or not DataManager.get_setting("halloween_event_enabled", False)                 or not DataManager.get_setting("reading_enabled", True):
             return False
         day = event_candy_day(self._msk_now().date())
         # 6 reads in a row without a drop: the site gives none now, don't read for nothing
@@ -4349,7 +4349,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 # Owner-only watcher for new site features; off unless enabled in settings
                 if self.running and DataManager.get_setting("site_watch_enabled", False):
                     self._run_module("site_watch", self.run_site_watch, 3 * 60)
-                if (self.running and DataManager.get_setting("halloween_event_enabled", True)
+                if (self.running and DataManager.get_setting("halloween_event_enabled", False)
                         and time.time() - getattr(self, "_halloween_event_at", 0) >= 30 * 60):
                     self._halloween_event_at = time.time()
                     self._run_module("halloween_event", self.run_halloween_event, 2 * 60)

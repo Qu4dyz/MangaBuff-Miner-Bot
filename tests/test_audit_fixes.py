@@ -350,7 +350,7 @@ class EventCandyTests(unittest.TestCase):
     def test_candy_dropped_by_reading_is_picked_up(self):
         b = bot()
         b.session.post.return_value = SimpleNamespace(status_code=200)
-        settings = {"halloween_event_info": {"balance": 10}}
+        settings = {"halloween_event_info": {"balance": 10}, "halloween_event_enabled": True}
         b._msk_now = lambda: __import__("datetime").datetime(2026, 10, 18, 12)
         with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
             b._take_event_drop({"token": "abc", "type": "candy"}, {"X-CSRF-TOKEN": "t"})
@@ -364,7 +364,7 @@ class EventCandyTests(unittest.TestCase):
 class EventReadingTests(unittest.TestCase):
     def test_reads_for_candies_after_the_daily_quest_and_stops_when_dry(self):
         import datetime as dt
-        settings = {"halloween_event_info": {"balance": 10}}
+        settings = {"halloween_event_info": {"balance": 10}, "halloween_event_enabled": True}
         b = bot()
         b._msk_now = lambda: dt.datetime(2026, 10, 18, 19)
         b.get_reading_stats = Mock(return_value={"chapters_read": 75, "chapters_max": 75, "cards_found": 10,
@@ -393,13 +393,13 @@ class HalloweenReviewTests(unittest.TestCase):
         return b, out
 
     def test_candies_do_not_wait_for_bonus_cards_on_cooldown(self):
-        settings = {"halloween_event_info": {"balance": 10}}
+        settings = {"halloween_event_info": {"balance": 10}, "halloween_event_enabled": True}
         b, out = self.step(settings, {"chapters_read": 75, "chapters_max": 75, "cards_found": 5, "cards_max": 10,
                                       "card_ready": False, "card_cooldown": "40 мин"}, 2)
         self.assertTrue(b.read_manga_chapters.call_args.kwargs.get("for_event"))
 
     def test_failed_reads_back_off_but_do_not_end_the_day(self):
-        settings = {"halloween_event_info": {"balance": 10}}
+        settings = {"halloween_event_info": {"balance": 10}, "halloween_event_enabled": True}
         stats = {"chapters_read": 75, "chapters_max": 75, "cards_found": 10, "cards_max": 10, "card_ready": False, "card_cooldown": ""}
         for _ in range(8):
             b, out = self.step(settings, stats, 0)
@@ -407,7 +407,7 @@ class HalloweenReviewTests(unittest.TestCase):
         self.assertGreaterEqual(out["event_wait_sec"], 8 * 60)
 
     def test_after_a_bonus_card_read_candies_come_back_in_minutes(self):
-        settings = {"halloween_event_info": {"balance": 10}}
+        settings = {"halloween_event_info": {"balance": 10}, "halloween_event_enabled": True}
         b, out = self.step(settings, {"chapters_read": 75, "chapters_max": 75, "cards_found": 5, "cards_max": 10,
                                       "card_ready": True, "card_cooldown": ""}, 2)
         self.assertFalse(b.read_manga_chapters.call_args.kwargs.get("for_event"))   # the card read

@@ -293,7 +293,7 @@ class HalloweenEventMixin:
     def refresh_halloween_info(self) -> None:
         """Candy balance and cauldron heat for the app right at start: run_halloween_event comes
         at the end of a long cycle, so the cards stayed empty for up to an hour. Reads only."""
-        if not DataManager.get_setting("halloween_event_enabled", True):
+        if not DataManager.get_setting("halloween_event_enabled", False):
             return
         try:
             res = self.session.get(self.EVENT_PACK_URL, timeout=15)

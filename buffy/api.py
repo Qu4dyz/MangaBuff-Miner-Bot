@@ -893,7 +893,7 @@ class BuffyApi:
 def _halloween_state(today):
     """Candy balance (from the event page) and today's reading drops, or None outside the event."""
     info = DataManager.get_setting("halloween_event_info")
-    if not info:
+    if not info or not DataManager.get_setting("halloween_event_enabled", False):  # event over: no stale tiles
         return None
     day = DataManager.get_setting("halloween_candy_day") or {}
     return {"balance": info.get("balance"), "reading_today": day.get("n", 0) if day.get("date") == today else 0,
