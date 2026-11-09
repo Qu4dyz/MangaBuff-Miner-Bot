@@ -25,7 +25,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements-desktop.txt nuitka zstandard pytest
+        pip install -r requirements-desktop.txt nuitka==4.3.4 zstandard pytest
 
     - name: Run Tests
       run: python -m pytest -q tests
@@ -36,12 +36,15 @@ jobs:
       run: echo "version=$(python -c 'import buffy; print(buffy.__version__)')" >> "$GITHUB_OUTPUT"
 
     # Libraries rarely change, so reuse their compiled objects: only our own modules get rebuilt
+    # A tag build only sees caches from its own tag and from main, so the shared compile
+    # cache comes from a manual run on main (Actions -> Build Buffy -> Run workflow).
+    # Rerun it after bumping Nuitka or requirements-desktop.txt.
     - name: Restore Nuitka Cache
       uses: actions/cache@v4
       with:
         path: ${{ runner.temp }}/nuitka-cache
-        key: nuitka-${{ hashFiles('requirements-desktop.txt') }}-${{ github.run_id }}
-        restore-keys: nuitka-${{ hashFiles('requirements-desktop.txt') }}-
+        key: nuitka-4.3.4-${{ hashFiles('requirements-desktop.txt') }}-${{ github.run_id }}
+        restore-keys: nuitka-4.3.4-${{ hashFiles('requirements-desktop.txt') }}-
 
     # Nuitka compiles to C instead of bundling the interpreter, which antivirus
     # heuristics flag far less often than PyInstaller-style packers.
