@@ -14,7 +14,7 @@
   --border-strong: rgba(255, 255, 255, 0.13);
   --text: #eeebf7;
   --muted: #9c95b6;
-  --faint: #6c6585;
+  --faint: #857e9f;
   --pink: #ff6aaa;
   --violet: #7c4dff;
   --glow: #b45cff;
@@ -37,10 +37,13 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 [hidden] { display: none !important; }
+h1, h2, h3, .what { text-wrap: balance; }
+p, .s, .desc { text-wrap: pretty; }
 body {
   background: var(--bg);
   color: var(--text);
   font: 14px/1.45 var(--font);
+  font-variant-numeric: tabular-nums; /* live numbers keep their width */
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   user-select: none;
@@ -104,7 +107,7 @@ input, button, select { font: inherit; color: inherit; }
 .topbar .sub { color: var(--muted); font-size: 13px; }
 .topbar .spacer { flex: 1; }
 .content { flex: 1; min-height: 0; overflow: auto; padding: 26px 28px 40px; }
-.page { display: none; animation: fade .25s ease; }
+.page { display: none; animation: fade .25s ease-out; }
 .page.active { display: block; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -117,7 +120,7 @@ input, button, select { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 .btn:hover { background: var(--surface-3); }
-.btn:active { transform: scale(0.98); }
+.btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: .5; cursor: default; transform: none; }
 .btn svg { width: 17px; height: 17px; }
 .btn.primary { background: var(--accent) border-box; border-color: transparent; color: #fff; box-shadow: 0 6px 22px rgba(var(--glow-rgb), 0.35); }
@@ -212,10 +215,12 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 }
 .switch span::after {
   content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
-  background: #d9d4ea; transition: transform .2s cubic-bezier(.3,1.4,.6,1), background .2s;
+  background: #d9d4ea; transition: transform .2s cubic-bezier(.2,.8,.2,1), width .15s ease-out, background .2s;
 }
 .switch input:checked + span { background: var(--accent) border-box; border-color: transparent; }
 .switch input:checked + span::after { transform: translateX(18px); background: #fff; }
+.switch:active span::after { width: 20px; }
+.switch:active input:checked + span::after { transform: translateX(16px); }
 
 .pill {
   display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px;
@@ -259,7 +264,7 @@ textarea.input { resize: vertical; min-height: 110px; font: inherit; color: inhe
 .hero .label { color: var(--muted); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
 .hero .what { font-size: 28px; font-weight: 700; margin: 6px 0 4px; }
 .hero .when { color: var(--muted); }
-.countdown { font: 700 44px/1 var(--mono); letter-spacing: 1px; background: var(--accent); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.countdown { font: 700 44px/1 var(--mono); letter-spacing: 1px; color: #ffd1e6; }
 
 .stat { display: flex; flex-direction: column; gap: 10px; min-height: 128px; }
 .stat .k { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; font-weight: 600; }
@@ -913,7 +918,7 @@ const MODULES = [
   { key: "arena_auto_awaken", note: "Если включено — сам, не чаще раза в 6 часов", emoji: "✨", title: "Пробуждение карт",
     text: "Тратит бесплатные пробуждения на новые карты. По умолчанию выключено.",
     more: "Пробуждение превращает карту из коллекции в боевую — у неё появляются атака, здоровье и шанс крита. Buffy тратит на это бесплатные попытки и энергию пробуждения (до 3 карт раз в 6 часов) и выбирает карты, которых ещё нет в боевой коллекции. Отменить пробуждение нельзя, поэтому включай, только если хочешь, чтобы он делал это сам." },
-  { key: "arena_cup_enabled", note: "Работает сам с 19:00 до 22:00 МСК", emoji: "🏆", title: "Вечерний кубок",
+  { key: "arena_cup_enabled", emoji: "🏆", title: "Вечерний кубок",
     text: "С 19:00 до 22:00 МСК играет кубок пошагово.",
     more: "Кубок идёт каждый день с 19:00 до 22:00 по Москве. Buffy играет его ход за ходом: выбирает, кого атаковать и какую тактику применить. Пока идёт кубок, остальные задачи ждут. Вручную не запускается — работает только в это время." },
   { key: "reading_enabled", run: "reading", emoji: "📖", title: "Чтение глав",
@@ -1475,7 +1480,7 @@ function renderState(st) {
   if ("seal" in st) { lastSeal = st.seal; renderSeal(st.seal); }
   const hw = st.halloween, hwEl = $("#hw-candies");
   if (hwEl) hwEl.textContent = hw ? `🍬 ${hw.balance ?? 0} конфет · за чтение сегодня ${hw.reading_today}/35 · ` : "";
-  for (const id of ["#hw-title", "#hw-grid"]) $(id).style.display = hw ? "" : "none";
+  for (const id of ["#hw-title", "#hw-grid"]) $(id).hidden = !hw;
   $("#candy-v").textContent = hw && hw.balance != null ? fmt(hw.balance) : "—";
   $("#candy-s").textContent = hw ? `За чтение сегодня ${hw.reading_today} / 35` : "Появятся через пару секунд после запуска бота";
   $("#heat-v").textContent = hw && hw.temperature != null ? `${hw.temperature}°` : "—";

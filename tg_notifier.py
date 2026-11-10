@@ -690,7 +690,7 @@ class TelegramNotifier:
         msg = "📊 <b>Сводка</b>\n" + " · ".join(top) + "\nСегодня: " + " · ".join(today)
         msg += f"\n🏰 Башня: {tower_str}"
         hw = DataManager.get_setting("halloween_event_info")
-        if hw and hw.get("balance") is not None:
+        if hw and hw.get("balance") is not None and DataManager.get_setting("halloween_event_enabled", False):
             candy = DataManager.get_setting("halloween_candy_day") or {}
             msg += (f"\n🎃 Конфеты: {hw['balance']} · за чтение {candy.get('n', 0)}/35"
                     f" · котёл {hw.get('temperature') or 0}°")
