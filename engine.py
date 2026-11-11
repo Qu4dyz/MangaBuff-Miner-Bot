@@ -2083,7 +2083,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
     def _comment_after_read(self, items):
         """Owner-only experiment: a thank-you sticker under a chapter the bot really read.
 
-        One per chapter, at most two per title a day and 30-60 min apart (13 in a row under one
+        One per chapter, at most three per title a day and 30-60 min apart (13 in a row under one
         title looks like the spam the site rules ban), only while the daily quest (N/13) is
         unfinished, so a deleted comment is simply made up later. Any refusal stops it for the day.
         The bot reads one title for hours, so chapters read in the last 7 days are kept as a pool
@@ -2095,7 +2095,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         known = {b["comment_id"] for b in pool}
         pool += [{**{k: b.get(k) for k in ("comment_id", "slug", "vol", "ch", "url")}, "at": time.time()}
                  for b in items if b.get("comment_id") and b["comment_id"] not in known]
-        pool = pool[-300:]
+        per_title = {}
+        for b in reversed(pool):  # newest 30 chapters of each title: one long read must not push the others out
+            per_title.setdefault(b.get("slug"), []).append(b)
+        pool = [b for b in pool if b in per_title[b.get("slug")][:30]]
         DataManager.set_setting("comment_pool", pool)
         today = str(self._msk_now().date())
         day = DataManager.get_setting("comment_day") or {}
@@ -2106,7 +2109,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         done = day.setdefault("chapters", [])
         titles = day.setdefault("titles", {})
         fresh = [b for b in reversed(pool) if not b.get("done") and b["comment_id"] not in done
-                 and titles.get(b.get("slug"), 0) < 2]
+                 and titles.get(b.get("slug"), 0) < 3]
         item = next((b for b in fresh if b.get("slug") != day.get("last_slug")), fresh[0] if fresh else None)
         quest = self._comment_quest() if item else None
         if quest:
@@ -4342,6 +4345,14 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                     if now_ts - getattr(self, "_last_club_check_at", 0) >= self.club_check_interval():
                         self._run_module("club", self.run_club_cycle, 4 * 60)
                         self._last_club_check_at = now_ts
+
+                # 4.55. Thank-you comments from the pool of read chapters: not only right after a read,
+                # since reading stops for the day once the 10 bonus cards are in
+                if self.running:
+                    try:
+                        self._comment_after_read([])
+                    except Exception as e:
+                        self.log(f"⚠️ Комментарии: {e}")
 
                 # 4.6. Seasonal pages watch (Halloween / event) — TG when they go live
                 if self.running and DataManager.get_setting("seasonal_watch_enabled", True):

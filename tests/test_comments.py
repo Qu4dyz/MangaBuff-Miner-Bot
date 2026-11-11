@@ -67,7 +67,7 @@ class CommentTests(unittest.TestCase):
         b = self.run_once(settings, items=[{"comment_id": "9", "slug": "petlya", "vol": 1, "ch": 15.0, "url": "u"}])
         b.session.post.assert_called_once()
 
-    def test_at_most_two_per_title_and_30_to_60_minutes_apart(self):
+    def test_at_most_three_per_title_and_30_to_60_minutes_apart(self):
         import time
         settings = {"comments_enabled": True}
         self.run_once(settings)
@@ -75,12 +75,20 @@ class CommentTests(unittest.TestCase):
         self.assertTrue(30 * 60 <= gap <= 60 * 60)
         settings["comment_day"]["last_at"] = time.time() - gap + 60   # a minute of pause left
         self.run_once(settings, items=[{"comment_id": "8", "slug": "other", "vol": 1, "ch": 1.0, "url": "u"}]).session.post.assert_not_called()
-        for cid in ("9", "10", "11"):
+        for cid in ("9", "10", "11", "12"):
             settings["comment_day"]["last_at"] = 0
             self.run_once(settings, items=[{"comment_id": cid, "slug": "petlya", "vol": 1, "ch": 15.0, "url": "u"}])
-        # the remembered "other" chapter goes next, then petlya again; a third petlya is refused
-        self.assertEqual(settings["comment_day"]["chapters"], ["2235", "8", "10"])
-        self.assertEqual(settings["comment_day"]["titles"], {"petlya": 2, "other": 1})
+        # the remembered "other" chapter goes next, then petlya again; a fourth petlya is refused
+        self.assertEqual(settings["comment_day"]["chapters"], ["2235", "8", "10", "11"])
+        self.assertEqual(settings["comment_day"]["titles"], {"petlya": 3, "other": 1})
+
+    def test_one_long_read_does_not_push_other_titles_out_of_the_pool(self):
+        settings = {"comments_enabled": True}
+        self.run_once(settings, done=13, items=[{"comment_id": "o1", "slug": "other", "vol": 1, "ch": 1.0, "url": "u"}])
+        long_read = [{"comment_id": str(i), "slug": "petlya", "vol": 1, "ch": float(i), "url": "u"} for i in range(400)]
+        self.run_once(settings, done=13, items=long_read)
+        slugs = [b["slug"] for b in settings["comment_pool"]]
+        self.assertEqual((slugs.count("petlya"), slugs.count("other")), (30, 1))
 
     def test_chapters_read_earlier_are_remembered_for_later_comments(self):
         settings = {"comments_enabled": True}
