@@ -2086,8 +2086,9 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         One per chapter, at most three per title a day and 30-60 min apart (13 in a row under one
         title looks like the spam the site rules ban), only while the daily quest (N/13) is
         unfinished, so a deleted comment is simply made up later. Any refusal stops it for the day.
-        The bot reads one title for hours, so chapters read in the last 7 days are kept as a pool
-        and the next comment goes to a title other than the previous one when there is one.
+        The bot reads one title for hours, so chapters read in the last 7 days are kept as a pool,
+        and when the pool has no other title than the previous comment's, a chapter of another
+        title from the bot's whole reading history is used (never a bookmarked title).
         """
         if not DataManager.get_setting("comments_enabled", False):
             return
@@ -2106,11 +2107,15 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             day = {"date": today, "chapters": [], "stopped": False}
         if day.get("stopped") or time.time() - float(day.get("last_at", 0)) < float(day.get("gap", 4 * 60)):
             return
+        if day.get("quest", 0) >= 13 and time.time() - float(day.get("last_at", 0)) < 3 * 3600:
+            return  # quest done: look again for a deleted comment only every few hours
         done = day.setdefault("chapters", [])
         titles = day.setdefault("titles", {})
         fresh = [b for b in reversed(pool) if not b.get("done") and b["comment_id"] not in done
                  and titles.get(b.get("slug"), 0) < 3]
-        item = next((b for b in fresh if b.get("slug") != day.get("last_slug")), fresh[0] if fresh else None)
+        item = (next((b for b in fresh if b.get("slug") != day.get("last_slug")), None)
+                or self._comment_from_history(pool, titles, day.get("last_slug"))
+                or (fresh[0] if fresh else None))
         quest = self._comment_quest() if item else None
         if quest:
             day["quest"] = quest[0]  # the site's own counter, shown in Telegram
@@ -2148,6 +2153,34 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.log(f"⚠️ Комментарий не отправлен ({why}) — до завтра больше не пробую")
             self.notifier.notify_alert("комментарии", f"Сайт не принял стикер под главой ({why}). До завтра бот комментарии не пишет, делать ничего не нужно.")
         DataManager.set_setting("comment_day", day)
+
+    def _comment_from_history(self, pool, titles, last_slug):
+        """A chapter of another title the bot read before, with its comment id from the chapter page."""
+        bookmarked = self._bookmarked_slugs()
+        if bookmarked is None:
+            return None  # bookmarks unknown: do not risk a comment under a bookmarked title
+        used = {b.get("url") for b in pool}
+        by_slug = {}
+        for url in DataManager.load_reading_state().get("history", []):
+            m = re.search(r"/manga/([\w-]+)/", url)
+            if (m and url not in used and m.group(1) != last_slug and m.group(1) not in bookmarked
+                    and titles.get(m.group(1), 0) < 3):
+                by_slug.setdefault(m.group(1), []).append(url)
+        if not by_slug:
+            return None
+        slug = random.choice(sorted(by_slug))
+        url = random.choice(by_slug[slug])
+        try:
+            res = self.session.get(url, timeout=15)
+            found = re.search(r'class="comments"[^>]*data-type="mangaChapter"[^>]*data-id="(\d+)"', res.text)
+        except Exception:
+            return None
+        if res.status_code != 200 or not found:
+            return None
+        parts = url.rstrip("/").split("/")
+        item = {"comment_id": found.group(1), "slug": slug, "vol": parts[-2], "ch": parts[-1], "url": url, "at": time.time()}
+        pool.append(item)  # remembered, so the chapter is not commented twice
+        return item
 
     def _take_event_drop(self, drop, headers):
         """Event candy/bag that a read chapter dropped: the site page sends its token to /halloween/takeCandy."""

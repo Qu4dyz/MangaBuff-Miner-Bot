@@ -15,11 +15,15 @@ class CommentTests(unittest.TestCase):
         b = object.__new__(MangaMinerBot)
         b.log, b.notifier, b.session, b.csrf_token = Mock(), Mock(), Mock(), "t"
         b._msk_now = lambda: dt.datetime(2026, 10, 31, 12)
-        b.session.get.return_value = SimpleNamespace(status_code=200, text=BALANCE.format(done))
+        chapter = '<div class="comments" data-type="mangaChapter" data-id="777">'
+        b.session.get.side_effect = lambda url, **kw: SimpleNamespace(
+            status_code=200, text=chapter if "/manga/" in url else BALANCE.format(done))
         b.session.post.return_value = SimpleNamespace(status_code=post_status)
+        b._bookmarked_slugs = lambda: set(settings.get("bookmarks", []))
         items = items or [{"comment_id": "2235", "slug": "petlya", "vol": 1, "ch": 14.0, "url": "https://mangabuff.ru/manga/petlya/1/14"}]
         with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)), \
-                patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+                patch("engine.DataManager.set_setting", side_effect=settings.__setitem__), \
+                patch("engine.DataManager.load_reading_state", return_value={"history": settings.get("history", [])}):
             b._comment_after_read(items)
         return b
 
@@ -97,6 +101,15 @@ class CommentTests(unittest.TestCase):
         b = self.run_once(settings, items=[{"comment_id": "2235", "slug": "petlya", "vol": 1, "ch": 14.0, "url": "u"}])
         self.assertEqual(b.session.post.call_args.kwargs["data"]["commentable_id"], "2235")
         self.assertTrue(settings["comment_pool"][0]["done"])
+
+    def test_reading_one_title_still_spreads_comments_over_other_titles_from_history(self):
+        settings = {"comments_enabled": True, "bookmarks": ["liked"],
+                    "history": ["https://mangabuff.ru/manga/liked/1/3", "https://mangabuff.ru/manga/old-title/1/5"]}
+        self.run_once(settings)                                            # petlya, the title being read
+        settings["comment_day"]["last_at"] = 0
+        b = self.run_once(settings)                                        # only petlya read: take history
+        self.assertEqual(b.session.post.call_args.kwargs["data"]["commentable_id"], "777")
+        self.assertEqual(settings["comment_day"]["titles"], {"petlya": 1, "old-title": 1})   # never the bookmarked one
 
     def test_stops_at_the_quest_limit_and_makes_up_deleted_ones(self):
         settings = {"comments_enabled": True}
