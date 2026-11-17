@@ -32,7 +32,7 @@ import collections
 import random
 import threading
 import time
-from tg_notifier import get_notifier
+from tg_notifier import MONTHS, get_notifier
 from arena import ArenaAutomationMixin, replay_from_html, save_observation
 from club import ClubAutomationMixin
 from seasonal import HalloweenEventMixin, SeasonalWatchMixin, SiteWatchMixin
@@ -659,74 +659,40 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 self.auth_log_buffer.append(err)
 
     def ping_daily_visit(self):
+        """Login streak («Дней подряд»): checked, not assumed.
+
+        The site dropped POST /visit/ping on 2026-11-13 and now credits the day itself when pages
+        are opened (+30 «За ежедневный заход на сайт» around 00:40 MSK). The bot makes an ordinary
+        visit and looks for today's credit in the balance history, every 30 min until it is there;
+        if it is still missing at 06:00 MSK, Telegram is told once so the owner can log in.
         """
-        Maintain profile login streak («Дней подряд») via POST /visit/ping.
-
-        MangaBuff frontend sends this once per day when opening /, /users/{id}
-        or /manga/* outside 00:00–02:00 local time. Pure HTTP scraping never
-        runs that JS, so the streak resets unless we ping explicitly.
-        """
-        from datetime import datetime, timezone, timedelta
-
-        msk = datetime.now(timezone(timedelta(hours=3)))
-        # Same quiet window as site JS (account is MSK-oriented).
-        if 0 <= msk.hour < 2:
-            return False
-
+        msk = self._msk_now()
+        if msk.hour < 1:
+            return False  # the site credits the day a little after midnight
         msk_day = msk.strftime("%Y-%m-%d")
-        if self._visit_ping_done_day == msk_day:
-            return False
         if DataManager.get_setting("visit_ping_day") == msk_day:
-            self._visit_ping_done_day = msk_day
+            return True
+        if time.time() - getattr(self, "_visit_check_at", 0) < 30 * 60:
             return False
-
+        self._visit_check_at = time.time()
         try:
-            # Homepage is an allowed visit path; also refreshes CSRF.
-            home = self.session.get("https://mangabuff.ru/", timeout=12)
-            if home.status_code != 200:
-                self.log(f"⚠️ Visit ping: главная HTTP {home.status_code}")
-                return False
-            soup = BeautifulSoup(home.text, "html.parser")
-            meta = soup.find("meta", attrs={"name": "csrf-token"})
-            if meta and meta.get("content"):
-                self.csrf_token = meta.get("content")
-
-            resp = self.session.post(
-                "https://mangabuff.ru/visit/ping",
-                data={},
-                headers={
-                    "Accept": "application/json, text/javascript, */*; q=0.01",
-                    "X-CSRF-TOKEN": self.csrf_token,
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Referer": "https://mangabuff.ru/",
-                    "Origin": "https://mangabuff.ru",
-                },
-                timeout=10,
-            )
-            if resp.status_code != 200:
-                self.log(f"⚠️ Visit ping HTTP {resp.status_code}")
-                return False
-
-            status = ""
-            try:
-                status = str((resp.json() or {}).get("status") or "")
-            except Exception:
-                status = ""
-
-            if status in ("recorded", "already"):
-                self._visit_ping_done_day = msk_day
-                DataManager.set_setting("visit_ping_day", msk_day)
-                if status == "recorded":
-                    self.log("📅 Логин-стрик: визит засчитан (/visit/ping).")
-                else:
-                    self.log("📅 Логин-стрик: визит за сегодня уже учтён.")
-                return True
-
-            self.log(f"⚠️ Visit ping unexpected: {resp.text[:160]}")
-            return False
+            self.session.get("https://mangabuff.ru/", timeout=12)  # an ordinary visit, as a reader makes
+            res = self.session.get("https://mangabuff.ru/balance", timeout=12)
         except Exception as e:
-            self.log(f"⚠️ Visit ping error: {e}")
+            self.log(f"⚠️ Логин-стрик: не удалось проверить ({str(e)[:80]})")
             return False
+        today = f"{msk.day:02d} {MONTHS[msk.month - 1]} {msk.year}"
+        if res.status_code == 200 and re.search(r"За ежедневный заход на сайт.{0,300}?" + today, res.text, re.S):
+            DataManager.set_setting("visit_ping_day", msk_day)
+            self.log("📅 Логин-стрик: заход за сегодня засчитан.")
+            return True
+        if msk.hour >= 6 and DataManager.get_setting("visit_alert_day") != msk_day:
+            DataManager.set_setting("visit_alert_day", msk_day)
+            self.log("⚠️ Логин-стрик: заход за сегодня не засчитан — написал в Telegram")
+            self.notifier.notify_alert("логин-стрик", "Сайт не засчитал сегодняшний заход: в истории баланса нет "
+                                       "«За ежедневный заход на сайт». Зайди на MangaBuff сам, иначе серия «Дней подряд» "
+                                       "оборвётся (восстановить потом можно за 70 💎).")
+        return False
 
     def watch_daily_ads(self):
         """Watch up to 3 daily ads on /balance page for +7 diamonds each (+21 diamonds total)."""
@@ -1293,6 +1259,8 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
                 soup = BeautifulSoup(res.text, "html.parser")
                 items = soup.select(".notifications__item")
                 if not items:
+                    if url.endswith("/notifications"):
+                        self._notifications_hidden(res, soup)
                     continue
                 # A cancelled, declined or accepted trade needs no answer: its notifications can be read
                 # even when no Telegram alert went out (an offer sent and cancelled during the cup).
@@ -1414,6 +1382,28 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         except Exception as e:
             self.log(f"⚠️ Ошибка обработки уведомлений MangaBuff: {e}")
             return 0
+
+    def _notifications_hidden(self, res, soup):
+        """The site sometimes serves the bot an empty notifications page while the header still counts
+        unread ones (2026-11-16: 13 empty reads in a row until the owner passed the site's check from a
+        phone). Record what was served and tell the owner once in 3 h, since only a visit clears it."""
+        badge = soup.select_one(".header-notifications__count")
+        count = int(badge.get_text(strip=True) or 0) if badge and badge.get_text(strip=True).isdigit() else 0
+        if count == 0 and badge is not None:
+            return  # really nothing there
+        title = soup.title.get_text(strip=True)[:60] if soup.title else "без заголовка"
+        try:
+            with open(os.path.join(BASE_DIR, "notifications_hidden.html"), "w", encoding="utf-8") as f:
+                f.write(res.text)
+        except OSError:
+            pass
+        self.log(f"⚠️ Уведомления: сайт показал пустой список ({title}, HTTP {res.status_code}, "
+                 f"{len(res.text)} байт), хотя непрочитанных {count or 'не видно'}")
+        if time.time() - float(DataManager.get_setting("notifications_hidden_alert_at", 0)) >= 3 * 3600:
+            DataManager.set_setting("notifications_hidden_alert_at", time.time())
+            self.notifier.notify_alert("уведомления", "Сайт перестал показывать боту уведомления — похоже, нужна "
+                                       "проверка браузера. Зайди на MangaBuff с телефона или ПК и пройди её, "
+                                       "дальше бот продолжит сам.")
 
     def process_mangabuff_notifications(self):
         """Parse notifications tab for trade offers and clean unwanted site notifications."""
@@ -3959,10 +3949,10 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             self.ping_daily_visit()
             if DataManager.get_setting("visit_ping_day") == str(msk_today):
                 visit = "визит засчитан"
-            elif self._msk_now().hour < 2:
-                visit = "визит сайт засчитывает только после 02:00 МСК — бот отметит его сам"
+            elif self._msk_now().hour < 1:
+                visit = "заход сайт засчитывает после 01:00 МСК — бот проверит сам"
             else:
-                visit = "визит не засчитался — сайт не ответил"
+                visit = "заход за сегодня пока не засчитан — в истории баланса его нет"
             if not self._find_active_claim_url():
                 if getattr(self, "_balance_unavailable", False):
                     return ManualFailed(f"{visit}; страница наград не открылась — проверить награду дня не получилось. "

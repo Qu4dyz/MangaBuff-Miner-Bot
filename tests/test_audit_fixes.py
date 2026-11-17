@@ -213,7 +213,7 @@ class UserReviewTests(unittest.TestCase):
         b._msk_now = lambda: __import__("datetime").datetime(2026, 10, 18, 12)
         with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)):
             summary = b._manual_step("daily")
-        self.assertIn("не засчитался", summary)
+        self.assertIn("не засчитан", summary)
         self.assertEqual(type(summary).__name__, "ManualFailed")
         self.assertIn("не получилось", summary)
 
@@ -229,6 +229,35 @@ class UserReviewTests(unittest.TestCase):
         api = BuffyApi()
         api._manual_bot = Mock()
         self.assertTrue(api.is_running())
+
+
+class VisitPingTests(unittest.TestCase):
+    def check(self, settings, hour, balance):
+        import datetime as real
+        b = bot()
+        b._msk_now = lambda: real.datetime(2026, 11, 17, hour, 5)
+        b.session.get.return_value = SimpleNamespace(status_code=200, text=balance)
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)),                 patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+            return b, b.ping_daily_visit()
+
+    def test_streak_is_confirmed_from_todays_credit_in_the_balance_history(self):
+        settings = {}
+        page = "<div>+30</div><div>За ежедневный заход на сайт</div><span>17 ноября 2026 в 00:43</span>"
+        b, ok = self.check(settings, 1, page)
+        self.assertTrue(ok)
+        self.assertEqual(settings["visit_ping_day"], "2026-11-17")
+        b.session.post.assert_not_called()                      # the dead /visit/ping is gone
+
+    def test_missing_credit_alerts_once_after_six(self):
+        settings = {}
+        old = "<div>За ежедневный заход на сайт</div><span>16 ноября 2026 в 00:41</span>"
+        b, ok = self.check(settings, 3, old)
+        self.assertFalse(ok)
+        b.notifier.notify_alert.assert_not_called()             # still early: keep checking
+        b, ok = self.check(settings, 6, old)
+        b.notifier.notify_alert.assert_called_once()
+        b, ok = self.check(settings, 7, old)
+        b.notifier.notify_alert.assert_not_called()             # one alert a day
 
 
 class ManualDailyTests(unittest.TestCase):

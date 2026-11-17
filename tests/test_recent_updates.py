@@ -146,6 +146,19 @@ class UpdateTests(unittest.TestCase):
         read_ids = {call.args[0].split('/')[-2] for call in self.bot.session.post.call_args_list}
         self.assertEqual(read_ids, {'cancel', 'offer'})          # the open offer stays unread
 
+    @patch('engine.time.sleep')
+    def test_empty_notifications_page_with_unread_count_alerts_once(self, sleep):
+        hidden = '<html><title>MangaBuff</title><span class="header-notifications__count">12</span></html>'
+        self.bot.session.get.return_value = response(hidden)
+        with patch('builtins.open', side_effect=OSError):
+            self.bot.clean_unwanted_notifications(active_trade_ids=[])
+            self.bot.clean_unwanted_notifications(active_trade_ids=[])
+        self.bot.notifier.notify_alert.assert_called_once()
+        self.bot.notifier.notify_alert.reset_mock()
+        self.bot.session.get.return_value = response('<span class="header-notifications__count">0</span>')
+        self.bot.clean_unwanted_notifications(active_trade_ids=[])
+        self.bot.notifier.notify_alert.assert_not_called()   # really nothing unread
+
     def trade_setup(self, delivered):
         self.bot.session.get.side_effect = [
             response('<div class="notifications__item" data-id="1"><button data-trade-id="10"></button></div>'),
