@@ -675,6 +675,7 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
         if time.time() - getattr(self, "_visit_check_at", 0) < 30 * 60:
             return False
         self._visit_check_at = time.time()
+        self._restore_login_streak(msk_day)
         try:
             self.session.get("https://mangabuff.ru/", timeout=12)  # an ordinary visit, as a reader makes
             res = self.session.get("https://mangabuff.ru/balance", timeout=12)
@@ -2069,6 +2070,39 @@ class MangaMinerBot(ArenaAutomationMixin, ClubAutomationMixin, SeasonalWatchMixi
             return None
         m = re.search(r"<span>\s*Комментарии\s*</span>\s*<b>\s*(\d+)\s*/\s*(\d+)\s*</b>", res.text) if res.status_code == 200 else None
         return (int(m.group(1)), int(m.group(2))) if m else None
+
+    def _restore_login_streak(self, msk_day):
+        """After a missed day the own profile shows a restore form (70 💎, site update 2026-11-13).
+        Off by default since it spends diamonds; looked at once a day."""
+        if (not DataManager.get_setting("login_streak_restore", False)
+                or DataManager.get_setting("login_streak_restore_day") == msk_day):
+            return
+        try:
+            if not getattr(self, "user_id", None):
+                found = re.search(r"/users/(\d+)", self.session.get("https://mangabuff.ru/balance", timeout=10).text)
+                if not found:
+                    return
+                self.user_id = found.group(1)
+            page = self.session.get(f"https://mangabuff.ru/users/{self.user_id}", timeout=15)
+            DataManager.set_setting("login_streak_restore_day", msk_day)
+            form = BeautifulSoup(page.text, "html.parser").select_one("form[data-login-streak-restore]")
+            if not form or not form.get("action"):
+                return  # nothing missed
+            data = {i.get("name"): i.get("value", "") for i in form.select("input[name]")}
+            res = self.session.post(form["action"], data=data, timeout=15, headers={
+                "Accept": "application/json", "X-CSRF-TOKEN": self.csrf_token, "X-Requested-With": "XMLHttpRequest",
+                "Referer": f"https://mangabuff.ru/users/{self.user_id}"})
+            streak = (res.json() or {}).get("streak") if res.status_code == 200 else None
+        except Exception as e:
+            self.log(f"⚠️ Восстановление стрика: {str(e)[:80]}")
+            return
+        if streak is not None:
+            self.log(f"🔁 Логин-стрик восстановлен за 70 💎: {streak} дней подряд")
+            self.notifier.notify_alert("логин-стрик", f"Пропущенный день восстановлен за 70 💎, серия: {streak} дней.", icon="✅")
+        else:
+            self.log(f"⚠️ Восстановление стрика не прошло (HTTP {res.status_code})")
+            self.notifier.notify_alert("логин-стрик", "Не получилось восстановить пропущенный день. "
+                                       "Восстанови сам в профиле (70 💎), пока есть возможность.")
 
     def _comment_after_read(self, items):
         """Owner-only experiment: a thank-you sticker under a chapter the bot really read.

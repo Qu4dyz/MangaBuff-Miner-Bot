@@ -906,6 +906,9 @@ const MODULES = [
   { key: null, run: "daily", emoji: "📅", title: "Ежедневные награды",
     text: "Отмечает визит, забирает награду дня и награды за выполненные задания.",
     more: "Каждый день Buffy заходит на сайт, чтобы не прерывалась серия «Дней подряд», забирает награду из календаря и награды за выполненные задания. Календарь наград сайт открывает не всем: нужен PRO, донат от 300 ₽ или аккаунт старше 3 месяцев с рейтингом от 300. Пока его нет, Buffy просто пропускает этот шаг. Ничего не тратит, поэтому модуль всегда включён." },
+  { key: "login_streak_restore", note: "Тратит 70 💎 за каждый пропущенный день", emoji: "🔁", title: "Восстановление стрика",
+    text: "Если день пропущен, возвращает серию «Дней подряд» за 70 алмазов. По умолчанию выключено.",
+    more: "Сайт засчитывает заход сам, пока Buffy работает. Если всё же день пропал (компьютер был выключен, сайт был недоступен), в профиле появляется кнопка восстановления за 70 алмазов. Buffy раз в день проверяет профиль и, если включено, восстанавливает серию сам и пишет об этом." },
   { key: null, run: "mining", emoji: "⛏️", title: "Шахта",
     text: "Тратит дневную энергию шахты на добычу руды.",
     more: "Энергия шахты появляется раз в день — после полуночи по Москве. Buffy тратит её целиком на добычу руды. Руда нужна для улучшения кирки и считается в капитал: 100 руды ≈ 1 💎. Если энергия уже потрачена, ручной запуск просто покажет, что копать нечего." },
@@ -987,7 +990,7 @@ function mockApi() {
     cover: "https://mangabuff.ru/img/covers/54.jpg", cover_video: "https://mangabuff.ru/img/covers/54.mp4" };
   let status = "stopped", seq = 0, logs = [], onboarded = false, manual = {}, settings = {
     battles_enabled: true, arena_cup_enabled: true, tower_enabled: true, reading_enabled: true,
-    ads_enabled: true, club_enabled: true, auto_upgrade: true, seasonal_watch_enabled: true,
+    ads_enabled: true, club_enabled: true, auto_upgrade: true, seasonal_watch_enabled: true, login_streak_restore: false,
     tg_enabled: false, tg_token: "", tg_chat_id: "", tg_night_mode: true, tg_silent_all: false,
     proxy: "", app_start_bot_on_launch: true, app_close_action: "ask", app_auto_update: true, autostart_windows: false,
   };

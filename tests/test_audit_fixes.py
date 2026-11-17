@@ -260,6 +260,39 @@ class VisitPingTests(unittest.TestCase):
         b.notifier.notify_alert.assert_not_called()             # one alert a day
 
 
+class StreakRestoreTests(unittest.TestCase):
+    def run_restore(self, settings, profile):
+        b = bot()
+        b.user_id, b.csrf_token = "279379", "t"
+        b.session.get.return_value = SimpleNamespace(status_code=200, text=profile)
+        b.session.post.return_value = SimpleNamespace(status_code=200, json=lambda: {"streak": 51})
+        with patch("engine.DataManager.get_setting", side_effect=lambda k, d=None: settings.get(k, d)), \
+                patch("engine.DataManager.set_setting", side_effect=settings.__setitem__):
+            b._restore_login_streak("2026-11-18")
+        return b
+
+    FORM = ('<div data-login-streak-panel><form data-login-streak-restore action="https://mangabuff.ru/streak/restore">'
+            '<input name="_token" value="abc"><button type="submit">Восстановить</button></form></div>')
+
+    def test_off_by_default_spends_nothing(self):
+        b = self.run_restore({}, self.FORM)
+        b.session.post.assert_not_called()
+        b.session.get.assert_not_called()
+
+    def test_missed_day_is_restored_once_when_switched_on(self):
+        settings = {"login_streak_restore": True}
+        b = self.run_restore(settings, self.FORM)
+        self.assertEqual(b.session.post.call_args.args[0], "https://mangabuff.ru/streak/restore")
+        self.assertEqual(b.session.post.call_args.kwargs["data"], {"_token": "abc"})
+        b.notifier.notify_alert.assert_called_once()
+        b = self.run_restore(settings, self.FORM)                 # same day: profile not opened again
+        b.session.get.assert_not_called()
+
+    def test_nothing_missed_no_form_no_spend(self):
+        b = self.run_restore({"login_streak_restore": True}, "<div>50 Дней подряд</div>")
+        b.session.post.assert_not_called()
+
+
 class ManualDailyTests(unittest.TestCase):
     def test_unreachable_rewards_page_is_not_reported_as_nothing_to_claim(self):
         b = bot()

@@ -44,6 +44,7 @@ SETTINGS = {
     "club_enabled": True,
     "auto_upgrade": True,
     "arena_auto_awaken": False,
+    "login_streak_restore": False,  # spends 70 diamonds per missed day
     "seasonal_watch_enabled": True,
     # telegram
     "tg_enabled": False,
